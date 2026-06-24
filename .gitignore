@@ -7,4 +7,6 @@ out
 next-env.d.ts
 .vercel
 e2e
-playwright.config.ts
+playwright.config.ts.env
+backend.zip
+.env
