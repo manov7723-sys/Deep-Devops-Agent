@@ -1,0 +1,13 @@
+# MODULE KB: S3 bucket — registry module.
+type: s3
+title: S3 bucket
+source: terraform-aws-modules/s3-bucket/aws
+version: "~> 4.0"
+config:
+  bucket: '"{{name}}-{{id}}"'
+provides:
+  bucket_id: "module.{{id}}.s3_bucket_id"
+  bucket_arn: "module.{{id}}.s3_bucket_arn"
+outputs:
+  bucket_id: "module.{{id}}.s3_bucket_id"
+  bucket_arn: "module.{{id}}.s3_bucket_arn"

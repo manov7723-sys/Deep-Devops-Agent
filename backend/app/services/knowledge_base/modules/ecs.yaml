@@ -1,0 +1,11 @@
+type: ecs
+title: ECS cluster
+source: terraform-aws-modules/ecs/aws
+version: "~> 5.0"
+config:
+  cluster_name: '"{{name}}-{{id}}"'
+provides:
+  cluster_arn: "module.{{id}}.cluster_arn"
+  cluster_name: "module.{{id}}.cluster_name"
+outputs:
+  cluster_arn: "module.{{id}}.cluster_arn"

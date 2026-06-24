@@ -1,0 +1,11 @@
+# MODULE KB: SNS topic — registry module.
+type: sns
+title: SNS topic
+source: terraform-aws-modules/sns/aws
+version: "~> 6.0"
+config:
+  name: '"{{name}}-{{id}}"'
+provides:
+  topic_arn: "module.{{id}}.topic_arn"
+outputs:
+  topic_arn: "module.{{id}}.topic_arn"

@@ -1,0 +1,12 @@
+# MODULE KB: KMS key — registry module.
+type: kms
+title: KMS key
+source: terraform-aws-modules/kms/aws
+version: "~> 3.0"
+config:
+  description: '"KMS key for {{name}}-{{id}}"'
+  aliases: '["{{name}}-{{id}}"]'
+provides:
+  key_arn: "module.{{id}}.key_arn"
+outputs:
+  key_arn: "module.{{id}}.key_arn"

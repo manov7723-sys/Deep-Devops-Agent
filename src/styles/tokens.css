@@ -1,0 +1,80 @@
+/* ============================================================
+ * tokens.css — DeepAgent design tokens (ported verbatim from wireframe)
+ * Dark default, light supported, accent + density tweakable.
+ * Do not edit values without updating the wireframe parity log.
+ * ============================================================ */
+
+:root {
+  /* Accent (tweakable) — violet by default */
+  --accent-h: 285;
+  --accent-c: 0.17;
+  --accent: oklch(0.62 var(--accent-c) var(--accent-h));
+  --accent-strong: oklch(0.56 var(--accent-c) var(--accent-h));
+  --accent-soft: oklch(0.62 var(--accent-c) var(--accent-h) / 0.14);
+  --accent-line: oklch(0.62 var(--accent-c) var(--accent-h) / 0.34);
+  --accent-fg: oklch(0.99 0 0);
+
+  /* Status */
+  --ok: oklch(0.74 0.15 158);
+  --ok-soft: oklch(0.74 0.15 158 / 0.14);
+  --warn: oklch(0.80 0.14 78);
+  --warn-soft: oklch(0.80 0.14 78 / 0.15);
+  --danger: oklch(0.66 0.20 22);
+  --danger-soft: oklch(0.66 0.20 22 / 0.15);
+  --info: oklch(0.72 0.13 235);
+  --info-soft: oklch(0.72 0.13 235 / 0.15);
+
+  /* Density (tweakable): comfortable default */
+  --density: 1;
+  --u: calc(4px * var(--density));
+  --row-h: calc(40px * var(--density));
+  --pad-card: calc(20px * var(--density));
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  --font-ui: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.30);
+  --shadow: 0 8px 24px -8px oklch(0 0 0 / 0.45);
+  --shadow-lg: 0 24px 60px -20px oklch(0 0 0 / 0.60);
+  --ring: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- DARK (default) ---------- */
+:root,
+[data-theme='dark'] {
+  --bg: oklch(0.17 0.012 274);
+  --bg-grad: radial-gradient(1200px 700px at 80% -10%, oklch(0.62 0.10 285 / 0.10), transparent 60%), var(--bg);
+  --surface: oklch(0.205 0.013 274);
+  --surface-2: oklch(0.245 0.014 274);
+  --surface-3: oklch(0.285 0.015 274);
+  --border: oklch(0.32 0.013 274);
+  --border-soft: oklch(0.27 0.012 274);
+  --text: oklch(0.96 0.005 274);
+  --text-muted: oklch(0.72 0.012 274);
+  --text-faint: oklch(0.56 0.012 274);
+  --overlay: oklch(0.10 0.01 274 / 0.62);
+}
+
+/* ---------- LIGHT ---------- */
+[data-theme='light'] {
+  --bg: oklch(0.975 0.004 274);
+  --bg-grad: radial-gradient(1200px 700px at 80% -10%, oklch(0.62 0.12 285 / 0.08), transparent 60%), var(--bg);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.975 0.005 274);
+  --surface-3: oklch(0.945 0.006 274);
+  --border: oklch(0.90 0.006 274);
+  --border-soft: oklch(0.93 0.005 274);
+  --text: oklch(0.24 0.015 274);
+  --text-muted: oklch(0.48 0.014 274);
+  --text-faint: oklch(0.62 0.012 274);
+  --overlay: oklch(0.30 0.02 274 / 0.35);
+  --shadow-sm: 0 1px 2px oklch(0.3 0.02 274 / 0.08);
+  --shadow: 0 10px 30px -12px oklch(0.3 0.02 274 / 0.18);
+  --shadow-lg: 0 30px 70px -24px oklch(0.3 0.02 274 / 0.22);
+  --accent-fg: oklch(0.99 0 0);
+}

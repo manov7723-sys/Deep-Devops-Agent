@@ -1,0 +1,145 @@
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { prisma } from "@/lib/db/prisma";
+import { getActiveSession } from "@/lib/auth/session";
+import { encryptSecret } from "@/lib/auth/crypto";
+import { createProvider } from "@/lib/cloud/providers";
+import { exchangeAzureCode, listAzureSubscriptions } from "@/lib/cloud/azure-oauth";
+import { audit } from "@/lib/audit/log";
+
+const CLEAR = { httpOnly: true, path: "/", maxAge: 0 };
+
+/** Decode the `tid` (tenant) claim from a JWT access token, best-effort. */
+function tenantFromToken(accessToken: string): string | null {
+  try {
+    const payload = accessToken.split(".")[1];
+    const json = JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as { tid?: string };
+    return json.tid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Popup-aware return: notify the opener + close, or redirect a normal tab. */
+function done(popup: boolean, ok: boolean, detail: string): NextResponse {
+  const status = ok ? "connected" : "error";
+  const html = `<!doctype html><meta charset="utf-8"><title>Azure</title>
+<body style="font:14px system-ui;padding:24px;color:#444">${ok ? "Azure connected. You can close this window." : "Azure connection failed."}</body>
+<script>
+(function(){
+  var msg = { source: "dda-azure-oauth", status: ${JSON.stringify(status)}, detail: ${JSON.stringify(detail)} };
+  var isPopup = false;
+  try { isPopup = ${popup ? "true" : "false"} && !!(window.opener && window.opener !== window); } catch(e){}
+  // localStorage is a COOP-proof channel: the opener gets a 'storage' event
+  // even when Cross-Origin-Opener-Policy severs window.opener (Next 16).
+  try { localStorage.setItem("dda_azure_oauth_result", JSON.stringify(msg) + "|" + Date.now()); } catch(e){}
+  if (isPopup) {
+    try { window.opener.postMessage(msg, window.location.origin); } catch(e){}
+    try { window.close(); } catch(e){}
+    setTimeout(function(){ location.replace("/"); }, 400);
+  } else {
+    location.replace("/u/projects?azure_connected=" + ${JSON.stringify(ok ? "true" : "false")});
+  }
+})();
+</script>`;
+  return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+export async function GET(req: Request) {
+  const u = new URL(req.url);
+  const code = u.searchParams.get("code") ?? "";
+  const state = u.searchParams.get("state") ?? "";
+  const oauthErr = u.searchParams.get("error_description") || u.searchParams.get("error");
+
+  const jar = await cookies();
+  const expectState = jar.get("az_oauth_state")?.value;
+  const verifier = jar.get("az_oauth_verifier")?.value;
+  const popup = jar.get("az_oauth_popup")?.value === "1";
+  const projSlug = jar.get("az_oauth_proj")?.value ?? "";
+  // Clear the one-time cookies regardless of outcome.
+  jar.set("az_oauth_state", "", CLEAR);
+  jar.set("az_oauth_verifier", "", CLEAR);
+  jar.set("az_oauth_popup", "", CLEAR);
+  jar.set("az_oauth_proj", "", CLEAR);
+
+  if (oauthErr) return done(popup, false, `Microsoft: ${oauthErr}`);
+  if (!code || !state || !expectState || state !== expectState || !verifier) {
+    return done(popup, false, "Invalid or expired sign-in state — try again.");
+  }
+
+  const sess = await getActiveSession();
+  if (!sess) return done(popup, false, "Your app session expired — sign in and retry.");
+
+  // 1 — exchange the code for tokens.
+  const ex = await exchangeAzureCode(code, verifier);
+  if (!ex.ok) return done(popup, false, ex.error);
+  if (!ex.tokens.refreshToken) return done(popup, false, "Microsoft returned no refresh token (offline_access not granted).");
+
+  // 2 — validate + resolve the subscription.
+  const subsRes = await listAzureSubscriptions(ex.tokens.accessToken);
+  if (!subsRes.ok) return done(popup, false, subsRes.error);
+  if (subsRes.subs.length === 0) {
+    return done(popup, false, "Signed in, but no Azure subscriptions are visible to this account.");
+  }
+  const sub = subsRes.subs.find((s) => s.state === "Enabled") ?? subsRes.subs[0];
+  const tenantId = tenantFromToken(ex.tokens.accessToken) ?? process.env.AZURE_OAUTH_TENANT_ID ?? "";
+
+  // 3 — store as an Azure CloudProvider (OAuth method). Convention: roleArn is
+  // LEFT NULL for OAuth providers (SP providers always have a client id there),
+  // externalId holds the ENCRYPTED refresh token.
+  try {
+    const encRefresh = encryptSecret(ex.tokens.refreshToken);
+
+    // ISOLATION: resolve which project this connection belongs to (verify access).
+    let projectId: string | undefined;
+    if (projSlug) {
+      const proj = await prisma.project.findFirst({ where: { slug: projSlug }, select: { id: true, ownerId: true } });
+      const allowed = proj && (proj.ownerId === sess.userId || (await prisma.membership.count({ where: { projectId: proj.id, userId: sess.userId } })) > 0);
+      if (proj && allowed) projectId = proj.id;
+    }
+
+    // Dedupe within the SAME project: reconnecting the same subscription in this
+    // project refreshes the token; the same account in another project is a
+    // separate row (that's the isolation guarantee).
+    const existing = await prisma.cloudProvider.findFirst({
+      where: { userId: sess.userId, kind: "azure", accountRef: sub.id, projectId: projectId ?? null },
+      select: { id: true },
+    });
+    let providerId: string;
+    if (existing) {
+      await prisma.cloudProvider.update({
+        where: { id: existing.id },
+        data: { externalId: encRefresh, accountId: tenantId, status: "ok", name: `Azure · ${sub.displayName}`.slice(0, 80) },
+      });
+      providerId = existing.id;
+    } else {
+      const created = await createProvider({
+        userId: sess.userId,
+        projectId,
+        kind: "azure",
+        name: `Azure · ${sub.displayName}`.slice(0, 80),
+        accountRef: sub.id,
+        accountId: tenantId,
+        region: "eastus",
+        externalId: encRefresh,
+      });
+      providerId = created.id;
+    }
+    // Bind to the project's environments that have no provider yet, so the
+    // connection shows on the project's Cloud providers page.
+    if (projectId) {
+      await prisma.env.updateMany({ where: { projectId, cloudProviderId: null }, data: { cloudProviderId: providerId } });
+    }
+    await audit({
+      userId: sess.userId,
+      action: existing ? "cloud_provider.updated" : "cloud_provider.created",
+      targetType: "cloud_provider",
+      targetId: existing?.id ?? sub.id,
+      metadata: { kind: "azure", method: "oauth", subscription: sub.id },
+    });
+  } catch (e) {
+    return done(popup, false, e instanceof Error ? e.message : "Could not save the Azure provider.");
+  }
+
+  return done(popup, true, `Connected ${sub.displayName}`);
+}
