@@ -158,6 +158,7 @@ export async function triageAlert(projectId: string, alertId: string): Promise<T
       .join("");
     const diagnosis = parseDiagnosis(text);
     if (!diagnosis) return { ok: false, error: "The agent didn't return a parseable diagnosis." };
+
     return { ok: true, diagnosis, toolsUsed };
   }
 
@@ -213,7 +214,7 @@ export async function triageAndPropose(projectId: string, alertId: string): Prom
  * approval — no human in the loop until the approve step. Never throws.
  */
 export function maybeAutoTriage(projectId: string, alertId: string, severity: string): void {
-  if (process.env.SRE_AUTO_TRIAGE !== "1") return;
+
   if (severity !== "high") return;
   void triageAndPropose(projectId, alertId).catch(() => {});
 }

@@ -58,6 +58,7 @@ export type AlertRow = {
   status: AlertStatus;
   detectedAt: string;
   resolvedAt: string | null;
+
 };
 
 function row(a: Alert & { env: { key: string }; sourceAgent: { name: string } | null }): AlertRow {
@@ -74,6 +75,7 @@ function row(a: Alert & { env: { key: string }; sourceAgent: { name: string } | 
     status: a.status,
     detectedAt: a.detectedAt.toISOString(),
     resolvedAt: a.resolvedAt?.toISOString() ?? null,
+
   };
 }
 

@@ -97,6 +97,7 @@ const CI_PLAYBOOK = [
 ].join("\n");
 
 /**
+
  * Azure context playbook — included only for projects with Azure connected.
  * Drives the subscription → resource group → region selection so the agent
  * always has the right scope before running any Azure command.
@@ -254,6 +255,7 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
     MANIFEST_PLAYBOOK,
     HELM_PLAYBOOK,
     CI_PLAYBOOK,
+
     clouds.has("azure") ? AZURE_PLAYBOOK : "",
     clouds.has("gcp") ? GCP_PLAYBOOK : "",
     clusters,

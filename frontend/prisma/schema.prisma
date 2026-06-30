@@ -1194,6 +1194,7 @@ model Alert {
   detectedAt     DateTime      @default(now())
   resolvedAt     DateTime?
 
+
   project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   env         Env     @relation(fields: [envId], references: [id])
   sourceAgent Agent?  @relation(fields: [sourceAgentId], references: [id])

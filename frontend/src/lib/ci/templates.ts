@@ -348,6 +348,7 @@ jobs:
 }
 
 /**
+
  * Vetted, stack-aware CI workflow (install → build → test) on push/PR.
  * Like the Dockerfile templates, the agent only DETECTS the stack + params;
  * the YAML itself is correct by construction (right toolchain setup, lockfile

@@ -39,6 +39,7 @@ import { trivyScanTool } from "./trivy-scan";
 import { generateComposeTool } from "./generate-compose";
 import { generateCiWorkflowTool, generateTrivyWorkflowTool } from "./generate-ci-workflow";
 import { listAlertsTool } from "./list-alerts";
+
 import type { Tool, ToolContext, ToolExecuteResult } from "./types";
 
 export type { Tool, ToolContext, ToolExecuteResult } from "./types";
@@ -94,6 +95,7 @@ export const ALL_TOOLS: Tool[] = [
   generateTrivyWorkflowTool,
   // Incidents / alerts
   listAlertsTool,
+
   // Infra (IaC)
   provisionEksTool,
   runTerraformTool,
@@ -135,6 +137,7 @@ const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp"> = {
   setup_gcp_monitor_alarms: "gcp",
   list_gcp_projects: "gcp",
   set_gcp_context: "gcp",
+
 };
 
 /**

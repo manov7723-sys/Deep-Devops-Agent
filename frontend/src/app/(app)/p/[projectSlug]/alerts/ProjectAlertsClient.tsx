@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
 import { Block, Btn, ChipGroup, PageHead, Stat } from "@/components/ui";
-import { AlertCard } from "@/components/domain/AlertCard";
+
 import { useAlertAction, useAlerts } from "@/hooks/queries/project";
 import type { AlertCategory } from "@/lib/legacy-types";
 
@@ -67,8 +67,7 @@ export function ProjectAlertsClient({ slug }: { slug: string }) {
         ) : (
           <div className="col gap-3">
             {alerts.map((a) => (
-              <AlertCard
-                key={a.id}
+
                 alert={a}
                 onAck={(id) => action.mutate({ id, action: "ack" })}
                 onResolve={(id) => action.mutate({ id, action: "resolve" })}

@@ -120,6 +120,7 @@ export function ProjectAutomationClient({ slug }: { slug: string }) {
             prTitle="CI workflow"
           />
           <TrivyAutomation key={`trivy-${repoFullName}`} slug={slug} repoFullName={repoFullName} />
+
         </>
       )}
     </div>
