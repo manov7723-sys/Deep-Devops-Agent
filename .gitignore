@@ -1,0 +1,25 @@
+# Dependencies
+**/node_modules/
+.pnp
+.pnp.js
+
+# Builds / caches
+**/.next/
+**/out/
+**/build/
+**/dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets / env — NEVER commit these
+**/.env
+**/.env.*
+!**/.env.example
+
+# Archives / misc
+backend.zip
+*.log
+.DS_Store
+
+# Python venv
+venv/
