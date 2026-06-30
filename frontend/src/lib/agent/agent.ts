@@ -97,28 +97,7 @@ const CI_PLAYBOOK = [
 ].join("\n");
 
 /**
- * CI → cloud registry playbook for GCP (Artifact Registry) and Azure (ACR),
- * both keyless. Included only when the matching cloud is connected. The agent
- * MUST ask new-vs-existing registry, then set up keyless auth, then generate.
- */
-const CI_REGISTRY_PLAYBOOK = [
-  "## CI workflow → cloud container registry (GCP Artifact Registry / Azure ACR), keyless",
-  "When the user wants a CI workflow that builds & PUSHES the image to GCP or Azure (not AWS/ECR):",
-  "1. FIRST ASK the user: create a NEW registry, or use an EXISTING one? Do not assume.",
-  "GCP (Artifact Registry):",
-  "  - Existing → list_artifact_registries(location) and let them pick (ask the location, default us-central1).",
-  "  - New → create_artifact_registry(location, repository).",
-  "  - Then setup_gcp_github_wif(repoFullName) → keyless Workload Identity Federation; returns workloadIdentityProvider + serviceAccount.",
-  "  - Then generate_gar_workflow(workloadIdentityProvider, serviceAccount, location, repository, image, branch) → the workflow YAML. NEVER hand-write it.",
-  "Azure (ACR):",
-  "  - Existing → list_acr() and let them pick.",
-  "  - New → create_acr(resourceGroup, name, location). (ACR names: global, lowercase, alphanumeric.)",
-  "  - Then setup_azure_github_oidc(repoFullName, acrName, resourceGroup) → keyless federated credential; returns clientId/tenantId/subscriptionId. NOTE: needs a service-principal Azure connection; if it errors about that, relay the message.",
-  "  - Then generate_acr_workflow(clientId, tenantId, subscriptionId, registry, image, branch) → the workflow YAML. NEVER hand-write it.",
-  "2. Show the generated workflow, explain the keyless flow (GitHub OIDC → cloud, no stored secret), and ASK before committing. On 'yes' commit with write_repo_file (PR) or save_pipeline_to_project per the user's preference.",
-].join("\n");
 
-/**
  * Azure context playbook — included only for projects with Azure connected.
  * Drives the subscription → resource group → region selection so the agent
  * always has the right scope before running any Azure command.
@@ -276,7 +255,7 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
     MANIFEST_PLAYBOOK,
     HELM_PLAYBOOK,
     CI_PLAYBOOK,
-    clouds.has("gcp") || clouds.has("azure") ? CI_REGISTRY_PLAYBOOK : "",
+
     clouds.has("azure") ? AZURE_PLAYBOOK : "",
     clouds.has("gcp") ? GCP_PLAYBOOK : "",
     clusters,

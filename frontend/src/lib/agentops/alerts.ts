@@ -58,8 +58,7 @@ export type AlertRow = {
   status: AlertStatus;
   detectedAt: string;
   resolvedAt: string | null;
-  /** SRE-agent diagnosis JSON if it has auto-investigated this alert (else null). */
-  aiDiagnosis: unknown;
+
 };
 
 function row(a: Alert & { env: { key: string }; sourceAgent: { name: string } | null }): AlertRow {
@@ -76,7 +75,7 @@ function row(a: Alert & { env: { key: string }; sourceAgent: { name: string } | 
     status: a.status,
     detectedAt: a.detectedAt.toISOString(),
     resolvedAt: a.resolvedAt?.toISOString() ?? null,
-    aiDiagnosis: a.aiDiagnosis ?? null,
+
   };
 }
 

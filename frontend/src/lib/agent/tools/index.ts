@@ -39,8 +39,7 @@ import { trivyScanTool } from "./trivy-scan";
 import { generateComposeTool } from "./generate-compose";
 import { generateCiWorkflowTool, generateTrivyWorkflowTool } from "./generate-ci-workflow";
 import { listAlertsTool } from "./list-alerts";
-import { listArtifactRegistriesTool, createArtifactRegistryTool, setupGcpGithubWifTool, generateGarWorkflowTool } from "./gcp-registry-tools";
-import { listAcrTool, createAcrTool, setupAzureGithubOidcTool, generateAcrWorkflowTool } from "./azure-registry-tools";
+
 import type { Tool, ToolContext, ToolExecuteResult } from "./types";
 
 export type { Tool, ToolContext, ToolExecuteResult } from "./types";
@@ -96,16 +95,7 @@ export const ALL_TOOLS: Tool[] = [
   generateTrivyWorkflowTool,
   // Incidents / alerts
   listAlertsTool,
-  // GCP CI → Artifact Registry (keyless WIF)
-  listArtifactRegistriesTool,
-  createArtifactRegistryTool,
-  setupGcpGithubWifTool,
-  generateGarWorkflowTool,
-  // Azure CI → ACR (keyless OIDC)
-  listAcrTool,
-  createAcrTool,
-  setupAzureGithubOidcTool,
-  generateAcrWorkflowTool,
+
   // Infra (IaC)
   provisionEksTool,
   runTerraformTool,
@@ -147,14 +137,7 @@ const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp"> = {
   setup_gcp_monitor_alarms: "gcp",
   list_gcp_projects: "gcp",
   set_gcp_context: "gcp",
-  list_artifact_registries: "gcp",
-  create_artifact_registry: "gcp",
-  setup_gcp_github_wif: "gcp",
-  generate_gar_workflow: "gcp",
-  list_acr: "azure",
-  create_acr: "azure",
-  setup_azure_github_oidc: "azure",
-  generate_acr_workflow: "azure",
+
 };
 
 /**

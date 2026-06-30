@@ -158,10 +158,7 @@ export async function triageAlert(projectId: string, alertId: string): Promise<T
       .join("");
     const diagnosis = parseDiagnosis(text);
     if (!diagnosis) return { ok: false, error: "The agent didn't return a parseable diagnosis." };
-    // Persist so the UI can show it without the user clicking (auto-triage flow).
-    await prisma.alert
-      .update({ where: { id: alertId }, data: { aiDiagnosis: diagnosis as object, aiDiagnosedAt: new Date() } })
-      .catch(() => {});
+
     return { ok: true, diagnosis, toolsUsed };
   }
 
@@ -217,9 +214,7 @@ export async function triageAndPropose(projectId: string, alertId: string): Prom
  * approval — no human in the loop until the approve step. Never throws.
  */
 export function maybeAutoTriage(projectId: string, alertId: string, severity: string): void {
-  // On by default for HIGH-severity alerts so they auto-investigate the moment
-  // they fire; set SRE_AUTO_TRIAGE=0 to disable (e.g. to control token spend).
-  if (process.env.SRE_AUTO_TRIAGE === "0") return;
+
   if (severity !== "high") return;
   void triageAndPropose(projectId, alertId).catch(() => {});
 }

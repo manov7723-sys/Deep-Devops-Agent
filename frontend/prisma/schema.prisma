@@ -1193,11 +1193,7 @@ model Alert {
   status         AlertStatus   @default(open)
   detectedAt     DateTime      @default(now())
   resolvedAt     DateTime?
-  // SRE agent auto-triage: the diagnosis JSON (summary/rootCause/evidence/
-  // remediation/confidence) the agent produced when this alert fired, so the UI
-  // can show it without the user clicking. Null = not yet investigated.
-  aiDiagnosis    Json?
-  aiDiagnosedAt  DateTime?
+
 
   project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   env         Env     @relation(fields: [envId], references: [id])

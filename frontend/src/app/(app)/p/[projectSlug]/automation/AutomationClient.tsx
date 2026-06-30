@@ -121,25 +121,6 @@ export function ProjectAutomationClient({ slug }: { slug: string }) {
           />
           <TrivyAutomation key={`trivy-${repoFullName}`} slug={slug} repoFullName={repoFullName} />
 
-          {/* Hand-off to the agent for the conversational "push image to a cloud
-              registry" flow (asks new-vs-existing registry, sets up keyless auth). */}
-          <Block>
-            <Block.Header>
-              <Block.Title sub="Want CI that builds and pushes your image to a registry (ECR / GCP Artifact Registry / Azure ACR) with keyless auth? The agent sets up the registry + OIDC and writes the workflow — just ask.">
-                <span className="row gap-2" style={{ alignItems: "center" }}>
-                  <Icon name="bot" size={16} /> Push to a cloud registry
-                </span>
-              </Block.Title>
-            </Block.Header>
-            <Block.Body>
-              <a href={`/p/${slug}/chat`} className="row gap-1" style={{ fontSize: 13, alignItems: "center", fontWeight: 600 }}>
-                <Icon name="chat" size={14} /> Set it up with the agent →
-              </a>
-              <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                e.g. “Set up a CI workflow that builds my repo and pushes the image to Artifact Registry.”
-              </p>
-            </Block.Body>
-          </Block>
         </>
       )}
     </div>
