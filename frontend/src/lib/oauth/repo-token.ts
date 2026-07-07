@@ -17,13 +17,20 @@
  */
 import type { OAuthAccount } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { decryptSecret } from "@/lib/auth/crypto";
+import { getFreshAccessTokenForAccount } from "@/lib/oauth/token";
+import { gitlabBaseUrl } from "@/lib/oauth/providers";
 
 export type RepoTokenResolution =
   | {
       ok: true;
       accessToken: string;
       scope: string | null;
+      /** Which git host this token authenticates against. */
+      provider: "github" | "gitlab";
+      /** REST API root: "https://api.github.com" or "{instance}/api/v4". */
+      apiBase: string;
+      /** GitLab instance URL (self-hosted); null for github / gitlab.com default. */
+      providerBaseUrl: string | null;
       account: {
         id: string;
         login: string | null;
@@ -39,7 +46,8 @@ export type RepoTokenResolution =
         | "repo_not_found"
         | "no_account"
         | "no_token"
-        | "decrypt_failed";
+        | "decrypt_failed"
+        | "reconnect";
       message: string;
     };
 
@@ -115,45 +123,58 @@ const tokenSelectFields = {
   userId: true,
   login: true,
   providerAccountId: true,
+  provider: true,
   scope: true,
   accessTokenRef: true,
+  refreshTokenRef: true,
+  tokenExpiresAt: true,
+  providerBaseUrl: true,
 } as const;
 
 const tokenSelect = { select: tokenSelectFields } as const;
 
-function materialize(
+async function materialize(
   row: Pick<
     OAuthAccount,
-    "id" | "userId" | "login" | "providerAccountId" | "scope" | "accessTokenRef"
+    | "id" | "userId" | "login" | "providerAccountId" | "provider" | "scope"
+    | "accessTokenRef" | "refreshTokenRef" | "tokenExpiresAt" | "providerBaseUrl"
   >,
   fromFallback: boolean,
-): RepoTokenResolution {
-  if (!row.accessTokenRef) {
-    return {
-      ok: false,
-      code: "no_token",
-      message:
-        "Connected GitHub account has no access token. Reconnect from /account/profile.",
-    };
+): Promise<RepoTokenResolution> {
+  // Delegate token read + (GitLab) refresh to the shared helper so a 2h-expired
+  // GitLab token is transparently renewed here too.
+  const tok = await getFreshAccessTokenForAccount({
+    id: row.id,
+    provider: row.provider,
+    accessTokenRef: row.accessTokenRef,
+    refreshTokenRef: row.refreshTokenRef,
+    tokenExpiresAt: row.tokenExpiresAt,
+    providerBaseUrl: row.providerBaseUrl,
+  });
+  if (!tok.ok) {
+    const code = tok.code === "no_token" || tok.code === "decrypt_failed" ? tok.code : "reconnect";
+    return { ok: false, code, message: tok.message };
   }
-  try {
-    return {
-      ok: true,
-      accessToken: decryptSecret(row.accessTokenRef),
-      scope: row.scope,
-      account: {
-        id: row.id,
-        login: row.login,
-        providerAccountId: row.providerAccountId,
-        userId: row.userId,
-      },
-      fromFallback,
-    };
-  } catch {
-    return {
-      ok: false,
-      code: "decrypt_failed",
-      message: "Could not decrypt the access token. Reconnect this account.",
-    };
-  }
+
+  const provider: "github" | "gitlab" = row.provider === "gitlab" ? "gitlab" : "github";
+  const apiBase =
+    provider === "gitlab"
+      ? `${(row.providerBaseUrl || gitlabBaseUrl()).replace(/\/+$/, "")}/api/v4`
+      : "https://api.github.com";
+
+  return {
+    ok: true,
+    accessToken: tok.accessToken,
+    scope: row.scope,
+    provider,
+    apiBase,
+    providerBaseUrl: row.providerBaseUrl ?? null,
+    account: {
+      id: row.id,
+      login: row.login,
+      providerAccountId: row.providerAccountId,
+      userId: row.userId,
+    },
+    fromFallback,
+  };
 }

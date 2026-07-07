@@ -3,7 +3,7 @@
  * by anyone with developer+. Decision is immutable: once approved/rejected
  * the row stays terminal forever (callers re-create a new approval if needed).
  */
-import type { Approval, ApprovalDiff, ApprovalRisk, DiffKind } from "@prisma/client";
+import { Prisma, type Approval, type ApprovalDiff, type ApprovalRisk, type DiffKind } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 export type ApprovalRow = {
@@ -80,6 +80,12 @@ export type CreateApprovalArgs = {
   risk: ApprovalRisk;
   repoId?: string;
   diff: Array<{ kind: DiffKind; text: string }>;
+  // Infra gate: an executable approval (kind="terraform") carries the payload +
+  // estimate + policy result so approving it runs the apply.
+  kind?: string;
+  payloadJson?: Prisma.InputJsonValue;
+  costMonthly?: number;
+  policyJson?: Prisma.InputJsonValue;
 };
 
 export async function createApproval(args: CreateApprovalArgs): Promise<ApprovalRow> {
@@ -93,6 +99,10 @@ export async function createApproval(args: CreateApprovalArgs): Promise<Approval
       risk: args.risk,
       repoId: args.repoId ?? null,
       status: "pending",
+      kind: args.kind ?? "generic",
+      payloadJson: args.payloadJson,
+      costMonthly: args.costMonthly ?? null,
+      policyJson: args.policyJson,
       diff: {
         create: args.diff.map((d, idx) => ({ kind: d.kind, text: d.text, order: idx })),
       },

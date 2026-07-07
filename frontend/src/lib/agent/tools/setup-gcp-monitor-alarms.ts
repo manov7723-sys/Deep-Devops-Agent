@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { setupGkeAlarms, gkeClusterFromEnv, GCP_METRICS, type GcpMetricKey } from "@/lib/cloud/gcp-monitor";
+import { getEnvThresholdPercents } from "@/lib/observability/thresholds";
 import type { Tool } from "./types";
 
 const METRIC_KEYS: GcpMetricKey[] = ["cpu", "memory"];
@@ -41,7 +42,8 @@ export const setupGcpMonitorAlarmsTool: Tool<Input, Output> = {
     if (!clusterName) return { ok: false, error: "Couldn't determine the GKE cluster name. Pass clusterName." };
 
     const metrics = input.metrics?.length ? input.metrics : METRIC_KEYS;
-    const result = await setupGkeAlarms({ cloudProviderId: env.cloudProviderId, clusterName, email: input.email, metrics });
+    const thresholdPercents = await getEnvThresholdPercents(env.id);
+    const result = await setupGkeAlarms({ cloudProviderId: env.cloudProviderId, clusterName, email: input.email, metrics, thresholdPercents });
     if (!result.ok && result.error) return { ok: false, error: result.error };
 
     return {

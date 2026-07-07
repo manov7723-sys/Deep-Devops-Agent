@@ -4,6 +4,9 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
 import { Block, Btn, ChipGroup, PageHead, Stat } from "@/components/ui";
 import { AlertInvestigation } from "@/components/domain/AlertInvestigation";
+import { AlertThresholdsPanel } from "@/components/domain/AlertThresholdsPanel";
+import { ChatOpsPanel } from "@/components/domain/ChatOpsPanel";
+import { NotificationEmailsPanel } from "@/components/domain/NotificationEmailsPanel";
 import { useAlertAction, useAlerts } from "@/hooks/queries/project";
 import type { AlertCategory } from "@/lib/legacy-types";
 
@@ -56,6 +59,12 @@ export function ProjectAlertsClient({ slug }: { slug: string }) {
         <Stat label="Security findings" value={security} icon="lock" sub="by Security Sentinel" />
         <Stat label="Mean time to ack" value="14m" icon="clock" sub="last 30 days" />
       </div>
+
+      <NotificationEmailsPanel slug={slug} />
+
+      <ChatOpsPanel slug={slug} />
+
+      <AlertThresholdsPanel slug={slug} />
 
       <ChipGroup options={CAT_OPTIONS} value={cat} onChange={setCat} ariaLabel="Alert category" />
 

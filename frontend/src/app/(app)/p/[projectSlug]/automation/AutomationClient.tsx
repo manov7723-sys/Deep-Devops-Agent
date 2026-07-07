@@ -6,6 +6,8 @@ import { Badge, Block, Btn, Field, PageHead, Progress, Select, StatusDot } from 
 import { Icon } from "@/components/ui/Icon";
 import type { BadgeTone } from "@/components/ui/Badge";
 import { api } from "@/lib/api/client";
+import type { RemediationDoc } from "@/lib/automation/trivy-remediation";
+import { downloadRemediationPdf } from "@/lib/automation/remediation-pdf";
 
 type RepoRow = { id: string; fullName: string; name: string; defaultBranch: string };
 type GenFile = { path: string; content: string };
@@ -298,6 +300,8 @@ type TrivyFinding = {
   fixedVersion: string;
   location: string;
   title: string;
+  description?: string;
+  resolution?: string;
   primaryUrl: string;
 };
 type TrivyScan = {
@@ -434,6 +438,23 @@ function TrivyAutomation({ slug, repoFullName }: { slug: string; repoFullName: s
     onError: (e) => setErr(apiErrorMessage(e)),
   });
 
+  // AI remediation doc → downloadable PDF the DevOps lead shares with developers.
+  const remediation = useMutation({
+    mutationFn: async () => {
+      if (!result || !result.ok) throw new Error("Run a scan first.");
+      const r = await api.post<{ ok: true; doc: RemediationDoc }>(
+        `/projects/${slug}/automation/trivy/remediation`,
+        { artifact: result.artifact, findings: result.findings, counts: result.counts },
+      );
+      const now = new Date();
+      const stamp = `${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      await downloadRemediationPdf(r.doc, stamp);
+      return r.doc;
+    },
+    onMutate: () => setErr(null),
+    onError: (e) => setErr(apiErrorMessage(e)),
+  });
+
   return (
     <Block>
       <Block.Header>
@@ -471,12 +492,22 @@ function TrivyAutomation({ slug, repoFullName }: { slug: string; repoFullName: s
                 <Badge tone="solid-ok" withDot>No known vulnerabilities found 🎉</Badge>
               ) : (
                 <>
-                  <div className="row gap-2 wrap" style={{ alignItems: "center" }}>
-                    <span className="muted" style={{ fontSize: 12.5 }}>{result.total} findings:</span>
-                    {SEVERITY_ROW.filter((s) => result.counts[s] > 0).map((s) => (
-                      <Badge key={s} tone={SEVERITY_TONE[s]} withDot>{s} {result.counts[s]}</Badge>
-                    ))}
+                  <div className="row gap-2 wrap between" style={{ alignItems: "center" }}>
+                    <span className="row gap-2 wrap" style={{ alignItems: "center" }}>
+                      <span className="muted" style={{ fontSize: 12.5 }}>{result.total} findings:</span>
+                      {SEVERITY_ROW.filter((s) => result.counts[s] > 0).map((s) => (
+                        <Badge key={s} tone={SEVERITY_TONE[s]} withDot>{s} {result.counts[s]}</Badge>
+                      ))}
+                    </span>
+                    <Btn variant="outline" icon="download" loading={remediation.isPending} disabled={remediation.isPending}
+                      onClick={() => remediation.mutate()}>
+                      {remediation.isPending ? "Writing fix guide…" : "Download remediation doc (PDF)"}
+                    </Btn>
                   </div>
+                  <span className="muted" style={{ fontSize: 11.5 }}>
+                    Generates a developer-facing PDF — findings grouped by severity, each with the exact change to make.
+                    Share it with the developers who own this repo.
+                  </span>
                   {/* Grouped by target (file scanned), mirroring Trivy's report:
                       Library · Vulnerability · Severity · Status · Installed · Fixed in · Title. */}
                   <div style={{ overflowX: "auto", maxHeight: 460, border: "1px solid var(--border)", borderRadius: 8 }}>

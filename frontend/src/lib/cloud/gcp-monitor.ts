@@ -114,6 +114,8 @@ export async function setupGkeAlarms(opts: {
   clusterName: string;
   email?: string;
   metrics: GcpMetricKey[];
+  /** Per-metric threshold overrides (PERCENT 0–100) from the env's AlertThreshold rules; converted to GCP's 0–1 ratio. */
+  thresholdPercents?: Partial<Record<GcpMetricKey, number>>;
 }): Promise<GcpSetupResult> {
   const tok = await getGcpAccessToken(opts.cloudProviderId);
   if (!tok.ok) return { ok: false, clusterName: opts.clusterName, emailWired: false, alarms: [], error: tok.error };
@@ -138,7 +140,10 @@ export async function setupGkeAlarms(opts: {
 
   const alarms: GcpAlarmResult[] = [];
   for (const key of opts.metrics) {
-    const def = GCP_METRICS[key];
+    // User-configured threshold (percent) overrides the default; GCP uses a 0–1 ratio.
+    const base = GCP_METRICS[key];
+    const override = opts.thresholdPercents?.[key];
+    const def = override != null ? { ...base, threshold: override / 100 } : base;
     const displayName = `dda-gke-${opts.clusterName}-${key}`;
     const prior = byName.get(displayName);
     if (prior) await gcp(tok.accessToken, `/${prior}`, "DELETE");

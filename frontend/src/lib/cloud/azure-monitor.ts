@@ -130,6 +130,8 @@ export async function setupAzureAksAlarms(opts: {
   resourceGroup?: string;
   email?: string;
   metrics: AzureMetricKey[];
+  /** Per-metric threshold overrides (percent) from the env's AlertThreshold rules. */
+  thresholdPercents?: Partial<Record<AzureMetricKey, number>>;
 }): Promise<AzureSetupResult> {
   const r = await resolveAks(opts.cloudProviderId, opts.clusterName, opts.resourceGroup);
   if (!r.ok) return { ok: false, clusterName: opts.clusterName, emailWired: false, alarms: [], error: r.error };
@@ -161,7 +163,9 @@ export async function setupAzureAksAlarms(opts: {
 
   const alarms: AzureAlarmResult[] = [];
   for (const key of opts.metrics) {
-    const def = AZURE_METRICS[key];
+    // User-configured threshold overrides the default for this metric.
+    const base = AZURE_METRICS[key];
+    const def = opts.thresholdPercents?.[key] != null ? { ...base, threshold: opts.thresholdPercents[key]! } : base;
     const name = `dda-aks-${opts.clusterName}-${key}`.slice(0, 250);
     const put = await arm(
       token,

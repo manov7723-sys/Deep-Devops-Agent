@@ -6,15 +6,18 @@ type CiInput = { repoFullName: string };
 type CiOutput = { stackTitle: string; reasoning: string; files: Array<{ path: string; content: string }>; notes: string[] };
 
 /**
- * Generate a stack-aware GitHub Actions CI workflow (install → build → test) for
- * a connected repo. The agent detects the stack; the YAML is vetted. Show it,
- * then commit with write_repo_file.
+ * Generate a stack-aware CI pipeline (install → build → test) for a connected
+ * repo. Emits GitHub Actions (.github/workflows/ci.yml) for GitHub repos, or a
+ * single .gitlab-ci.yml (build/test + Trivy) for GitLab repos — chosen
+ * automatically from the repo's provider. Show it, then commit with
+ * write_repo_file.
  */
 export const generateCiWorkflowTool: Tool<CiInput, CiOutput> = {
   name: "generate_ci_workflow",
   description:
-    "Generate a vetted, stack-aware GitHub Actions CI workflow (.github/workflows/ci.yml: install → build → test, " +
-    "runs on push/PR) for a connected repo. Use when the user wants CI / a build pipeline. Show the file, then commit with write_repo_file.",
+    "Generate a vetted, stack-aware CI pipeline (install → build → test, runs on push/PR/MR) for a connected repo. " +
+    "Emits GitHub Actions (.github/workflows/ci.yml) for GitHub repos or a single .gitlab-ci.yml (build/test + Trivy) " +
+    "for GitLab repos automatically. Use when the user wants CI / a build pipeline. Show the file, then commit with write_repo_file.",
   inputSchema: {
     type: "object",
     properties: { repoFullName: { type: "string", description: 'The repo as "owner/name", attached to this project.' } },

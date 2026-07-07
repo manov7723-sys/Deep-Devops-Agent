@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
 import { useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Badge,
   Block,
@@ -16,6 +17,7 @@ import {
   StatusDot,
   Toggle,
 } from "@/components/ui";
+import { api } from "@/lib/api/client";
 import { useProjectEnvs, useProjectWorkloads, type ProjectEnv } from "@/hooks/queries/project";
 import type { EnvId, SeedEnv, SeedWorkload } from "@/lib/legacy-types";
 import { AddEnvModal } from "@/components/modals/AddEnvModal";
@@ -28,6 +30,16 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
   const selectedFromUrl = sp.get("focus") as EnvId | null;
 
   const { data: envs } = useProjectEnvs(slug);
+  const qc = useQueryClient();
+  const { data: activeResp } = useQuery<{ ok: boolean; activeEnvKey: string | null }>({
+    queryKey: ["p", slug, "active-env"],
+    queryFn: () => api.get<{ ok: boolean; activeEnvKey: string | null }>(`/projects/${slug}/active-env`),
+  });
+  const activeEnvKey = activeResp?.activeEnvKey ?? null;
+  const setActive = useMutation({
+    mutationFn: (envKey: string) => api.put(`/projects/${slug}/active-env`, { envKey }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug, "active-env"] }),
+  });
   const [selected, setSelected] = useState<EnvId>(selectedFromUrl ?? "release");
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -100,6 +112,52 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
                   showArrow={i < envs.length - 1}
                 />
               ))}
+            </div>
+          ) : (
+            <Block.Loading />
+          )}
+        </Block.Body>
+      </Block>
+
+      {/* Active environment — the whole project's env-scoped pages default to it. */}
+      <Block>
+        <Block.Header>
+          <Block.Title sub="Pick the environment you're working in. Clusters, Workloads, Deployments and the Scheduler default to it (you can still switch on each page).">
+            Active environment
+          </Block.Title>
+        </Block.Header>
+        <Block.Body>
+          {envs ? (
+            <div className="col gap-2">
+              {envs.map((e) => {
+                const isActive = activeEnvKey === e.key;
+                return (
+                  <button
+                    key={e.key}
+                    type="button"
+                    className="row between"
+                    onClick={() => setActive.mutate(e.key)}
+                    disabled={setActive.isPending}
+                    style={{
+                      alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                      border: `1px solid ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
+                      background: isActive ? "var(--accent-soft, var(--surface-2))" : "var(--surface-1)",
+                    }}
+                  >
+                    <span className="row gap-2" style={{ alignItems: "center" }}>
+                      <span aria-hidden style={{
+                        width: 16, height: 16, borderRadius: "50%", flex: "none",
+                        border: `2px solid ${isActive ? "var(--accent)" : "var(--border)"}`,
+                        background: isActive ? "var(--accent)" : "transparent",
+                        boxShadow: isActive ? "inset 0 0 0 3px var(--surface-1)" : "none",
+                      }} />
+                      <strong style={{ fontSize: 13.5 }}>{e.name}</strong>
+                      <Badge tone="default">{e.key}</Badge>
+                    </span>
+                    {isActive && <Badge tone="ok" icon="check">Active</Badge>}
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <Block.Loading />

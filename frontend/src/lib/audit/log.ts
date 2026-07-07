@@ -42,6 +42,8 @@ export type AuditAction =
   | "repo.detached"
   | "repo.file_committed"
   | "repo.scanned"
+  | "repo.remediation_doc"
+  | "deployment.applied"
   | "cloud_provider.created"
   | "cloud_provider.updated"
   | "cloud_provider.removed"

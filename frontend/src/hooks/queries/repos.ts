@@ -32,20 +32,32 @@ export type GitHubRepoRow = {
   defaultBranch: string;
   htmlUrl: string;
   pushedAt: string | null;
+  /** Present for GitLab rows — the numeric project id, stored on the Repo. */
+  providerRepoId?: string;
+  /** Git host of the row (defaults to github when absent). */
+  provider?: "github" | "gitlab";
 };
 
-export function useGitHubRepos(enabled = true, accountId?: string | null) {
+export type GitProvider = "github" | "gitlab";
+
+/** Live repo list for either provider — hits /integrations/{provider}/repos. */
+export function useProviderRepos(provider: GitProvider, enabled = true, accountId?: string | null) {
   return useQuery<GitHubRepoRow[], ApiError>({
-    queryKey: ["integrations", "github", "repos", accountId ?? "default"],
+    queryKey: ["integrations", provider, "repos", accountId ?? "default"],
     queryFn: () =>
       api.get<GitHubRepoRow[]>(
-        "/integrations/github/repos",
+        `/integrations/${provider}/repos`,
         accountId ? { accountId } : undefined,
       ),
     enabled,
     retry: false,
     staleTime: 5 * 60_000,
   });
+}
+
+/** GitHub-specific convenience wrapper (kept for existing callers). */
+export function useGitHubRepos(enabled = true, accountId?: string | null) {
+  return useProviderRepos("github", enabled, accountId);
 }
 
 /** Who the caller is on GitHub — used for the "Connected as <login>" banner. */
@@ -58,12 +70,12 @@ export type GitHubMe = {
   providerAccountId: string;
 };
 
-export function useGitHubMe(enabled = true, accountId?: string | null) {
+export function useProviderMe(provider: GitProvider, enabled = true, accountId?: string | null) {
   return useQuery<GitHubMe, ApiError>({
-    queryKey: ["integrations", "github", "me", accountId ?? "default"],
+    queryKey: ["integrations", provider, "me", accountId ?? "default"],
     queryFn: async () => {
       const res = await api.get<{ ok: boolean } & GitHubMe>(
-        "/integrations/github/me",
+        `/integrations/${provider}/me`,
         accountId ? { accountId } : undefined,
       );
       return {
@@ -79,4 +91,9 @@ export function useGitHubMe(enabled = true, accountId?: string | null) {
     retry: false,
     staleTime: 5 * 60_000,
   });
+}
+
+/** GitHub-specific convenience wrapper (kept for existing callers). */
+export function useGitHubMe(enabled = true, accountId?: string | null) {
+  return useProviderMe("github", enabled, accountId);
 }

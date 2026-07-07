@@ -11,11 +11,13 @@ import {
 const PROVIDER_LABEL: Record<ConnectedOAuthAccount["provider"], string> = {
   github: "GitHub",
   google: "Google",
+  gitlab: "GitLab",
 };
 
-const PROVIDER_ICON: Record<ConnectedOAuthAccount["provider"], "github" | "user"> = {
+const PROVIDER_ICON: Record<ConnectedOAuthAccount["provider"], "github" | "user" | "gitlab"> = {
   github: "github",
   google: "user",
+  gitlab: "gitlab",
 };
 
 /**

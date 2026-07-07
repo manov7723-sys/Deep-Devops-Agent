@@ -25,7 +25,12 @@ type Output = {
 
 /** Pick the GitHub Actions workflow file out of the generated set, if present. */
 function findWorkflowPath(files: FileEntry[]): string | null {
-  const wf = files.find((f) => /^\.github\/workflows\/.+\.ya?ml$/.test(f.path.replace(/^\/+/, "")));
+  // GitHub Actions live under .github/workflows/*.yml; GitLab CI is a single
+  // .gitlab-ci.yml at the repo root.
+  const wf = files.find((f) => {
+    const p = f.path.replace(/^\/+/, "");
+    return /^\.github\/workflows\/.+\.ya?ml$/.test(p) || /^\.gitlab-ci\.ya?ml$/.test(p);
+  });
   return wf ? wf.path.replace(/^\/+/, "") : null;
 }
 

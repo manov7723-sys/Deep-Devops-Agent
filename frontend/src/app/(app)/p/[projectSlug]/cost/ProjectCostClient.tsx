@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { Badge, Bars, Block, Btn, Donut, Icon, PageHead, Progress, Stat } from "@/components/ui";
 import { EnvFilter } from "@/components/domain/EnvFilter";
+import { CostBudgetPanel } from "@/components/domain/CostBudgetPanel";
+import { CostOptimizationPanel } from "@/components/domain/CostOptimizationPanel";
+import { CostEstimatorPanel } from "@/components/domain/CostEstimatorPanel";
 import { useProjectCostFull } from "@/hooks/queries/project";
 import { useCostHistory, useSynthesizeCost } from "@/hooks/queries/cost";
 
@@ -70,6 +73,14 @@ export function ProjectCostClient({ slug }: { slug: string }) {
           </>
         }
       />
+
+      {/* Estimate infra cost BEFORE creating it. */}
+      <CostEstimatorPanel slug={slug} />
+
+      {/* Live account + project cost with budget threshold → alert. */}
+      <CostBudgetPanel slug={slug} />
+
+      <CostOptimizationPanel slug={slug} />
 
       {syntheticReport && (
         <div

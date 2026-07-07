@@ -33,17 +33,23 @@ export const RepoSummary = z.object({
 export type RepoSummary = z.infer<typeof RepoSummary>;
 
 export const CreateRepoRequest = z.object({
+  // owner/repo (GitHub) OR a GitLab path_with_namespace, which may nest through
+  // groups: group/subgroup/repo — so "one-or-more /segments".
   fullName: z
     .string()
     .trim()
-    .regex(/^[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+$/, "fullName must be in 'owner/repo' form"),
+    .regex(/^[A-Za-z0-9_.\-]+(\/[A-Za-z0-9_.\-]+)+$/, "fullName must be in 'owner/repo' (or 'group/sub/repo') form"),
   description: z.string().trim().max(500).optional().default(""),
   lang: z.string().trim().min(1).max(40),
   kind: RepoKindApi,
   defaultBranch: z.string().trim().default("main"),
   visibility: RepoVisibilityApi.default("private"),
-  /** Connected GitHub identity (OAuthAccount.id) the repo was discovered through. */
+  /** Connected git identity (OAuthAccount.id) the repo was discovered through. */
   oauthAccountId: z.string().uuid().optional(),
+  /** Git host. Defaults to github server-side when omitted. */
+  provider: z.enum(["github", "gitlab"]).optional(),
+  /** Provider-native repo id (GitLab numeric project id). */
+  providerRepoId: z.string().trim().optional(),
 });
 export type CreateRepoRequest = z.infer<typeof CreateRepoRequest>;
 

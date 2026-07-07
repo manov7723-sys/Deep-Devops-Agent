@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
-import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
+import { resolveRepoClient } from "@/lib/git";
 import type { Tool } from "./types";
 
 type Input = {
@@ -26,17 +26,17 @@ type Output = {
 };
 
 /**
- * Browse a directory in a connected GitHub repo. Pairs with read_github_file
- * for the chain "list a folder → pick the interesting file → read it". Uses
- * Phase B's resolveTokenForRepo so multi-account projects use the right
- * GitHub identity.
+ * Browse a directory in a connected GitHub or GitLab repo. Pairs with
+ * read_github_file for the chain "list a folder → pick the interesting file →
+ * read it". Goes through resolveRepoClient, so it works for either provider and
+ * multi-account projects use the right identity.
  */
 export const listFilesInRepoTool: Tool<Input, Output> = {
   name: "list_files_in_repo",
   description:
-    "List files and subfolders at a path inside a GitHub repo attached to the " +
-    "current project. Use this to explore a repo before reading specific files. " +
-    "Pass path=\"\" or path=\"/\" for the root. Only repos returned by " +
+    "List files and subfolders at a path inside a GitHub or GitLab repo attached " +
+    "to the current project. Use this to explore a repo before reading specific " +
+    "files. Pass path=\"\" or path=\"/\" for the root. Only repos returned by " +
     "list_project_repos are accessible.",
   inputSchema: {
     type: "object",
@@ -73,60 +73,24 @@ export const listFilesInRepoTool: Tool<Input, Output> = {
       };
     }
 
-    const tok = await resolveTokenForRepo(repo.id);
-    if (!tok.ok) {
-      return { ok: false, error: `Cannot access ${input.repoFullName}: ${tok.message}` };
+    const resolved = await resolveRepoClient(repo.id);
+    if (!resolved.ok) {
+      return { ok: false, error: `Cannot access ${input.repoFullName}: ${resolved.message}` };
     }
 
     const ref = input.ref ?? repo.defaultBranch;
     const cleanPath = (input.path ?? "").replace(/^\/+|\/+$/g, "");
-    const url = cleanPath
-      ? `https://api.github.com/repos/${repo.fullName}/contents/${encodeURIComponent(cleanPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(ref)}`
-      : `https://api.github.com/repos/${repo.fullName}/contents?ref=${encodeURIComponent(ref)}`;
 
-    let res: Response;
+    let items: Entry[];
     try {
-      res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${tok.accessToken}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        cache: "no-store",
-      });
+      const entries = await resolved.client.listFiles(cleanPath, ref);
+      items = entries.map((e) => ({ name: e.name, path: e.path, type: e.type }));
     } catch (err) {
       return {
         ok: false,
-        error: `Network error: ${err instanceof Error ? err.message : "unknown"}`,
+        error: `Could not list ${repo.fullName}/${cleanPath || "/"}@${ref}: ${err instanceof Error ? err.message : "unknown"}`,
       };
     }
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return {
-        ok: false,
-        error: `GitHub returned ${res.status} listing ${repo.fullName}/${cleanPath || "/"}@${ref}: ${body.slice(0, 200)}`,
-      };
-    }
-
-    const raw = (await res.json()) as unknown;
-    // Contents API returns an array for dirs, an object for files. If a file
-    // path was given, surface that as a single entry.
-    const items: Entry[] = Array.isArray(raw)
-      ? (raw as Array<{ name: string; path: string; type: string; size?: number }>).map((e) => ({
-          name: e.name,
-          path: e.path,
-          type: e.type === "dir" ? "dir" : "file",
-          size: e.size,
-        }))
-      : [
-          {
-            name: (raw as { name: string }).name,
-            path: (raw as { path: string }).path,
-            type: "file",
-            size: (raw as { size?: number }).size,
-          },
-        ];
 
     items.sort((a, b) => {
       // Dirs first, then alpha.

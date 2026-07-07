@@ -2,10 +2,11 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Btn, PageHead, TileGrid } from "@/components/ui";
 import { ProjectCard } from "@/components/domain/ProjectCard";
 import { CreateProjectWizard } from "@/components/modals/CreateProjectWizard";
+import { DeleteProjectModal } from "@/components/modals/DeleteProjectModal";
 import { useProjects } from "@/hooks/queries/projects";
 
 function genDraftId() {
@@ -53,6 +54,7 @@ export function UserProjectsClient() {
   }
 
   const sorted = useMemo(() => projects ?? [], [projects]);
+  const [toDelete, setToDelete] = useState<{ slug: string; name: string } | null>(null);
 
   return (
     <div className="col gap-5">
@@ -68,10 +70,12 @@ export function UserProjectsClient() {
 
       <TileGrid minTile={300}>
         {sorted.map((p) => (
-          <ProjectCard key={p.id} project={p} variant="tile" />
+          <ProjectCard key={p.id} project={p} variant="tile" onDelete={() => setToDelete({ slug: p.slug, name: p.name })} />
         ))}
         <ProjectCard variant="create-new" onCreate={() => setWizard(true)} />
       </TileGrid>
+
+      <DeleteProjectModal open={!!toDelete} onOpenChange={(o) => { if (!o) setToDelete(null); }} project={toDelete} />
 
       {wizardOpen && draftId && (
         <CreateProjectWizard

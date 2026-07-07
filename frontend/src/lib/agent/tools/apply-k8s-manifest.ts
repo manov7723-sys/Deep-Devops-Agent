@@ -99,6 +99,19 @@ export const applyK8sManifestTool: Tool<Input, Output> = {
       // KUBECONFIG + AWS creds so the EKS exec auth plugin can mint a token.
       const execEnv = await kubeExecEnv(kcfg.handle.path, env.cloudProviderId);
 
+      // Ensure the target namespace exists before applying. A promotion keeps an
+      // app in its own namespace, which may not be on this (target) cluster yet
+      // (e.g. a fresh "dev") — a plain `kubectl apply -n <ns>` would otherwise
+      // fail with "namespaces not found". Idempotent + best-effort; "default"
+      // always exists so we skip it, and a genuine permission error still
+      // surfaces on apply. Skipped for dry-run (must not mutate the cluster).
+      if (!input.dryRun && namespace && namespace !== "default") {
+        const has = await runStage({ command: "kubectl", args: ["get", "namespace", namespace], cwd: workspace, env: execEnv, timeoutMs: 30_000 });
+        if (has.exitCode !== 0) {
+          await runStage({ command: "kubectl", args: ["create", "namespace", namespace], cwd: workspace, env: execEnv, timeoutMs: 30_000 });
+        }
+      }
+
       const args = ["apply", "-f", file, "-n", namespace];
       if (input.dryRun) args.push("--dry-run=server");
 

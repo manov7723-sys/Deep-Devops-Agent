@@ -203,7 +203,13 @@ export async function POST(req: Request) {
             select: { id: true, deletedAt: true },
           })
         : await prisma.repo.findUnique({
-            where: { ownerId_fullName: { ownerId: sess.userId, fullName: r.fullName } },
+            where: {
+              ownerId_provider_fullName: {
+                ownerId: sess.userId,
+                provider: "github",
+                fullName: r.fullName,
+              },
+            },
             select: { id: true, deletedAt: true },
           });
       if (existing && !existing.deletedAt) repoId = existing.id;

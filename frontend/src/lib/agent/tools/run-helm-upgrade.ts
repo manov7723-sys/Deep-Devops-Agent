@@ -18,7 +18,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prisma } from "@/lib/db/prisma";
-import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
+import { resolveRepoClient } from "@/lib/git";
 import { runStage } from "@/lib/runner/exec";
 import { getKubeconfigForEnv, kubeExecEnv } from "@/lib/runner/creds";
 import type { Tool } from "./types";
@@ -115,9 +115,9 @@ export const runHelmUpgradeTool: Tool<Input, Output> = {
         error: `Repo "${input.repoFullName}" isn't attached to this project.`,
       };
     }
-    const tok = await resolveTokenForRepo(repo.id);
-    if (!tok.ok) {
-      return { ok: false, error: `Cannot access ${repo.fullName}: ${tok.message}` };
+    const resolved = await resolveRepoClient(repo.id);
+    if (!resolved.ok) {
+      return { ok: false, error: `Cannot access ${repo.fullName}: ${resolved.message}` };
     }
 
     // 3. Resolve kubeconfig.
@@ -134,7 +134,7 @@ export const runHelmUpgradeTool: Tool<Input, Output> = {
     const workspace = await mkdtemp(join(tmpdir(), "dda-helm-"));
     const repoDir = join(workspace, "repo");
     try {
-      const cloneUrl = `https://x-access-token:${tok.accessToken}@github.com/${repo.fullName}.git`;
+      const cloneUrl = resolved.client.cloneUrlWithToken();
       const clone = await runStage({
         command: "git",
         args: [

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { setupAzureAksAlarms, aksClusterFromEnv, AZURE_METRICS, type AzureMetricKey } from "@/lib/cloud/azure-monitor";
+import { getEnvThresholdPercents } from "@/lib/observability/thresholds";
 import type { Tool } from "./types";
 
 const METRIC_KEYS: AzureMetricKey[] = ["cpu", "memory", "disk"];
@@ -42,7 +43,8 @@ export const setupAzureMonitorAlarmsTool: Tool<Input, Output> = {
     if (!clusterName) return { ok: false, error: "Couldn't determine the AKS cluster name. Pass clusterName." };
 
     const metrics = input.metrics?.length ? input.metrics : METRIC_KEYS;
-    const result = await setupAzureAksAlarms({ cloudProviderId: env.cloudProviderId, clusterName, resourceGroup: input.resourceGroup, email: input.email, metrics });
+    const thresholdPercents = await getEnvThresholdPercents(env.id);
+    const result = await setupAzureAksAlarms({ cloudProviderId: env.cloudProviderId, clusterName, resourceGroup: input.resourceGroup, email: input.email, metrics, thresholdPercents });
     if (!result.ok && result.error) return { ok: false, error: result.error };
 
     return {

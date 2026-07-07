@@ -33,7 +33,6 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
   }, [thread, partial, isThinking]);
 
   const messages = thread ?? [];
-  const userMsgCount = messages.filter((m) => m.role === "user").length;
 
   function handleSend(text: string) {
     send(text).catch(() => {});
@@ -140,7 +139,7 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
       <div style={{ padding: "0 24px 20px", flex: "none" }}>
         <ChatComposer
           suggestions={suggestions}
-          showSuggestions={userMsgCount === 0}
+          showSuggestions
           onSend={handleSend}
           disabled={isThinking || isStreaming}
         />
@@ -165,6 +164,11 @@ const TOOL_LABEL: Record<string, string> = {
   list_helm_chart_fields: "Loading Helm chart options",
   generate_helm_chart: "Generating Helm chart",
   run_helm_upgrade: "Deploying via Helm",
+  schedule_deployment: "Scheduling deployment",
+  list_scheduled_deployments: "Listing scheduled deployments",
+  cancel_scheduled_deployment: "Cancelling scheduled deployment",
+  rollback_deployment: "Rolling back deployment",
+  list_rollout_history: "Loading rollout history",
 };
 
 function ToolCallChip({ call }: { call: ToolCallView }) {

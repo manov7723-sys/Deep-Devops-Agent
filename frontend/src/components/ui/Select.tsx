@@ -26,9 +26,19 @@ export function Select({
   name,
   ariaLabel,
 }: SelectProps) {
+  // Radix keys items by `value`; duplicate values (live cluster data can repeat
+  // a kind/version) would throw React's "two children with the same key". Keep
+  // the first occurrence of each value so the dropdown is always well-formed.
+  const seen = new Set<string>();
+  const uniqueOptions = options.filter((o) => (seen.has(o.value) ? false : (seen.add(o.value), true)));
+  // Stay CONTROLLED for the component's whole life: if a caller passes `value`
+  // (even undefined while data loads), coerce undefined → "" so Radix never sees
+  // undefined-then-string (which logs "uncontrolled → controlled"). Uncontrolled
+  // callers (value omitted AND defaultValue given) are left untouched.
+  const controlled = value !== undefined || defaultValue === undefined;
   return (
     <RSelect.Root
-      value={value}
+      value={controlled ? (value ?? "") : undefined}
       defaultValue={defaultValue}
       onValueChange={onValueChange}
       disabled={disabled}
@@ -54,7 +64,7 @@ export function Select({
           }}
         >
           <RSelect.Viewport>
-            {options.map((o) => (
+            {uniqueOptions.map((o) => (
               <RSelect.Item
                 key={o.value}
                 value={o.value}

@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Btn, Field, Icon, Modal, Select } from "@/components/ui";
 import { api } from "@/lib/api/client";
-import { useGitHubRepos } from "@/hooks/queries/repos";
+import { useProviderRepos, type GitProvider } from "@/hooks/queries/repos";
 import { useConnectedOAuthAccounts } from "@/hooks/queries/account";
+
+const PROVIDER_LABEL: Record<GitProvider, string> = { github: "GitHub", gitlab: "GitLab" };
 
 export interface AttachReposModalProps {
   open: boolean;
@@ -22,11 +24,12 @@ type GitHubRow = {
   defaultBranch: string;
   lang: string;
   kind: "private" | "public";
+  providerRepoId?: string;
 };
 
 /**
- * Attach one or more GitHub repos to an existing project. Each pick goes
- * through `POST /repos` (upserts Repo by ownerId+fullName) then
+ * Attach one or more GitHub or GitLab repos to an existing project. Each pick
+ * goes through `POST /repos` (upserts Repo by ownerId+fullName+provider) then
  * `POST /projects/<slug>/repos` (creates the ProjectRepo row).
  *
  * Failures are reported per-repo so the user can retry just that one
@@ -39,21 +42,29 @@ export function AttachReposModal({
   alreadyAttachedFullNames,
 }: AttachReposModalProps) {
   const qc = useQueryClient();
-  const ghAccounts = useConnectedOAuthAccounts();
-  const githubAccounts = (ghAccounts.data ?? []).filter((a) => a.provider === "github");
+  const accountsQuery = useConnectedOAuthAccounts();
+  const allAccounts = accountsQuery.data ?? [];
+  const hasGithub = allAccounts.some((a) => a.provider === "github");
+  const hasGitlab = allAccounts.some((a) => a.provider === "gitlab");
+
+  const [provider, setProvider] = useState<GitProvider>("github");
+  const providerAccounts = allAccounts.filter((a) => a.provider === provider);
   const [accountId, setAccountId] = useState<string | null>(null);
-  const effectiveAccountId = accountId ?? githubAccounts[0]?.id ?? null;
-  const ghQuery = useGitHubRepos(open && !!effectiveAccountId, effectiveAccountId);
+  const effectiveAccountId = accountId ?? providerAccounts[0]?.id ?? null;
+  const ghQuery = useProviderRepos(provider, open && !!effectiveAccountId, effectiveAccountId);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [serverError, setServerError] = useState<string | null>(null);
+  const label = PROVIDER_LABEL[provider];
 
-  // Reset picks whenever the modal opens.
+  // Reset picks whenever the modal opens; default to a connected provider.
   useEffect(() => {
     if (open) {
       setPicked({});
       setServerError(null);
       setAccountId(null);
+      setProvider(hasGithub ? "github" : hasGitlab ? "gitlab" : "github");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const visibleRepos = useMemo<GitHubRow[]>(() => {
@@ -78,13 +89,15 @@ export function AttachReposModal({
               defaultBranch: r.defaultBranch,
               visibility: r.kind,
               oauthAccountId: effectiveAccountId ?? undefined,
+              provider,
+              providerRepoId: r.providerRepoId,
             },
           );
           // duplicate is fine — re-resolve using a fresh GET.
           let repoId = create.repo?.id ?? null;
           if (!repoId) {
-            const all = await api.get<Array<{ id: string; fullName: string }>>("/repos");
-            repoId = all.find((x) => x.fullName === r.fullName)?.id ?? null;
+            const all = await api.get<Array<{ id: string; fullName: string; provider?: GitProvider }>>("/repos");
+            repoId = all.find((x) => x.fullName === r.fullName && (x.provider ?? "github") === provider)?.id ?? null;
           }
           if (!repoId) {
             results.push({ ok: false, fullName: r.fullName, code: "repo_resolve_failed" });
@@ -131,7 +144,7 @@ export function AttachReposModal({
       open={open}
       onOpenChange={onOpenChange}
       title="Attach repositories"
-      description="Pick GitHub repos to attach to this project."
+      description="Pick GitHub or GitLab repos to attach to this project."
       width={620}
       footer={
         <>
@@ -163,9 +176,27 @@ export function AttachReposModal({
         </>
       }
     >
-      {githubAccounts.length > 1 && (
+      {hasGithub && hasGitlab && (
+        <Field label="Provider" hint="Which git host to attach repos from.">
+          <div className="row gap-2 wrap">
+            {(["github", "gitlab"] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={`chip ${provider === p ? "active" : ""}`}
+                style={{ height: 34 }}
+                onClick={() => { setProvider(p); setAccountId(null); setPicked({}); }}
+              >
+                <Icon name={p} size={14} /> {PROVIDER_LABEL[p]}
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
+
+      {providerAccounts.length > 1 && (
         <Field
-          label="GitHub account"
+          label={`${label} account`}
           hint="Repos under the picked account will be saved with that identity."
         >
           <Select
@@ -174,8 +205,8 @@ export function AttachReposModal({
               setAccountId(v || null);
               setPicked({});
             }}
-            ariaLabel="GitHub account"
-            options={githubAccounts.map((a) => ({
+            ariaLabel={`${label} account`}
+            options={providerAccounts.map((a) => ({
               value: a.id,
               label: a.login ? `@${a.login}` : `id:${a.providerAccountId.slice(0, 8)}`,
             }))}
@@ -185,31 +216,31 @@ export function AttachReposModal({
 
       <Field label="Repositories" hint={`${pickedRepos.length} selected`}>
         {ghQuery.isLoading ? (
-          <span className="muted" style={{ fontSize: 13 }}>Loading your GitHub repositories…</span>
+          <span className="muted" style={{ fontSize: 13 }}>Loading your {label} repositories…</span>
         ) : ghError ? (
           <div
             className="col gap-2"
             style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 12, fontSize: 13 }}
           >
             <span style={{ fontWeight: 600 }}>
-              {ghCode === "github_not_connected"
-                ? "GitHub isn't connected yet"
+              {ghCode?.endsWith("_not_connected")
+                ? `${label} isn't connected yet`
                 : ghCode === "github_scope_insufficient"
-                  ? "Reconnect GitHub to grant repo access"
-                  : "Couldn't load your GitHub repos"}
+                  ? `Reconnect ${label} to grant repo access`
+                  : `Couldn't load your ${label} repos`}
             </span>
             <a
               className="btn outline sm"
               style={{ width: "fit-content", textDecoration: "none" }}
-              href={`/api/v1/auth/oauth/github/start?next=${encodeURIComponent(`/p/${projectSlug}/cicd?tab=repos`)}`}
+              href={`/api/v1/auth/oauth/${provider}/start?next=${encodeURIComponent(`/p/${projectSlug}/cicd?tab=repos`)}`}
             >
-              <Icon name="github" size={14} />
-              {ghCode === "github_not_connected" ? "Connect GitHub" : "Reconnect GitHub"}
+              <Icon name={provider} size={14} />
+              {ghCode?.endsWith("_not_connected") ? `Connect ${label}` : `Reconnect ${label}`}
             </a>
           </div>
         ) : visibleRepos.length === 0 ? (
           <span className="muted" style={{ fontSize: 13 }}>
-            All your GitHub repos are already attached to this project.
+            All your {label} repos are already attached to this project.
           </span>
         ) : (
           <div className="col gap-2" style={{ maxHeight: 320, overflow: "auto" }}>
@@ -224,7 +255,7 @@ export function AttachReposModal({
                   data-on={on}
                 >
                   <div className="row gap-3" style={{ minWidth: 0 }}>
-                    <Icon name="github" size={17} />
+                    <Icon name={provider} size={17} />
                     <div className="col" style={{ lineHeight: 1.3, minWidth: 0, textAlign: "left" }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>{r.fullName}</span>
                       <span className="faint" style={{ fontSize: 11.5 }}>

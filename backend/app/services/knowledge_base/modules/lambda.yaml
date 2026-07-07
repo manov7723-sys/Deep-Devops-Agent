@@ -1,0 +1,13 @@
+type: lambda
+title: Lambda function
+source: terraform-aws-modules/lambda/aws
+version: "~> 7.0"
+config:
+  function_name: '"{{name}}-{{id}}"'
+  handler: '"index.handler"'
+  runtime: '"python3.12"'
+  source_path: '"src"'
+provides:
+  function_arn: "module.{{id}}.lambda_function_arn"
+outputs:
+  function_arn: "module.{{id}}.lambda_function_arn"

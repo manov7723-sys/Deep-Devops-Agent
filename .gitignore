@@ -21,5 +21,7 @@ backend.zip
 *.log
 .DS_Store
 
-# Python venv
+# Python
 venv/
+**/__pycache__/
+*.py[cod]

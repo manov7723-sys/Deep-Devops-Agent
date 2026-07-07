@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { setupEksCloudWatchAlarms, eksClusterFromEnv, METRICS, type MetricKey } from "@/lib/cloud/cloudwatch";
 import { syncEksAlarmsToAlerts } from "@/lib/cloud/cloudwatch-alerts";
+import { getEnvThresholdPercents } from "@/lib/observability/thresholds";
 import type { Tool } from "./types";
 
 const METRIC_KEYS: MetricKey[] = ["cpu", "status", "memory", "disk"];
@@ -65,12 +66,14 @@ export const setupCloudWatchAlarmsTool: Tool<Input, Output> = {
     if (!clusterName) return { ok: false, error: "Couldn't determine the EKS cluster name from the kubeconfig. Pass clusterName." };
 
     const metrics = input.metrics?.length ? input.metrics : METRIC_KEYS;
+    const thresholdPercents = await getEnvThresholdPercents(env.id);
     const result = await setupEksCloudWatchAlarms({
       cloudProviderId: env.cloudProviderId,
       clusterName,
       region: input.region || env.region || cp.region || undefined,
       email: input.email,
       metrics,
+      thresholdPercents,
     });
     if (!result.ok && result.error) return { ok: false, error: result.error };
 

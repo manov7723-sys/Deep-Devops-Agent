@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { join, dirname, normalize, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
 import { prisma } from "@/lib/db/prisma";
-import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
+import { resolveRepoClient } from "@/lib/git";
 import { runStage } from "@/lib/runner/exec";
 import type { Tool } from "./types";
 
@@ -108,9 +108,9 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
       return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
     }
 
-    const tok = await resolveTokenForRepo(repo.id);
-    if (!tok.ok) {
-      return { ok: false, error: `Cannot access ${input.repoFullName}: ${tok.message}` };
+    const resolved = await resolveRepoClient(repo.id);
+    if (!resolved.ok) {
+      return { ok: false, error: `Cannot access ${input.repoFullName}: ${resolved.message}` };
     }
 
     const ref = input.ref ?? repo.defaultBranch;
@@ -121,8 +121,8 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
     const imageTag = `dda-verify-${repo.id.slice(0, 8)}-${ctx.projectId.slice(0, 8)}`.toLowerCase();
 
     try {
-      // 1 — shallow clone.
-      const cloneUrl = `https://x-access-token:${tok.accessToken}@github.com/${repo.fullName}.git`;
+      // 1 — shallow clone (token-embedded URL, provider-aware).
+      const cloneUrl = resolved.client.cloneUrlWithToken();
       const clone = await runStage({
         command: "git",
         args: ["clone", "--depth=1", "--branch", ref, "--single-branch", cloneUrl, repoDir],

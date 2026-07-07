@@ -14,6 +14,7 @@
  */
 import { execFile } from "node:child_process";
 import { resolveAttachedRepo } from "./repo-analyze";
+import { resolveRepoClient } from "@/lib/git";
 
 const TRIVY_IMAGE = "aquasec/trivy:latest";
 const SCAN_TIMEOUT_MS = 5 * 60 * 1000; // hard ceiling for the whole docker run
@@ -36,6 +37,8 @@ export type TrivyFinding = {
   fixedVersion: string;
   location: string; // misconfig/secret: line reference · vuln: ""
   title: string;
+  description: string; // misconfig: fuller explanation of what's wrong (Trivy Message/Description)
+  resolution: string; // misconfig: Trivy's concrete "how to fix" text
   primaryUrl: string;
 };
 
@@ -68,6 +71,7 @@ type RawMisconfig = {
   Title?: string;
   Description?: string;
   Message?: string;
+  Resolution?: string;
   Severity?: string;
   Status?: string;
   PrimaryURL?: string;
@@ -112,13 +116,13 @@ function runDocker(args: string[]): Promise<{ stdout: string; stderr: string }> 
 export async function scanRepoWithTrivy(projectId: string, repoFullName: string): Promise<TrivyScanResult> {
   const resolved = await resolveAttachedRepo(projectId, repoFullName);
   if (!resolved.ok) return resolved;
-  const { fullName, accessToken } = resolved.repo;
+  const { id, fullName } = resolved.repo;
 
-  // Embed the token so Trivy's repo scanner can clone private repos. Falls back
-  // to an anonymous URL if no token (public repos).
-  const cloneUrl = accessToken
-    ? `https://x-access-token:${accessToken}@github.com/${fullName}.git`
-    : `https://github.com/${fullName}.git`;
+  // Provider-aware, token-embedded clone URL so Trivy's repo scanner can clone
+  // private GitHub or GitLab repos.
+  const rc = await resolveRepoClient(id);
+  if (!rc.ok) return { ok: false, error: `Cannot access ${repoFullName}: ${rc.message}` };
+  const cloneUrl = rc.client.cloneUrlWithToken();
 
   let stdout: string;
   try {
@@ -183,6 +187,8 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
         fixedVersion: v.FixedVersion ?? "",
         location: "",
         title: clip(v.Title ?? ""),
+        description: "",
+        resolution: "",
         primaryUrl: v.PrimaryURL ?? "",
       });
     }
@@ -201,6 +207,10 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
         fixedVersion: "",
         location: m.CauseMetadata?.StartLine ? `line ${m.CauseMetadata.StartLine}` : "",
         title: clip(m.Title || m.Message || m.Description || ""),
+        // Keep Trivy's own explanation + fix — this is what makes the remediation
+        // doc actionable (e.g. "Disable public access" / "set X = false").
+        description: (m.Message || m.Description || "").slice(0, 400),
+        resolution: (m.Resolution || "").slice(0, 400),
         primaryUrl: m.PrimaryURL ?? "",
       });
     }
@@ -217,6 +227,8 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
         fixedVersion: "",
         location: s.StartLine ? `line ${s.StartLine}` : "",
         title: clip(s.Title ?? ""),
+        description: "",
+        resolution: "",
         primaryUrl: "",
       });
     }

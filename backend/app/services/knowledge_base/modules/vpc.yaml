@@ -1,0 +1,20 @@
+# MODULE KB: VPC — backed by the public Terraform Registry module (not hand-written HCL).
+type: vpc
+title: VPC
+source: terraform-aws-modules/vpc/aws
+version: "~> 5.0"
+config:
+  name: '"{{name}}-{{id}}"'
+  cidr: '"10.0.0.0/16"'
+  azs: '["{{region}}a", "{{region}}b"]'
+  private_subnets: '["10.0.1.0/24", "10.0.2.0/24"]'
+  public_subnets: '["10.0.101.0/24", "10.0.102.0/24"]'
+  enable_nat_gateway: "true"
+  single_nat_gateway: "true"
+# Outputs other components can wire to:
+provides:
+  vpc_id: "module.{{id}}.vpc_id"
+  private_subnets: "module.{{id}}.private_subnets"
+  public_subnets: "module.{{id}}.public_subnets"
+outputs:
+  vpc_id: "module.{{id}}.vpc_id"

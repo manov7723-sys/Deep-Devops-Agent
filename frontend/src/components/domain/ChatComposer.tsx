@@ -6,7 +6,7 @@ import type { SeedChatSuggestion } from "@/lib/legacy-types";
 
 export interface ChatComposerProps {
   suggestions?: SeedChatSuggestion[];
-  /** Show suggestion chips above the input. Hidden after the first user reply. */
+  /** Master switch for the suggestion chips (they also hide while the user is typing). */
   showSuggestions?: boolean;
   onSend: (text: string) => void;
   disabled?: boolean;
@@ -36,7 +36,7 @@ export function ChatComposer({
 
   return (
     <div className="col gap-3" style={{ maxWidth: 820, margin: "0 auto", width: "100%" }}>
-      {showSuggestions && suggestions.length > 0 && (
+      {showSuggestions && suggestions.length > 0 && !text.trim() && (
         <div className="row gap-2 wrap">
           {suggestions.map((s, i) => (
             <button

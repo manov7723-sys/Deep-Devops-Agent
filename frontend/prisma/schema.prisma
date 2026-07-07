@@ -232,6 +232,15 @@ enum SecurityScopeKind {
 enum OAuthProvider {
   github
   google
+  gitlab
+}
+
+// Git hosting provider of a Repo row. Separate from OAuthProvider on purpose:
+// google is a valid OAuth provider but never a git host, and the two lists
+// will diverge (e.g. bitbucket).
+enum GitProvider {
+  github
+  gitlab
 }
 
 // Account-level role shown on the profile card. In per-user tenancy this
@@ -441,6 +450,12 @@ model OAuthAccount {
   refreshTokenRef   String?
   tokenExpiresAt    DateTime?
   scope             String?
+  /**
+   * Base URL of the provider instance the token is bound to (e.g.
+   * "https://gitlab.example.com" for self-hosted GitLab). Null means the
+   * provider's default host (github.com / gitlab.com / google).
+   */
+  providerBaseUrl   String?
   createdAt         DateTime      @default(now())
 
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -704,6 +719,8 @@ model Project {
   description String
   health      HealthStatus @default(ok)
   cloud       String? // the cloud this project targets: "aws" | "gcp" | "azure" (locks the Connect-provider UI)
+  activeEnvKey String? // the project's ACTIVE environment — env-scoped pages default to it (user-selectable)
+  alertEmails String[]     @default([]) // extra addresses that get alert emails (managed in the UI)
   archivedAt  DateTime? // "Archive project" (reversible) — read-only, agents paused
   deletedAt   DateTime? // soft-delete; retained for undo/audit before hard purge
   createdAt   DateTime     @default(now())
@@ -722,6 +739,13 @@ model Project {
   approvals         Approval[]
   activities        Activity[]
   alerts            Alert[]
+  alertThresholds   AlertThreshold[]
+  chatOps           ChatOpsWebhook?
+  uptimeMonitors    UptimeMonitor[]
+  appSecrets        AppSecret[]
+  scheduledDeploys  ScheduledDeploy[]
+  deploymentRecords DeploymentRecord[]
+  deployWatches     DeployWatch[]
   knowledgeDocs     KnowledgeDoc[]
   issues            Issue[]
   chatThreads       ChatThread[]
@@ -817,7 +841,14 @@ model Repo {
    * column was added; backfilled lazily on next sync.
    */
   oauthAccountId  String?        @db.Uuid
-  fullName        String // e.g. "alice/api"
+  provider        GitProvider    @default(github)
+  fullName        String // e.g. "alice/api"; GitLab: path_with_namespace, may nest ("group/sub/repo")
+  /**
+   * Provider-native repo id (GitLab numeric project id as a string). Used for
+   * API calls instead of the URL-encoded path — survives renames/transfers.
+   * Null for GitHub rows (fullName is the API identity there).
+   */
+  providerRepoId  String?
   name            String
   description     String?
   lang            String // TypeScript | HCL | YAML | Python | …
@@ -849,7 +880,7 @@ model Repo {
   // identities). (ownerId, fullName) is kept as a soft fallback for legacy
   // rows where oauthAccountId is null.
   @@unique([oauthAccountId, fullName])
-  @@unique([ownerId, fullName])
+  @@unique([ownerId, provider, fullName])
   @@index([ownerId])
   @@index([oauthAccountId])
 }
@@ -928,6 +959,7 @@ model Env {
   pipelines         Pipeline[]
   approvals         Approval[]
   alerts            Alert[]
+  alertThresholds   AlertThreshold[]
   activities        Activity[]
   knowledgeDocs     KnowledgeDoc[]
   tasks             Task[]
@@ -1127,6 +1159,15 @@ model Approval {
   requestedAt        DateTime       @default(now())
   decidedAt          DateTime?
   decidedById        String?        @db.Uuid
+  // Infra gate (Plan → policy → approval → apply): when kind="terraform" the
+  // approval carries the executable payload + the estimate + policy result, so
+  // approving it actually runs the apply.
+  kind               String         @default("generic") // generic | terraform
+  payloadJson        Json? // { type:"terraform", envKey, name, stack, files:[{path,content}] }
+  costMonthly        Float? // estimated USD/month shown on the approval
+  policyJson         Json? // policy check result { ok, violations[] }
+  appliedAt          DateTime?
+  applyRunId         String?
 
   project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   env              Env            @relation(fields: [envId], references: [id])
@@ -1205,6 +1246,188 @@ model Alert {
 
   @@index([projectId, category])
   @@index([projectId, status])
+}
+
+// User-set alarm thresholds per environment + metric. Drives BOTH the live
+// in-cluster evaluation and the cloud alarms (AWS/Azure/GCP). `percent` is a
+// uniform 0–100 value; each consumer converts (e.g. GCP wants a 0–1 ratio).
+model AlertThreshold {
+  id        String        @id @default(uuid(7)) @db.Uuid
+  projectId String        @db.Uuid
+  envId     String        @db.Uuid
+  metric    String // "cpu" | "memory" | "disk"
+  percent   Int // 0–100 threshold
+  severity  AlertSeverity @default(high)
+  enabled   Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  env     Env     @relation(fields: [envId], references: [id], onDelete: Cascade)
+
+  @@unique([envId, metric])
+  @@index([projectId])
+}
+
+// ChatOps — an incoming webhook per project (Microsoft Teams or Slack) so
+// alerts/deploys/errors post to the team's channel. The URL is encrypted.
+model ChatOpsWebhook {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  projectId  String   @unique @db.Uuid
+  provider   String   @default("teams") // "teams" | "slack"
+  webhookRef String // encrypted incoming webhook URL
+  channel    String? // display-only label of the target channel
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Uptime / synthetic monitoring — periodically HTTP-check a deployed app URL and
+// alert on downtime or slow response. Alerts flow through the normal pipeline
+// (banner + email + Slack).
+model UptimeMonitor {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  projectId      String    @db.Uuid
+  name           String
+  url            String
+  method         String    @default("GET")
+  expectedStatus Int       @default(200)
+  intervalSec    Int       @default(300)
+  enabled        Boolean   @default(true)
+  // current state (updated each check)
+  lastOk         Boolean?
+  lastStatus     Int?
+  lastLatencyMs  Int?
+  lastCheckedAt  DateTime?
+  consecutiveFails Int     @default(0)
+  alertOpen      Boolean   @default(false)
+  // TLS certificate expiry monitoring (https URLs).
+  certExpiresAt  DateTime?
+  certDaysWarn   Int       @default(21) // warn when the cert expires within this many days
+  certAlertOpen  Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  checks  UptimeCheck[]
+
+  @@index([projectId])
+}
+
+model UptimeCheck {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  monitorId String   @db.Uuid
+  at        DateTime @default(now())
+  ok        Boolean
+  status    Int?
+  latencyMs Int?
+  error     String?
+
+  monitor UptimeMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([monitorId, at])
+}
+
+// Scheduled deployment — the agent lets a user "deploy later"; the background
+// scheduler runs it at `runAt`, then notifies (email + ChatOps) like a normal deploy.
+model ScheduledDeploy {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  projectId     String    @db.Uuid
+  createdById   String    @db.Uuid
+  envKey        String
+  appName       String
+  image         String
+  containerPort Int       @default(8080)
+  replicas      Int       @default(1)
+  envJson       Json? // [{ key, value }]
+  expose        Boolean   @default(false)
+  host          String?
+  namespace     String?
+  runAt         DateTime
+  status        String    @default("pending") // pending | running | done | failed | cancelled
+  // Approval gate: a scheduled deploy is approved UPFRONT (when scheduled). The
+  // scheduler only runs it once approved=true; a rejection cancels it.
+  approved      Boolean   @default(false)
+  approvalId    String?   @db.Uuid
+  result        String?
+  ranAt         DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@index([projectId])
+}
+
+// Deployment history — one row per deploy attempt (manual, scheduled, or agent).
+// Powers the Deployments page: see what ran, who ran it, and one-click
+// rollback/redeploy. Stores enough of the spec to redeploy the same image.
+model DeploymentRecord {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  projectId     String   @db.Uuid
+  createdById   String?  @db.Uuid
+  envKey        String
+  appName       String
+  image         String
+  namespace     String
+  containerPort Int      @default(8080)
+  replicas      Int      @default(1)
+  envJson       Json? // [{ key, value }] — so redeploy reuses the same env
+  expose        Boolean  @default(false)
+  host          String?
+  status        String // succeeded | failed | rolled_back
+  detail        String?
+  source        String   @default("manual") // manual | scheduled | agent
+  createdAt     DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+}
+
+// Deploy watchdog — one row per successfully-deployed app the background
+// scheduler keeps an eye on. If an app that WAS healthy stays unhealthy for
+// several consecutive checks, the watchdog auto-rolls it back to the previous
+// version. Registered/refreshed on every successful deploy.
+model DeployWatch {
+  id                   String    @id @default(uuid(7)) @db.Uuid
+  projectId            String    @db.Uuid
+  createdById          String?   @db.Uuid
+  envKey               String
+  appName              String
+  namespace            String
+  enabled              Boolean   @default(true)
+  consecutiveUnhealthy Int       @default(0)
+  lastHealthyAt        DateTime?
+  lastCheckedAt        DateTime?
+  autoRolledBackAt     DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, envKey, appName, namespace])
+  @@index([enabled])
+}
+
+// App secrets — encrypted key/value pairs a project can sync to its cluster as a
+// Kubernetes Secret, so apps get their secrets at runtime WITHOUT plaintext in
+// Git. Values are stored encrypted; they're never returned to the client.
+model AppSecret {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  projectId String   @db.Uuid
+  key       String
+  valueRef  String // encrypted value
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])
+  @@index([projectId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1419,6 +1642,8 @@ model CloudProvider {
   // Azure active context (the agent remembers the user's picks per project):
   resourceGroup    String? // active Azure resource group
   cloudEnvironment String  @default("AzurePublic") // AzurePublic | AzureUSGovernment | AzureChina
+  // GCP Cloud Billing → BigQuery export dataset id (for cost queries). Null = not set up.
+  costDatasetId    String?
   status     HealthStatus @default(ok)
   createdAt  DateTime     @default(now())
 

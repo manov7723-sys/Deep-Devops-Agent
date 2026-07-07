@@ -1,0 +1,22 @@
+# MODULE KB: EC2 instance — registry module. Wires into a VPC subnet + a security group.
+type: ec2
+title: EC2 instance
+source: terraform-aws-modules/ec2-instance/aws
+version: "~> 5.0"
+defaults:
+  instance_type: t3.micro
+config:
+  name: '"{{name}}-{{id}}"'
+  instance_type: '"{{instance_type}}"'
+  ami_ssm_parameter: '"/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"'
+provides:
+  id: "module.{{id}}.id"
+  security_group_id: "module.{{id}}.security_group_id"
+wires:
+  vpc:                       # connect: {vpc: <vpc-id>}
+    subnet_id: "{{source.private_subnets}}[0]"
+  sg:                        # connect: {sg: <sg-id>}
+    vpc_security_group_ids: "[{{source.security_group_id}}]"
+outputs:
+  id: "module.{{id}}.id"
+  public_ip: "module.{{id}}.public_ip"

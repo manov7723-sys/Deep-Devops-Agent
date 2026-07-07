@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { ApprovalDecisionRequest } from "@/lib/api/schemas/devops-api";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { decideApproval } from "@/lib/devops/approvals";
+import { applyApprovedChange } from "@/lib/devops/infra-approval";
+import { syncScheduledApproval } from "@/lib/devops/deploy-approval";
 import { audit } from "@/lib/audit/log";
 import { recordActivity } from "@/lib/agentops/activity";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
@@ -46,5 +48,18 @@ export async function POST(
     targetLabel: res.approval.title,
     icon: parsed.data.decision === "approve" ? "check" : "x",
   }).catch(() => {});
-  return NextResponse.json({ ok: true, approval: res.approval });
+
+  // Scheduled-deploy approvals: approve → the scheduler may run it at its time;
+  // reject → cancel it. (Runs for BOTH decisions; no-op for other kinds.)
+  await syncScheduledApproval(gate.access.project.id, id, parsed.data.decision);
+
+  // Apply gate: approving an executable change (terraform / immediate deploy)
+  // runs it now. Rejecting runs nothing. Scheduled/generic approvals don't run here.
+  let apply: { applied: boolean; runId?: string; error?: string } | undefined;
+  if (parsed.data.decision === "approve") {
+    const r = await applyApprovedChange(gate.access.project.id, gate.access.session.userId, id);
+    if (r.ok && r.applied) apply = { applied: true, runId: r.runId };
+    else if (!r.ok) apply = { applied: false, error: r.error };
+  }
+  return NextResponse.json({ ok: true, approval: res.approval, apply });
 }

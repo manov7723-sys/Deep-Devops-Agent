@@ -1,6 +1,6 @@
 /**
- * OAuth provider configs (GitHub + Google). Credentials are resolved at call
- * time from:
+ * OAuth provider configs (GitHub + GitLab + Google). Credentials are resolved
+ * at call time from:
  *   1. the OAuthProviderConfig DB row (admin-managed, encrypted),
  *   2. the legacy env vars `<PROVIDER>_OAUTH_CLIENT_ID` / `_SECRET`
  *      (bootstrap fallback so a fresh install still works without DB write).
@@ -13,7 +13,7 @@
 import type { OAuthProvider } from "@prisma/client";
 import { getOAuthCredentials } from "@/lib/admin/oauth-config";
 
-export type ProviderId = OAuthProvider; // "github" | "google"
+export type ProviderId = OAuthProvider; // "github" | "google" | "gitlab"
 
 export type ProviderConfig = {
   id: ProviderId;
@@ -23,6 +23,10 @@ export type ProviderConfig = {
   scope: string;
   clientId: string;
   clientSecret: string;
+  /** Instance base URL for host-bound providers (GitLab self-hosted). */
+  baseUrl?: string;
+  /** REST API root, e.g. "https://api.github.com" or "{base}/api/v4". */
+  apiBaseUrl?: string;
 };
 
 function readEnv(key: string, required = true): string {
@@ -37,7 +41,33 @@ export function isMockMode(): boolean {
   return process.env.DDA_OAUTH_MOCK === "1";
 }
 
-const PROVIDER_META: Record<ProviderId, Omit<ProviderConfig, "clientId" | "clientSecret">> = {
+type ProviderMeta = Omit<ProviderConfig, "clientId" | "clientSecret">;
+
+/**
+ * Base URL of the GitLab instance this deployment talks to. gitlab.com by
+ * default; set GITLAB_BASE_URL for self-hosted/enterprise. Read lazily (not
+ * at module load) so the gitlab meta always reflects the running env.
+ */
+export function gitlabBaseUrl(): string {
+  return (process.env.GITLAB_BASE_URL || "https://gitlab.com").replace(/\/+$/, "");
+}
+
+function gitlabMeta(): ProviderMeta {
+  const base = gitlabBaseUrl();
+  return {
+    id: "gitlab",
+    authorizeUrl: `${base}/oauth/authorize`,
+    tokenUrl: `${base}/oauth/token`,
+    userinfoUrl: `${base}/api/v4/user`,
+    // `api` is required: no narrower scope covers repo write + CI/CD variables
+    // + pipelines together. `read_user` gives the /user identity call.
+    scope: "read_user api",
+    baseUrl: base,
+    apiBaseUrl: `${base}/api/v4`,
+  };
+}
+
+const PROVIDER_META: Record<Exclude<ProviderId, "gitlab">, ProviderMeta> = {
   github: {
     id: "github",
     authorizeUrl: "https://github.com/login/oauth/authorize",
@@ -50,6 +80,7 @@ const PROVIDER_META: Record<ProviderId, Omit<ProviderConfig, "clientId" | "clien
     // a `repo`-only token writes every other path fine but GitHub rejects
     // workflow files (surfaces as a 404/422) without this extra scope.
     scope: "read:user user:email repo workflow",
+    apiBaseUrl: "https://api.github.com",
   },
   google: {
     id: "google",
@@ -63,7 +94,13 @@ const PROVIDER_META: Record<ProviderId, Omit<ProviderConfig, "clientId" | "clien
 const ENV_KEYS: Record<ProviderId, { id: string; secret: string }> = {
   github: { id: "GITHUB_OAUTH_CLIENT_ID", secret: "GITHUB_OAUTH_CLIENT_SECRET" },
   google: { id: "GOOGLE_OAUTH_CLIENT_ID", secret: "GOOGLE_OAUTH_CLIENT_SECRET" },
+  gitlab: { id: "GITLAB_OAUTH_CLIENT_ID", secret: "GITLAB_OAUTH_CLIENT_SECRET" },
 };
+
+function providerMeta(id: string): ProviderMeta | null {
+  if (id === "gitlab") return gitlabMeta();
+  return PROVIDER_META[id as Exclude<ProviderId, "gitlab">] ?? null;
+}
 
 /**
  * @deprecated Synchronous accessor reads from env only. Use `getProviderAsync()`
@@ -71,7 +108,7 @@ const ENV_KEYS: Record<ProviderId, { id: string; secret: string }> = {
  * paths that can't await.
  */
 export function getProvider(id: string): ProviderConfig | null {
-  const meta = PROVIDER_META[id as ProviderId];
+  const meta = providerMeta(id);
   if (!meta) return null;
   const env = ENV_KEYS[id as ProviderId];
   return {
@@ -87,7 +124,7 @@ export function getProvider(id: string): ProviderConfig | null {
  * disabled, or no credentials are available anywhere.
  */
 export async function getProviderAsync(id: string): Promise<ProviderConfig | null> {
-  const meta = PROVIDER_META[id as ProviderId];
+  const meta = providerMeta(id);
   if (!meta) return null;
 
   const fromDb = await getOAuthCredentials(id as ProviderId);

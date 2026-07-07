@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
-import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
+import { resolveRepoClient } from "@/lib/git";
 import type { Tool } from "./types";
 
 type Input = {
@@ -44,11 +44,12 @@ const MAX_CONTENT_BYTES = 256 * 1024;
 export const writeRepoFileTool: Tool<Input, Output> = {
   name: "write_repo_file",
   description:
-    "Commit a file to a branch in a GitHub repo attached to the current " +
-    "project, optionally opening a pull request. Use this to author Helm " +
-    "charts, env configs, terraform HCL, manifests — anything that should " +
-    "land via PR review. Direct commits to the default branch are refused; " +
-    "use a feature branch and set openPullRequest=true.",
+    "Commit a file to a branch in a GitHub or GitLab repo attached to the " +
+    "current project, optionally opening a pull request (GitHub) / merge " +
+    "request (GitLab). Use this to author Helm charts, env configs, terraform " +
+    "HCL, manifests — anything that should land via review. Direct commits to " +
+    "the default branch are refused; use a feature branch and set " +
+    "openPullRequest=true.",
   inputSchema: {
     type: "object",
     properties: {
@@ -91,137 +92,42 @@ export const writeRepoFileTool: Tool<Input, Output> = {
       };
     }
 
-    const tok = await resolveTokenForRepo(repo.id);
-    if (!tok.ok) {
-      return { ok: false, error: `Cannot access ${input.repoFullName}: ${tok.message}` };
+    const resolved = await resolveRepoClient(repo.id);
+    if (!resolved.ok) {
+      return { ok: false, error: `Cannot access ${input.repoFullName}: ${resolved.message}` };
     }
-
-    const headers = {
-      Authorization: `Bearer ${tok.accessToken}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "Content-Type": "application/json",
-    };
-
-    // Step 1 — ensure the branch exists. If not, create it pointing at the
-    // current HEAD of the default branch.
-    const branchUrl = `https://api.github.com/repos/${repo.fullName}/git/refs/heads/${encodeURIComponent(branch)}`;
-    let branchExists = false;
-    try {
-      const r = await fetch(branchUrl, { headers, cache: "no-store" });
-      branchExists = r.ok;
-    } catch {
-      /* swallow — handled by the fallback create below */
-    }
-    if (!branchExists) {
-      const defHead = await fetch(
-        `https://api.github.com/repos/${repo.fullName}/git/refs/heads/${encodeURIComponent(repo.defaultBranch)}`,
-        { headers, cache: "no-store" },
-      );
-      if (!defHead.ok) {
-        return {
-          ok: false,
-          error: `Could not read default branch HEAD: ${defHead.status} ${defHead.statusText}`,
-        };
-      }
-      const defRef = (await defHead.json()) as { object: { sha: string } };
-      const create = await fetch(
-        `https://api.github.com/repos/${repo.fullName}/git/refs`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            ref: `refs/heads/${branch}`,
-            sha: defRef.object.sha,
-          }),
-        },
-      );
-      if (!create.ok) {
-        const body = await create.text().catch(() => "");
-        return {
-          ok: false,
-          error: `Could not create branch ${branch}: ${create.status} ${body.slice(0, 200)}`,
-        };
-      }
-    }
-
-    // Step 2 — fetch existing file SHA (if present) for an idempotent update.
+    const client = resolved.client;
     const cleanPath = input.path.replace(/^\/+/, "");
-    const contentsUrl = `https://api.github.com/repos/${repo.fullName}/contents/${encodeURIComponent(cleanPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`;
-    let existingSha: string | undefined;
+
+    // Step 1 — ensure the branch exists (created off the default branch).
     try {
-      const existing = await fetch(contentsUrl, { headers, cache: "no-store" });
-      if (existing.ok) {
-        const raw = (await existing.json()) as { sha?: string };
-        existingSha = raw.sha;
-      }
-    } catch {
-      /* 404 is fine — file doesn't exist yet */
+      await client.ensureBranch(branch, repo.defaultBranch);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : `Could not create branch ${branch}.` };
     }
 
-    // Step 3 — PUT the file. Single API call commits one file with one
-    // message; for multi-file commits we'd switch to the git data API.
-    const put = await fetch(
-      `https://api.github.com/repos/${repo.fullName}/contents/${encodeURIComponent(cleanPath).replace(/%2F/g, "/")}`,
-      {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({
-          message: input.message,
-          content: Buffer.from(input.content, "utf8").toString("base64"),
-          branch,
-          ...(existingSha && { sha: existingSha }),
-        }),
-      },
-    );
-    if (!put.ok) {
-      const body = await put.text().catch(() => "");
-      return {
-        ok: false,
-        error: `Commit failed: ${put.status} ${body.slice(0, 300)}`,
-      };
+    // Step 2 — commit the file (create or update).
+    let commitSha: string;
+    try {
+      const c = await client.commitFiles({ branch, message: input.message, files: [{ path: cleanPath, content: input.content }] });
+      commitSha = c.commitSha;
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? `Commit failed: ${err.message}` : "Commit failed." };
     }
-    const commit = (await put.json()) as { commit: { sha: string } };
 
-    // Step 4 — optionally open a PR.
+    // Step 3 — optionally open a pull request (GitHub) / merge request (GitLab).
     let pr: { number: number; url: string } | undefined;
     if (input.openPullRequest) {
-      const prRes = await fetch(`https://api.github.com/repos/${repo.fullName}/pulls`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
+      try {
+        pr = await client.openChangeRequest({
+          sourceBranch: branch,
+          targetBranch: repo.defaultBranch,
           title: input.message,
-          head: branch,
-          base: repo.defaultBranch,
-          body:
-            input.pullRequestBody ??
-            `Authored by DeepAgent for project ${ctx.projectId.slice(0, 8)}.`,
-          maintainer_can_modify: true,
-        }),
-      });
-      if (prRes.ok) {
-        const j = (await prRes.json()) as { number: number; html_url: string };
-        pr = { number: j.number, url: j.html_url };
-      } else {
-        // Don't fail the whole tool — commit was successful. Surface the PR
-        // failure as part of the output so the agent can decide.
-        const body = await prRes.text().catch(() => "");
-        return {
-          ok: true,
-          output: {
-            fullName: repo.fullName,
-            path: cleanPath,
-            branch,
-            commitSha: commit.commit.sha,
-            pullRequest: undefined,
-          },
-          // Surfaced as a side note — the agent reads `summary` in some
-          // execution paths; embedding the warning in `pullRequest` would
-          // be misleading. So we leave PR off and let the message convey
-          // it through the agent's next reasoning.
-          // (Optional: return a separate warning field if we ever add one.)
-        };
-        void body;
+          body: input.pullRequestBody ?? `Authored by DeepAgent for project ${ctx.projectId.slice(0, 8)}.`,
+        });
+      } catch {
+        // The commit succeeded — don't fail the whole tool if the PR/MR can't
+        // open (e.g. one already exists). Return the commit; agent can retry.
       }
     }
 
@@ -231,7 +137,7 @@ export const writeRepoFileTool: Tool<Input, Output> = {
         fullName: repo.fullName,
         path: cleanPath,
         branch,
-        commitSha: commit.commit.sha,
+        commitSha,
         ...(pr && { pullRequest: pr }),
       },
     };

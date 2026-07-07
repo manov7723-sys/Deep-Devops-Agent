@@ -13,6 +13,7 @@ import { Badge, Block, Btn, Field, Input, PageHead, Select, Textarea } from "@/c
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api/client";
 import { useClusterStatus, useConnectCluster, type ConnectClusterResult } from "@/hooks/queries/connectivity";
+import { useActiveEnv } from "@/hooks/useActiveEnv";
 
 type EnvRow = { id: string; key: string; name: string; cloudProviderId?: string | null; hasKubeconfig?: boolean };
 type Cloud = "aws" | "azure" | "gcp";
@@ -38,6 +39,8 @@ const GCP_REGIONS = [
 type GcpContext = { projects?: { projectId: string; name: string }[] };
 type AzureCluster = { name: string; resourceGroup: string; location: string };
 type AzureClustersResp = { clusters?: AzureCluster[]; note?: string };
+type AwsCluster = { name: string; status?: string; version?: string };
+type AwsClustersResp = { connected?: boolean; clusters?: AwsCluster[]; note?: string };
 
 export function ProjectConnectionClient({ slug }: { slug: string }) {
   const qc = useQueryClient();
@@ -59,6 +62,7 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
   const availableClouds = lockedCloud ? CLOUDS.filter((c) => c.key === lockedCloud) : CLOUDS;
 
   // ── Kubernetes cluster ────────────────────────────────────────────────
+  const projectActiveEnv = useActiveEnv(slug);
   const [envKey, setEnvKey] = useState("");
   const [cloud, setCloud] = useState<Cloud>("aws");
   const [clusterName, setClusterName] = useState("");
@@ -79,9 +83,12 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
   const [kubeText, setKubeText] = useState("");
   const [pasteMsg, setPasteMsg] = useState<string | null>(null);
 
+  // Default to the project's ACTIVE env (if it exists), else the first env.
   useEffect(() => {
-    if (!envKey && envs && envs.length > 0) setEnvKey(envs[0].key);
-  }, [envs, envKey]);
+    if (envKey || !envs || envs.length === 0) return;
+    const active = projectActiveEnv && envs.find((e) => e.key === projectActiveEnv) ? projectActiveEnv : envs[0].key;
+    setEnvKey(active);
+  }, [envs, envKey, projectActiveEnv]);
 
   // Lock the selected cloud to the project's target once it's known so the form
   // can't sit on a cloud this project doesn't use.
@@ -116,6 +123,16 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
   const azClusters = azClustersResp?.clusters ?? [];
   const azResourceGroups = Array.from(new Set(azClusters.map((c) => c.resourceGroup))).filter(Boolean).sort();
   const azClustersInRg = azClusters.filter((c) => c.resourceGroup === resourceGroup);
+
+  // Live EKS cluster list for the chosen AWS region — mirrors the Azure flow so
+  // you pick a region → pick a cluster instead of typing the name.
+  const { data: awsClustersResp, isFetching: awsClustersLoading } = useQuery<AwsClustersResp>({
+    queryKey: ["p", slug, "aws-clusters", region],
+    queryFn: () => api.get<AwsClustersResp>(`/projects/${slug}/aws/clusters?region=${encodeURIComponent(region)}`),
+    enabled: cloud === "aws" && !!region.trim(),
+    staleTime: 30_000,
+  });
+  const awsClusters = awsClustersResp?.clusters ?? [];
   // The exact command the user runs in Cloud Shell to get a pasteable kubeconfig.
   const azCommand = `az aks get-credentials -g ${resourceGroup.trim() || "<resource-group>"} -n ${clusterName.trim() || "<cluster>"} --admin --file -`;
   const [copied, setCopied] = useState(false);
@@ -323,10 +340,21 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
               </>
             )}
 
-            <Field label={`${meta.clusterLabel} name`} required>
+            <Field
+              label={`${meta.clusterLabel} name`}
+              required
+              hint={cloud === "aws"
+                ? (awsClustersLoading ? "Finding EKS clusters in this region…"
+                  : awsClusters.length > 0 ? `Found ${awsClusters.length} cluster${awsClusters.length === 1 ? "" : "s"} in ${region} — pick one.`
+                  : awsClustersResp?.note || "No EKS clusters found in this region — pick another region or type a name.")
+                : undefined}
+            >
               {cloud === "azure" && azClusters.length > 0 ? (
                 <Select value={clusterName} onValueChange={setClusterName} ariaLabel="AKS cluster"
                   options={azClustersInRg.map((c) => ({ value: c.name, label: c.name }))} />
+              ) : cloud === "aws" && awsClusters.length > 0 ? (
+                <Select value={clusterName} onValueChange={setClusterName} ariaLabel="EKS cluster"
+                  options={awsClusters.map((c) => ({ value: c.name, label: `${c.name}${c.version ? ` · v${c.version}` : ""}${c.status && c.status !== "ACTIVE" ? ` · ${c.status}` : ""}` }))} />
               ) : (
                 <Input value={clusterName} onChange={(e) => setClusterName(e.target.value)}
                   placeholder={`type the ${meta.clusterLabel} name`}

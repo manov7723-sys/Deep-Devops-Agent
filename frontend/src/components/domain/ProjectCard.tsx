@@ -12,9 +12,11 @@ export interface ProjectCardProps {
   project?: Project;
   variant?: ProjectCardVariant;
   onCreate?: () => void;
+  /** When provided, a delete (trash) button shows on the tile. */
+  onDelete?: () => void;
 }
 
-export function ProjectCard({ project, variant = "tile", onCreate }: ProjectCardProps) {
+export function ProjectCard({ project, variant = "tile", onCreate, onDelete }: ProjectCardProps) {
   if (variant === "create-new") {
     return (
       <button
@@ -68,7 +70,20 @@ export function ProjectCard({ project, variant = "tile", onCreate }: ProjectCard
     <Link href={href} className="card card-pad col gap-4 dda-project-tile">
       <div className="row between">
         <ProjectAvatar name={project.name} hue={project.colorHue} size={44} />
-        <StatusDot tone={health} pulse={health === "ok"} />
+        <div className="row gap-2" style={{ alignItems: "center" }}>
+          <StatusDot tone={health} pulse={health === "ok"} />
+          {onDelete && (
+            <button
+              type="button"
+              aria-label="Delete project"
+              className="row center"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
+              style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border-soft)", background: "var(--surface-1)", color: "var(--text-faint)", cursor: "pointer" }}
+            >
+              <Icon name="trash" size={14} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="col gap-1">
         <span style={{ fontWeight: 700, fontSize: 15 }}>{project.name}</span>

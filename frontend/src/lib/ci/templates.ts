@@ -302,12 +302,35 @@ export function generateDockerArtifacts(args: {
  * using OIDC (no stored AWS secrets). The role ARN + ECR URI come from the
  * setup_github_oidc_ecr tool — injected here verbatim, never invented.
  */
+/**
+ * A Trivy scan step that FAILS the job on HIGH/CRITICAL vulnerabilities, so the
+ * push step (which runs after it) never executes for an unsafe image. Inserted
+ * between build and push when `scanGate` is on.
+ */
+function trivyGateStep(imageRefWithTag: string): string {
+  return `
+      - name: Scan image for vulnerabilities (Trivy — stop on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "${imageRefWithTag}"
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+`;
+}
+
 export function generateEcrWorkflow(args: {
   roleArn: string;
   region: string;
   ecrRepositoryUri: string;
   branch: string;
+  /** Insert a Trivy gate that stops the pipeline on HIGH/CRITICAL before push. Default true. */
+  scanGate?: boolean;
 }): GeneratedFile {
+  const gate = args.scanGate !== false;
+  const scanStep = gate ? trivyGateStep(`${args.ecrRepositoryUri}:\${{ github.sha }}`) : "";
   const content = `name: Build and push to ECR
 
 on:
@@ -335,12 +358,17 @@ jobs:
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag and push image
+      - name: Build and tag image
+        env:
+          ECR_REPOSITORY: ${args.ecrRepositoryUri}
+          IMAGE_TAG: \${{ github.sha }}
+        run: docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REPOSITORY:latest" .
+${scanStep}
+      - name: Push image
         env:
           ECR_REPOSITORY: ${args.ecrRepositoryUri}
           IMAGE_TAG: \${{ github.sha }}
         run: |
-          docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REPOSITORY:latest" .
           docker push "$ECR_REPOSITORY:$IMAGE_TAG"
           docker push "$ECR_REPOSITORY:latest"
 `;
@@ -367,8 +395,11 @@ export function generateGarWorkflow(args: {
   /** Image name within the repo. */
   image: string;
   branch: string;
+  /** Insert a Trivy gate that stops the pipeline on HIGH/CRITICAL before push. Default true. */
+  scanGate?: boolean;
 }): GeneratedFile {
   const imageBase = `${args.location}-docker.pkg.dev/${args.projectId}/${args.repository}/${args.image}`;
+  const scanStep = args.scanGate !== false ? trivyGateStep(`${imageBase}:\${{ github.sha }}`) : "";
   const content = `name: Build and push to Artifact Registry
 
 on:
@@ -399,12 +430,17 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${args.location}-docker.pkg.dev --quiet
 
-      - name: Build, tag and push image
+      - name: Build and tag image
+        env:
+          IMAGE: ${imageBase}
+          IMAGE_TAG: \${{ github.sha }}
+        run: docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
+${scanStep}
+      - name: Push image
         env:
           IMAGE: ${imageBase}
           IMAGE_TAG: \${{ github.sha }}
         run: |
-          docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
           docker push "$IMAGE:$IMAGE_TAG"
           docker push "$IMAGE:latest"
 `;
@@ -425,8 +461,11 @@ export function generateAcrWorkflow(args: {
   registry: string;
   image: string;
   branch: string;
+  /** Insert a Trivy gate that stops the pipeline on HIGH/CRITICAL before push. Default true. */
+  scanGate?: boolean;
 }): GeneratedFile {
   const imageBase = `${args.registry}.azurecr.io/${args.image}`;
+  const scanStep = args.scanGate !== false ? trivyGateStep(`${imageBase}:\${{ github.sha }}`) : "";
   const content = `name: Build and push to ACR
 
 on:
@@ -455,12 +494,17 @@ jobs:
       - name: Log in to ACR
         run: az acr login --name ${args.registry}
 
-      - name: Build, tag and push image
+      - name: Build and tag image
+        env:
+          IMAGE: ${imageBase}
+          IMAGE_TAG: \${{ github.sha }}
+        run: docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
+${scanStep}
+      - name: Push image
         env:
           IMAGE: ${imageBase}
           IMAGE_TAG: \${{ github.sha }}
         run: |
-          docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
           docker push "$IMAGE:$IMAGE_TAG"
           docker push "$IMAGE:latest"
 `;
@@ -537,6 +581,68 @@ jobs:
 ${steps}
 `;
   return { path: ".github/workflows/ci.yml", content };
+}
+
+/**
+ * GitLab CI equivalent of generateCiWorkflow + generateTrivyWorkflow, merged
+ * into the ONE `.gitlab-ci.yml` GitLab allows per repo: a stack-aware
+ * build/test job plus a Trivy security stage (fails on HIGH/CRITICAL). No
+ * registry push here — keyless cloud-registry federation for GitLab is a later
+ * phase; add CI/CD variables + a push job manually if you need it now.
+ */
+export function generateGitlabCi(args: {
+  stack: DockerStackId;
+  params?: Record<string, unknown>;
+}): GeneratedFile {
+  const stack = getStack(args.stack);
+  if (!stack) throw new Error(`Unknown stack "${args.stack}". Call list_dockerfile_stacks first.`);
+  const p = withDefaults(stack, args.params ?? {});
+
+  let image: string;
+  let script: string;
+  if (args.stack === "python") {
+    image = `python:${p.pythonVersion || "3.12"}`;
+    script = `    - python -m pip install --upgrade pip
+    - if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - if [ -f pyproject.toml ]; then pip install -e .; fi
+    - pip install pytest
+    - pytest --maxfail=1 --disable-warnings -q || echo "No tests or tests failed (non-blocking)."`;
+  } else if (args.stack === "go") {
+    image = `golang:${p.goVersion || "1.22"}`;
+    script = `    - go build ./...
+    - go test ./... || echo "No tests or tests failed (non-blocking)."`;
+  } else {
+    const buildCmd = p.buildCommand || "npm run build --if-present";
+    image = `node:${p.nodeVersion || "20"}`;
+    script = `    - npm ci || npm install
+    - ${buildCmd}
+    - npm test --if-present || echo "No tests defined (non-blocking)."`;
+  }
+
+  const content = `# Generated by DeepAgent — GitLab CI (build/test + Trivy security scan).
+stages:
+  - build
+  - security
+
+build:
+  stage: build
+  image: ${image}
+  script:
+${script}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+trivy:
+  stage: security
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress .
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+`;
+  return { path: ".gitlab-ci.yml", content };
 }
 
 /**

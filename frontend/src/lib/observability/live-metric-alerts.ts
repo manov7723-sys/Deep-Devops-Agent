@@ -14,27 +14,33 @@
  */
 import { queryClusterPrometheus } from "./cluster-monitoring";
 import { createAlert, patchAlertStatus } from "@/lib/agentops/alerts";
+import { getEnvThresholds, type MetricKey } from "./thresholds";
 import { prisma } from "@/lib/db/prisma";
 import type { AlertCategory, AlertSeverity } from "@prisma/client";
 
 type Rule = {
   key: string;
+  /** Which configurable metric this rule maps to (cpu/memory/disk). */
+  metric: MetricKey;
   /** PromQL returning one sample per entity (per-node etc.). */
   query: string;
+  /** Fallback threshold if no user/default value applies. */
   threshold: number;
   /** Metric label identifying the entity (e.g. "node"); omit for a cluster scalar. */
   labelKey?: string;
   resource: string;
   category: AlertCategory;
+  /** Fallback severity; overridden by the configured threshold's severity. */
   severity: AlertSeverity;
   title: (entity: string, v: number) => string;
-  detail: (entity: string, v: number) => string;
+  detail: (entity: string, v: number, threshold: number) => string;
   recommendation: string;
 };
 
 const RULES: Rule[] = [
   {
     key: "node-cpu",
+    metric: "cpu",
     // Per-node CPU% = used cores / capacity × 100 (cadvisor + kube-state-metrics).
     query:
       '100 * sum by (node) (rate(container_cpu_usage_seconds_total{container!=""}[1m])) / on(node) group_left sum by (node) (kube_node_status_capacity{resource="cpu"})',
@@ -44,11 +50,12 @@ const RULES: Rule[] = [
     category: "Performance",
     severity: "high",
     title: (n, v) => `High CPU on node ${n} — ${v.toFixed(0)}%`,
-    detail: (n, v) => `Node ${n} CPU is ${v.toFixed(1)}% (threshold 80%), live from in-cluster Prometheus.`,
+    detail: (n, v, t) => `Node ${n} CPU is ${v.toFixed(1)}% (threshold ${t}%), live from in-cluster Prometheus.`,
     recommendation: "Scale the node pool or the workload — sustained CPU saturation throttles your apps.",
   },
   {
     key: "node-mem",
+    metric: "memory",
     query:
       '100 * sum by (node) (container_memory_working_set_bytes{container!=""}) / on(node) group_left sum by (node) (kube_node_status_capacity{resource="memory"})',
     threshold: 85,
@@ -57,7 +64,7 @@ const RULES: Rule[] = [
     category: "Performance",
     severity: "high",
     title: (n, v) => `High memory on node ${n} — ${v.toFixed(0)}%`,
-    detail: (n, v) => `Node ${n} memory is ${v.toFixed(1)}% (threshold 85%), live from in-cluster Prometheus.`,
+    detail: (n, v, t) => `Node ${n} memory is ${v.toFixed(1)}% (threshold ${t}%), live from in-cluster Prometheus.`,
     recommendation: "Scale the node pool or reduce memory requests — nodes near capacity risk OOM evictions.",
   },
 ];
@@ -73,7 +80,15 @@ export async function evaluateLiveMetricAlerts(projectId: string, envId: string)
     select: { id: true, sourceLabel: true },
   });
 
+  // User-configurable thresholds for this env (defaults where unset).
+  const thresholds = await getEnvThresholds(envId);
+
   for (const rule of RULES) {
+    const conf = thresholds[rule.metric];
+    // Disabled metric → skip evaluating (and resolve any lingering alerts below).
+    const threshold = conf.enabled ? conf.percent : rule.threshold;
+    const severity = conf.enabled ? conf.severity : rule.severity;
+
     let res;
     try {
       res = await queryClusterPrometheus(envId, rule.query);
@@ -83,11 +98,13 @@ export async function evaluateLiveMetricAlerts(projectId: string, envId: string)
     if (!res.ok) return; // monitoring not installed / unreachable — skip
 
     const breaching = new Map<string, number>();
-    for (const s of res.result) {
-      const v = Number(s.value?.[1]);
-      if (!Number.isFinite(v)) continue;
-      const entity = rule.labelKey ? s.metric[rule.labelKey] ?? "cluster" : "cluster";
-      if (v > rule.threshold) breaching.set(entity, v);
+    if (conf.enabled) {
+      for (const s of res.result) {
+        const v = Number(s.value?.[1]);
+        if (!Number.isFinite(v)) continue;
+        const entity = rule.labelKey ? s.metric[rule.labelKey] ?? "cluster" : "cluster";
+        if (v > threshold) breaching.set(entity, v);
+      }
     }
 
     const prefix = `live:${rule.key}:`;
@@ -99,11 +116,11 @@ export async function evaluateLiveMetricAlerts(projectId: string, envId: string)
         projectId,
         envId,
         title: rule.title(entity, v),
-        detail: rule.detail(entity, v),
+        detail: rule.detail(entity, v, threshold),
         resource: rule.resource,
         sourceLabel,
         category: rule.category,
-        severity: rule.severity,
+        severity,
         recommendation: rule.recommendation,
       });
     }

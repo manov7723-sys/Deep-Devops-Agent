@@ -173,6 +173,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
         refreshTokenRef,
         tokenExpiresAt: ex.profile.expiresAt ?? null,
         scope: ex.profile.scope ?? null,
+        providerBaseUrl: provider.baseUrl ?? null,
       },
       update: {
         login: ex.profile.login || null,
@@ -181,17 +182,19 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
         refreshTokenRef,
         tokenExpiresAt: ex.profile.expiresAt ?? null,
         scope: ex.profile.scope ?? null,
+        providerBaseUrl: provider.baseUrl ?? null,
       },
     });
-    // Re-bind repos that lost their GitHub identity. Disconnecting an account
+    // Re-bind repos that lost their git identity. Disconnecting an account
     // nulls Repo.oauthAccountId (onDelete: SetNull), so reconnecting must
     // re-attach the owner's orphaned repos to this account — otherwise
-    // connectedAs stays null and the agent can't authorize writes/PRs.
-    // Best-effort: a bind failure must never break the connect itself.
-    if (providerId === "github") {
+    // connectedAs stays null and the agent can't authorize writes/PRs/MRs.
+    // Scoped by provider so a GitLab reconnect only claims GitLab repos (and
+    // vice-versa). Best-effort: a bind failure must never break the connect.
+    if (providerId === "github" || providerId === "gitlab") {
       try {
         await prisma.repo.updateMany({
-          where: { ownerId: activeSess.userId, oauthAccountId: null, deletedAt: null },
+          where: { ownerId: activeSess.userId, oauthAccountId: null, deletedAt: null, provider: providerId },
           data: { oauthAccountId: linkedAccount.id },
         });
       } catch {
@@ -214,7 +217,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     return smartReturn(nextPath ?? "/u/dashboard");
   }
 
-  const resolved = await resolveIdentity(providerId as OAuthProvider, ex.profile);
+  const resolved = await resolveIdentity(providerId as OAuthProvider, ex.profile, provider.baseUrl ?? null);
   if (!resolved.ok) {
     await audit({
       action: "auth.oauth.failed",

@@ -20,7 +20,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam, ContentBlockParam } from "@anthropic-ai/sdk/resources/messages";
 import OpenAI from "openai";
 import { prisma } from "@/lib/db/prisma";
-import { ALL_TOOLS, executeTool, toAnthropicTools, toolsForClouds, type Tool } from "./tools";
+import { ALL_TOOLS, executeTool, toAnthropicTools, toolsForClouds, toolsForProject, type Tool } from "./tools";
 
 export type ResolvedModel = {
   name: string;
@@ -49,8 +49,10 @@ const INFRA_PLAYBOOK = [
   "## Infrastructure (AWS/cloud) requests",
   "To create/change ANY cloud infra (S3, RDS, VPC, EKS, IAM, Lambda, security groups…), run a guided wizard:",
   `- Ask requirements ONE at a time. ${OPTIONS_RULE} Gather: resource specifics, name (globally-unique where needed), region, environment, repo (for push), prod settings (encryption, HA, tags).`,
-  '- Then show a short SUMMARY and ask the mode: ```options``` {"question":"How should I create it?","options":["Generate & push to GitHub","Generate, push & apply","Apply directly","Cancel"],"key":"mode"}.',
-  "- EKS → ALWAYS provision_eks (mode push|apply|push_and_apply); NEVER hand-write EKS Terraform. Other resources → write production-grade Terraform (encryption, least-privilege, remote state); Push = write_repo_file openPullRequest=true; Apply = run_terraform action=apply (plan first). Use a stable descriptive `stack` name and REUSE it across runs. Apply only when the user picked an apply mode.",
+  "- COST FIRST: before showing the create/apply options, call estimate_infra_cost with the chosen specs (cloud, instanceType, nodeCount, managedK8s for EKS/AKS/GKE, storageGb, loadBalancers) and show the user the estimated MONTHLY cost + line-item breakdown. Say it's an approximate on-demand estimate. Only proceed once they've seen it.",
+  '- Then show a short SUMMARY and ask the mode: ```options``` {"question":"How should I create it?","options":["Generate & push to GitHub","Submit for approval & apply","Cancel"],"key":"mode"}.',
+  "- APPROVAL GATE (MANDATORY — never apply directly): to APPLY any infra, do NOT call run_terraform action='apply'. First run_terraform action='plan' to preview, then call request_infra_approval with the SAME files/stack + the cloud/region/instanceType/nodeCount so it runs policy checks + cost and creates a PENDING approval. If it returns status='blocked', STOP — tell the user exactly which policy rule failed (public storage, oversized/GPU instance, non-allowed region, admin port open to the world) and how to fix it; do NOT retry until they change the spec. If status='pending_approval', tell the user the change is waiting for approval on the Approvals page and that it will be applied automatically once a human approves — do NOT try to apply it yourself.",
+  "- EKS → ALWAYS provision_eks for generating the Terraform; NEVER hand-write EKS Terraform. Other resources → write production-grade Terraform (encryption, least-privilege, remote state). Push = write_repo_file openPullRequest=true. The apply ALWAYS goes through request_infra_approval (the gate), never run_terraform apply directly. Use a stable descriptive `stack` name and REUSE it across runs.",
 ].join("\n");
 
 /**
@@ -116,6 +118,60 @@ const CI_REGISTRY_PLAYBOOK = [
   "  - Then setup_azure_github_oidc(repoFullName, acrName, resourceGroup) → keyless federated credential; returns clientId/tenantId/subscriptionId. NOTE: needs a service-principal Azure connection; if it errors about that, relay the message.",
   "  - Then generate_acr_workflow(clientId, tenantId, subscriptionId, registry, image, branch) → the workflow YAML. NEVER hand-write it.",
   "2. Show the generated workflow, explain the keyless flow (GitHub OIDC → cloud, no stored secret), and ASK before committing. On 'yes' commit with write_repo_file (PR) or save_pipeline_to_project per the user's preference.",
+].join("\n");
+
+/**
+ * Quick-deploy playbook: the DIRECT "deploy my app" path when an image already
+ * exists. The agent asks only what the manifest needs, then deploys and watches.
+ */
+const DEPLOY_APP_PLAYBOOK = [
+  "## Deploy an app (quick) — triggers: 'deploy my app', 'deploy the application', 'get my app running', 'deploy <image>'",
+  "This is the DIRECT deploy path for when an image already exists. (If the user has NOT built/pushed an image yet, offer the full build pipeline instead — see the full deploy pipeline playbook.) Start immediately, asking only what's needed:",
+  "0. TIMING FIRST — before anything else, ASK '''Deploy now, or schedule it for later?''' via an ```options``` block (options: 'Deploy now', 'Schedule for later'). If they pick 'Schedule for later', ALSO ask when (```options``` with e.g. 'In 1 hour', 'Tonight 9 PM', 'Tomorrow 9 AM', 'Custom'). Remember the choice; still collect all the same deploy settings below either way.",
+  "1. list_deploy_targets → if more than one env, ASK which environment/cluster (```options```); if exactly one, use it and say so; if none, tell them to connect a cluster on the Clusters tab first.",
+  "2. Image: if the user named one, use it. Otherwise list_registry_images and ASK which to deploy (```options```, default the newest). If the registry is empty, say so and offer to set up the full build+push pipeline.",
+  "3. Ask the settings the manifest needs, one at a time via ```options``` (WAIT for each), offering sensible defaults so the user can accept quickly: app name (default the repo/image name), namespace (default the env's), container port (default 8080 or the detected port), replicas (default 1), expose publicly? (+ host if yes). Keep it short.",
+  "4. Optionally ask which EXTRA files beyond Deployment+Service they want (Ingress if exposing, ConfigMap/Secret/HPA) — default to just Deployment+Service if they don't care.",
+  "5. RUN IT — respect the timing choice from step 0: if 'Deploy now', call deploy_app(envKey, appName, image, containerPort, replicas, env, expose, host). IMPORTANT — deploy_app does NOT deploy immediately: EVERY deploy goes through an APPROVAL GATE. deploy_app returns pendingApproval=true with an approvalId; tell the user the deploy is WAITING FOR APPROVAL and must be approved on the Approvals page before it runs — do NOT claim the app is live yet. If 'Schedule for later', call schedule_deployment with the SAME fields plus the time (runAtISO or delayMinutes); confirm the run time and tell them the scheduler will run it.",
+  "6. After deploy_app, DON'T poll deployment_status yet — nothing is deployed until a human approves. Just report that it's pending approval (with what they're approving: image, env, replicas). Once they say it's approved, THEN poll deployment_status until healthy. If you scheduled it instead, remind them they can 'list scheduled deployments' or 'cancel the scheduled deploy' anytime.",
+].join("\n");
+
+/**
+ * End-to-end pipeline playbook: one request → Dockerfile → Trivy-gated CI →
+ * push → wait → image → CD files → deploy. Ties the individual tools into the
+ * exact sequence so a single message runs the whole thing.
+ */
+const DEPLOY_PIPELINE_PLAYBOOK = [
+  "## Full deploy pipeline (one request → app running on the cluster)",
+  "When the user asks to build+scan+push+deploy end-to-end (e.g. 'set up everything and deploy my app'), run this sequence, narrating each step:",
+  "0. TIMING FIRST — before building anything, ASK '''When the pipeline is ready, should the FINAL deploy run now, or be scheduled for later?''' via an ```options``` block (options: 'Deploy now', 'Schedule for later'). If 'Schedule for later', also ask when ('In 1 hour', 'Tonight 9 PM', 'Tomorrow 9 AM', 'Custom'). Remember it — the CI build/scan/push steps run immediately regardless; only the deploy step in 8 is affected.",
+  "1. Dockerfile: detect the stack and generate_dockerfile (+ verify_docker_build). Commit it with write_repo_file if the repo has none.",
+  "2. (Optional) trivy_scan the repo to surface issues early and tell the user.",
+  "3. CI workflow WITH the Trivy gate (ON by default): set up keyless registry auth and generate the build+push workflow — AWS: setup_github_oidc_ecr → generate_ecr_workflow; GCP/Azure: per the registry playbook (generate_gar_workflow / generate_acr_workflow). The generated workflow BUILDS the image, scans it with Trivy, STOPS immediately on any HIGH/CRITICAL vulnerability (the push never runs), then pushes. Commit it with write_repo_file so the push triggers the run.",
+  "4. wait_for_workflow_run(workflowFile: the build-and-push file, e.g. 'build-and-push.yml') until it completes. If done=false, call it again to keep waiting. If conclusion='failure', the Trivy gate most likely stopped it on HIGH/CRITICAL — DO NOT deploy; tell the user and offer to fix the vulnerabilities first. Only continue on conclusion='success'.",
+  "5. Get the image: list_registry_images — the newest entry is the image CI just pushed. NEVER invent an image reference; always take it from here.",
+  "6. INTERACTIVE MANIFEST BUILD — do NOT auto-generate. After CI succeeds, before writing anything, ASK the user which Kubernetes files they want and collect every field, in this order:",
+  "   6a. list_k8s_manifest_kinds, then present the resource kinds and ASK (```options``` block, allow multiple) which files to create — e.g. Namespace, Deployment, Service, Ingress, ConfigMap, Secret, HorizontalPodAutoscaler, PersistentVolumeClaim. Recommend the common set (Namespace + Deployment + Service, add Ingress if they want public access) but let the USER decide. WAIT for their selection.",
+  "   6b. FIRST ask the namespace name (```options``` — default the env's namespace or offer 'Custom'). Use it for every file.",
+  "   6c. Then for EACH selected file, ask its required fields one at a time via ```options``` (from that kind's `fields`): Deployment → name, image (PREFILL the image from step 5 as the default), replicas, containerPort, env vars, probe path, resources; Service → type, port, targetPort, selector; Ingress → host, path, TLS; ConfigMap/Secret → keys/values; HPA → target, min/max, CPU%. WAIT for each answer. Only after ALL selected files' questions are answered do you start creating manifests.",
+  "   6d. generate_k8s_manifest per selected kind with the collected values (NEVER hand-write YAML). Show each.",
+  "   6e. ASK the user the REPO PATH/folder to save the manifests in (```options``` — default 'k8s', offer e.g. 'manifests', 'deploy/<env>', or Custom). Then commit each manifest with write_repo_file under <that path>/<name>.yaml (openPullRequest on the first file = one PR). Remember this path.",
+  "7. Write the CD workflow: write_cd_files(..., manifestPath=<the path the user chose in 6e>, writeWorkflowOnly=true) → commits ONLY .github/workflows/deploy.yml, which applies the manifests from THAT path (don't let it re-generate the manifest). Pass the SAME manifestPath so the workflow's `kubectl apply -f <path>/` matches where you saved the files. Then set_kubeconfig_secret(repoFullName, envKey) to publish the cluster kubeconfig as the KUBECONFIG_B64 repo secret automatically, so the deploy workflow can reach the cluster with no manual step.",
+  "8. Deploy + verify — honor the timing choice from step 0: use list_deploy_targets for the envKey/namespace. If 'Deploy now', call deploy_app — but note EVERY deploy goes through the APPROVAL GATE: deploy_app returns pendingApproval=true, so tell the user the deploy is WAITING FOR APPROVAL on the Approvals page and will run once approved (don't claim it's live). Only after they confirm it's approved, poll deployment_status until healthy. If 'Schedule for later', call schedule_deployment(...) with the image from step 5 and confirm the run time.",
+].join("\n");
+
+/**
+ * Rollback playbook — both the manual path (user asks) and the promise that
+ * deploys auto-revert. Included whenever a cloud is connected.
+ */
+const ROLLBACK_PLAYBOOK = [
+  "## Rollback a deployment — triggers: 'rollback <app>', 'revert the deploy', 'undo the last deploy', 'go back to the previous version'",
+  "AUTOMATIC: every deploy already self-heals — deploy_app / schedule_deployment watch the rollout and, if the new version doesn't become healthy in time, AUTOMATICALLY roll back to the previous version and email + notify the team. So if a deploy tool reports it 'was automatically rolled back', tell the user that plainly and suggest checking pod logs (image pull, wrong port, missing env var) — do NOT roll back again.",
+  "MANUAL (user asks to revert a version that deployed fine but misbehaves):",
+  "1. Identify the app + env. If unclear, list_deploy_targets for the env and ask which app.",
+  "2. Optionally list_rollout_history(envKey, appName) to show the revisions and let the user pick one (```options```). Default is the immediately previous version.",
+  "3. CONFIRM before rolling back a PRODUCTION env. Then rollback_deployment(envKey, appName, [toRevision]). It reverts via `kubectl rollout undo` and waits for the rollout to settle, then notifies the team.",
+  "4. Report the result. If it failed because there's no previous revision (a first-ever deploy), explain there's nothing to roll back to and offer to fix-forward instead.",
 ].join("\n");
 
 /**
@@ -262,6 +318,22 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
   const azureCtx = clouds.has("azure") ? await loadAzureContext(projectId) : "";
   const gcpCtx = clouds.has("gcp") ? await loadGcpContext(projectId) : "";
 
+  // ISOLATION: which git host(s) this project's repos live on. GitLab repos use
+  // merge requests + .gitlab-ci.yml, and keyless cloud-registry OIDC isn't wired
+  // for GitLab yet — so a GitLab-only project must not be offered GitHub OIDC.
+  const gitProviders = await getProjectGitProviders(projectId);
+  const hasGitlab = gitProviders.has("gitlab");
+  const hasGithub = gitProviders.has("github");
+  const gitlabOnly = hasGitlab && !hasGithub;
+  const gitLine =
+    gitProviders.size === 0
+      ? ""
+      : `## Source control for this project: ${[...gitProviders].map((p) => (p === "gitlab" ? "GitLab" : "GitHub")).join(", ")}.` +
+        (hasGitlab
+          ? " For GitLab repos, write_repo_file opens a MERGE REQUEST (not a pull request), and generate_ci_workflow produces a single .gitlab-ci.yml (build/test + Trivy). Keyless cloud-registry (ECR/GAR/ACR) OIDC federation is NOT available for GitLab yet — if the user needs registry push from GitLab CI, tell them to add registry credentials as CI/CD variables (or use a GitHub repo for that flow); don't offer the GitHub OIDC tools for GitLab repos."
+          : "") +
+        (hasGithub && !hasGitlab ? " Use pull requests and GitHub Actions workflows." : "");
+
   return [
     "You are Deep Agent, an AI assistant inside a DevOps platform called DeepAgent.",
     "You help engineers reason about their infrastructure, repositories, deployments and cloud resources.",
@@ -270,13 +342,17 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
       : "",
     "Be concise. When you don't know something specific about the user's infra, say so plainly rather than guess.",
     cloudLine,
+    gitLine,
     azureCtx,
     gcpCtx,
     INFRA_PLAYBOOK,
     MANIFEST_PLAYBOOK,
     HELM_PLAYBOOK,
     CI_PLAYBOOK,
-    clouds.has("gcp") || clouds.has("azure") ? CI_REGISTRY_PLAYBOOK : "",
+    (clouds.has("gcp") || clouds.has("azure")) && !gitlabOnly ? CI_REGISTRY_PLAYBOOK : "",
+    clouds.size > 0 ? DEPLOY_APP_PLAYBOOK : "",
+    clouds.size > 0 ? DEPLOY_PIPELINE_PLAYBOOK : "",
+    clouds.size > 0 ? ROLLBACK_PLAYBOOK : "",
     clouds.has("azure") ? AZURE_PLAYBOOK : "",
     clouds.has("gcp") ? GCP_PLAYBOOK : "",
     clusters,
@@ -448,6 +524,19 @@ async function getProjectClouds(projectId: string): Promise<Set<string>> {
       distinct: ["kind"],
     });
     return new Set(rows.map((r) => r.kind));
+  } catch {
+    return new Set();
+  }
+}
+
+/** The git providers (github/gitlab) this project has attached repos for — drives tool + prompt isolation. */
+async function getProjectGitProviders(projectId: string): Promise<Set<string>> {
+  try {
+    const rows = await prisma.projectRepo.findMany({
+      where: { projectId, repo: { deletedAt: null } },
+      select: { repo: { select: { provider: true } } },
+    });
+    return new Set(rows.map((r) => r.repo.provider));
   } catch {
     return new Set();
   }
@@ -677,12 +766,14 @@ export async function* runAgentTurnStream(args: {
     text: m.text,
   }));
 
-  // ISOLATION: only expose the cloud tools for the clouds THIS project has
-  // connected (agnostic tools are always included). An Azure-only project never
-  // sees AWS tools, so the agent can't fumble onto the wrong cloud — and the
-  // smaller tool set also makes the model respond faster.
+  // ISOLATION: only expose tools for the clouds AND git providers THIS project
+  // uses (agnostic tools are always included). An Azure-only project never sees
+  // AWS tools; a GitLab-only project never sees GitHub-Actions OIDC tools — so
+  // the agent can't fumble onto the wrong provider, and the smaller tool set
+  // makes the model respond faster.
   const clouds = await getProjectClouds(args.projectId);
-  const projectTools = toolsForClouds(clouds);
+  const gitProviders = await getProjectGitProviders(args.projectId);
+  const projectTools = toolsForProject({ clouds, gitProviders });
 
   // Dispatch to the provider's tool-use loop. Each implementation yields the
   // same AgentStreamEvent shape, and the accumulator below survives across

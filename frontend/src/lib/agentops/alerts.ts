@@ -5,8 +5,36 @@
 import type { Alert, AlertCategory, AlertSeverity, AlertStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/transport";
+import { postAlertToChatOps } from "@/lib/integrations/chatops";
 
 const APP_URL = (process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+
+/** Resolve a project's notification recipients: members + UI-managed addresses + env. */
+async function projectNotifyRecipients(projectId: string): Promise<{ name: string; slug: string; emails: string[] } | null> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { name: true, slug: true, alertEmails: true, memberships: { select: { user: { select: { email: true } } } } },
+  });
+  if (!project) return null;
+  const extra = (process.env.ALERT_NOTIFY_EMAIL || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const emails = [...new Set([...project.memberships.map((m) => m.user.email), ...project.alertEmails, ...extra].filter(Boolean))];
+  return { name: project.name, slug: project.slug, emails };
+}
+
+/**
+ * Send a plain notification email to a project's recipients (members + the
+ * configured Notification emails). Best-effort; never throws. Used for deploy
+ * results and other ops notifications.
+ */
+export async function emailProjectMembers(projectId: string, subject: string, body: string): Promise<void> {
+  try {
+    const p = await projectNotifyRecipients(projectId);
+    if (!p || p.emails.length === 0) return;
+    await Promise.allSettled(p.emails.map((to) => sendEmail({ to, subject, text: body })));
+  } catch {
+    /* best-effort */
+  }
+}
 
 /**
  * Email the project's members when a new alert fires. Best-effort: never throws,
@@ -15,31 +43,18 @@ const APP_URL = (process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || 
  */
 async function emailAlertToMembers(projectId: string, a: Alert): Promise<void> {
   try {
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { name: true, slug: true, memberships: { select: { user: { select: { email: true } } } } },
-    });
-    if (!project) return;
-    // Project members + any always-notify addresses from ALERT_NOTIFY_EMAIL
-    // (comma-separated) so alerts can reach an inbox that isn't a member.
-    const extra = (process.env.ALERT_NOTIFY_EMAIL || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const emails = [...new Set([...project.memberships.map((m) => m.user.email), ...extra].filter(Boolean))];
-    if (emails.length === 0) return;
-
-    const subject = `🚨 [${project.name}] ${a.severity.toUpperCase()} alert: ${a.title}`;
+    const p = await projectNotifyRecipients(projectId);
+    if (!p || p.emails.length === 0) return;
+    const subject = `🚨 [${p.name}] ${a.severity.toUpperCase()} alert: ${a.title}`;
     const text =
-      `A new ${a.severity} alert fired in your project "${project.name}".\n\n` +
+      `A new ${a.severity} alert fired in your project "${p.name}".\n\n` +
       `${a.title}\n${a.detail}\n\n` +
       `Resource:  ${a.resource}\n` +
       `Category:  ${a.category}\n` +
       `Severity:  ${a.severity}\n\n` +
       `What to do:\n${a.recommendation}\n\n` +
-      `View it: ${APP_URL}/p/${project.slug}/alerts\n`;
-
-    await Promise.allSettled(emails.map((to) => sendEmail({ to, subject, text })));
+      `View it: ${APP_URL}/p/${p.slug}/alerts\n`;
+    await Promise.allSettled(p.emails.map((to) => sendEmail({ to, subject, text })));
   } catch {
     /* email is best-effort — alert creation must not depend on it */
   }
@@ -132,6 +147,15 @@ export async function createAlert(args: CreateAlertArgs): Promise<AlertRow> {
     include: { env: { select: { key: true } }, sourceAgent: { select: { name: true } } },
   });
   await emailAlertToMembers(args.projectId, created);
+  // ChatOps: also post the alert to the project's Teams/Slack channel (best-effort).
+  await postAlertToChatOps(args.projectId, {
+    title: created.title,
+    detail: created.detail,
+    severity: created.severity,
+    category: created.category,
+    resource: created.resource,
+    env: created.env?.key,
+  }).catch(() => {});
   // Autonomous trigger (gated by SRE_AUTO_TRIAGE). Dynamic import breaks the
   // alerts → sre-agent → tools → list-alerts → alerts import cycle. Fire-and-
   // forget; never blocks alert creation.

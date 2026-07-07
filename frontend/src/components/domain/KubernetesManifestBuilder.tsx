@@ -53,11 +53,15 @@ export function KubernetesManifestBuilder({ slug }: { slug: string }) {
   const apiVersions = versionsQ.data?.apiVersions ?? [];
   const resources = resourcesQ.data?.resources ?? [];
 
-  // Kinds available for the chosen apiVersion.
-  const kindsForVersion = useMemo(
-    () => resources.filter((r) => !apiVersion || r.apiVersion === apiVersion),
-    [resources, apiVersion],
-  );
+  // Kinds available for the chosen apiVersion. Dedupe by kind — live cluster
+  // discovery can return the same kind more than once (e.g. a resource and its
+  // subresource, or "Event" listed twice), which would make duplicate <option>s.
+  const kindsForVersion = useMemo(() => {
+    const seen = new Set<string>();
+    return resources
+      .filter((r) => !apiVersion || r.apiVersion === apiVersion)
+      .filter((r) => (seen.has(r.kind) ? false : (seen.add(r.kind), true)));
+  }, [resources, apiVersion]);
 
   const namespaced = useMemo(() => {
     const r = resources.find((x) => x.kind === kind && (!apiVersion || x.apiVersion === apiVersion));

@@ -40,6 +40,8 @@ export type ResolveResult = { ok: true; identity: ResolvedIdentity } | ResolveEr
 export async function resolveIdentity(
   provider: OAuthProvider,
   profile: ProviderProfile,
+  /** Instance URL the token is bound to (GitLab self-hosted); null = default host. */
+  providerBaseUrl?: string | null,
 ): Promise<ResolveResult> {
   if (!profile.emailVerified) {
     return { ok: false, code: "email_unverified" };
@@ -70,6 +72,7 @@ export async function resolveIdentity(
         refreshTokenRef: refreshRef,
         tokenExpiresAt: profile.expiresAt ?? null,
         scope: profile.scope ?? null,
+        providerBaseUrl: providerBaseUrl ?? null,
       },
     });
     return { ok: true, identity: { outcome: "sign_in", user: existingOAuth.user } };
@@ -92,6 +95,7 @@ export async function resolveIdentity(
         refreshTokenRef: refreshRef,
         tokenExpiresAt: profile.expiresAt ?? null,
         scope: profile.scope ?? null,
+        providerBaseUrl: providerBaseUrl ?? null,
       },
     });
     return { ok: true, identity: { outcome: "linked", user: existingUser } };
@@ -118,6 +122,7 @@ export async function resolveIdentity(
           refreshTokenRef: refreshRef,
           tokenExpiresAt: profile.expiresAt ?? null,
           scope: profile.scope ?? null,
+          providerBaseUrl: providerBaseUrl ?? null,
         },
       },
     },

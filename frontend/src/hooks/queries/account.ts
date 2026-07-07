@@ -110,7 +110,7 @@ export function useRegenerateBackupCodes() {
 
 export type ConnectedOAuthAccount = {
   id: string;
-  provider: "github" | "google";
+  provider: "github" | "google" | "gitlab";
   providerAccountId: string;
   login: string | null;
   avatarUrl: string | null;

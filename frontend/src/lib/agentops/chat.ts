@@ -156,6 +156,16 @@ export async function postUserMessage(
   return { ok: true, message: messageRow(created) };
 }
 
+/**
+ * Always-available starter prompts so users know they can just ASK the agent to
+ * do things (deploy, CI/CD, scan). Shown first; DB suggestions fill the rest.
+ */
+const BUILTIN_SUGGESTIONS: Array<{ id: string; icon: string; text: string }> = [
+  { id: "builtin-deploy", icon: "rocket", text: "Deploy my application to the cluster" },
+  { id: "builtin-pipeline", icon: "zap", text: "Set up CI/CD and deploy my app" },
+  { id: "builtin-scan", icon: "shield", text: "Scan my repo for vulnerabilities" },
+];
+
 export async function listSuggestions(projectId: string): Promise<
   Array<{ id: string; icon: string; text: string }>
 > {
@@ -164,5 +174,16 @@ export async function listSuggestions(projectId: string): Promise<
     orderBy: [{ projectId: "desc" }, { order: "asc" }],
     take: 8,
   });
-  return rows.map((r) => ({ id: r.id, icon: r.icon, text: r.text }));
+  const db = rows.map((r) => ({ id: r.id, icon: r.icon, text: r.text }));
+
+  // Built-ins first, then DB suggestions — deduped by text, capped at 8.
+  const seen = new Set<string>();
+  return [...BUILTIN_SUGGESTIONS, ...db]
+    .filter((s) => {
+      const k = s.text.trim().toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, 8);
 }

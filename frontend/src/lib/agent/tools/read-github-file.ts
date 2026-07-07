@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
-import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
+import { resolveRepoClient } from "@/lib/git";
 import type { Tool } from "./types";
 
 type Input = {
@@ -24,10 +24,10 @@ type Output = {
 const MAX_BYTES = 64 * 1024;
 
 /**
- * Read a file from one of the project's connected GitHub repos. Uses the
- * OAuth token bound to the repo via Phase B's oauthAccountId, so a project
- * pulling from `@alice` and another pulling from `@alice-acme` each speak
- * to GitHub with the correct identity.
+ * Read a file from one of the project's connected GitHub or GitLab repos.
+ * Goes through resolveRepoClient, which binds to the repo's OAuth identity and
+ * (for GitLab) refreshes the token, so each project speaks to the right host
+ * with the correct identity.
  *
  * Refuses to read repos that aren't attached to the current project so a
  * prompt-injection attempt can't pivot to other repos the user owns.
@@ -35,10 +35,10 @@ const MAX_BYTES = 64 * 1024;
 export const readGithubFileTool: Tool<Input, Output> = {
   name: "read_github_file",
   description:
-    "Read the contents of a single file from a GitHub repository attached to " +
-    "the current project. Use this to inspect code, configs, or manifests. " +
-    "Only repos returned by `list_project_repos` are accessible. UTF-8 text only " +
-    "— binary files (images, archives) will be rejected.",
+    "Read the contents of a single file from a GitHub or GitLab repository " +
+    "attached to the current project. Use this to inspect code, configs, or " +
+    "manifests. Only repos returned by `list_project_repos` are accessible. " +
+    "UTF-8 text only — binary files (images, archives) will be rejected.",
   inputSchema: {
     type: "object",
     properties: {
@@ -75,84 +75,55 @@ export const readGithubFileTool: Tool<Input, Output> = {
       };
     }
 
-    const tok = await resolveTokenForRepo(repo.id);
-    if (!tok.ok) {
+    const resolved = await resolveRepoClient(repo.id);
+    if (!resolved.ok) {
       return {
         ok: false,
-        error: `Cannot access ${input.repoFullName}: ${tok.message}`,
+        error: `Cannot access ${input.repoFullName}: ${resolved.message}`,
       };
     }
 
     const ref = input.ref ?? repo.defaultBranch;
     const cleanPath = input.path.replace(/^\/+/, "");
-    const url = `https://api.github.com/repos/${repo.fullName}/contents/${encodeURIComponent(cleanPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(ref)}`;
 
-    let res: Response;
+    let content: string | null;
     try {
-      res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${tok.accessToken}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        cache: "no-store",
-      });
+      content = await resolved.client.readFile(cleanPath, ref);
     } catch (err) {
-      return { ok: false, error: `Network error fetching file: ${err instanceof Error ? err.message : "unknown"}` };
-    }
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
       return {
         ok: false,
-        error: `GitHub returned ${res.status} fetching ${repo.fullName}/${cleanPath}@${ref}: ${body.slice(0, 200)}`,
+        error: `Could not read ${repo.fullName}/${cleanPath}@${ref}: ${err instanceof Error ? err.message : "unknown"}`,
+      };
+    }
+    if (content === null) {
+      return {
+        ok: false,
+        error: `${cleanPath} not found in ${repo.fullName}@${ref} (or it's a directory, not a file).`,
       };
     }
 
-    const raw = (await res.json()) as {
-      type?: string;
-      encoding?: string;
-      content?: string;
-      size?: number;
-      sha?: string;
-    };
-    if (raw.type !== "file") {
-      return {
-        ok: false,
-        error: `${cleanPath} isn't a file (got ${raw.type}). Use the GitHub contents endpoint directly for trees.`,
-      };
-    }
-    if (raw.encoding !== "base64" || !raw.content) {
-      return {
-        ok: false,
-        error: `Unexpected GitHub encoding (${raw.encoding}).`,
-      };
-    }
-
-    const buf = Buffer.from(raw.content, "base64");
-    if (buf.length > MAX_BYTES * 4) {
-      return {
-        ok: false,
-        error: `File is ${buf.length} bytes — too large to read inline. Cap is ${MAX_BYTES} bytes.`,
-      };
-    }
-    // Defend against binaries — check for NUL byte in the first 8KB.
-    const slice = buf.subarray(0, Math.min(buf.length, 8192));
-    if (slice.includes(0x00)) {
+    // Binary guard — a NUL character in decoded text means it isn't UTF-8 text.
+    if (/\x00/.test(content)) {
       return { ok: false, error: "File appears to be binary — refusing to read." };
     }
+    const byteSize = Buffer.byteLength(content, "utf8");
+    if (byteSize > MAX_BYTES * 4) {
+      return {
+        ok: false,
+        error: `File is ${byteSize} bytes — too large to read inline. Cap is ${MAX_BYTES} bytes.`,
+      };
+    }
 
-    const text = buf.toString("utf8");
-    const capped = text.length > MAX_BYTES;
+    const capped = content.length > MAX_BYTES;
     return {
       ok: true,
       output: {
         fullName: repo.fullName,
         path: cleanPath,
         ref,
-        content: capped ? text.slice(0, MAX_BYTES) : text,
+        content: capped ? content.slice(0, MAX_BYTES) : content,
         truncated: capped,
-        byteSize: buf.length,
+        byteSize,
       },
     };
   },

@@ -8,6 +8,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
 import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
+import { resolveRepoClient } from "@/lib/git";
 import { DOCKER_STACKS, getStack, type DockerStackId } from "@/lib/ci/templates";
 
 const ANALYSIS_MODEL = "claude-sonnet-4-5";
@@ -87,16 +88,22 @@ export type StackDetection =
 export async function detectRepoStack(projectId: string, repoFullName: string): Promise<StackDetection> {
   const resolved = await resolveAttachedRepo(projectId, repoFullName);
   if (!resolved.ok) return resolved;
-  const { fullName, ref, accessToken } = resolved.repo;
+  const { id, ref } = resolved.repo;
 
-  const rootFiles = await ghListRoot(fullName, ref, accessToken);
+  // Read through the provider-neutral client so detection works on GitHub AND
+  // GitLab repos (the actual REST differences live in @/lib/git).
+  const rc = await resolveRepoClient(id);
+  if (!rc.ok) return { ok: false, error: `Cannot access ${repoFullName}: ${rc.message}` };
+  const client = rc.client;
+
+  const rootFiles = await client.listFiles("", ref).catch(() => []);
   if (rootFiles.length === 0) return { ok: false, error: "Couldn't read the repository contents (empty repo or no access)." };
 
   const present = new Set(rootFiles.map((f) => f.name.toLowerCase()));
   const keyContents: Record<string, string> = {};
   for (const f of KEY_FILES) {
     if (present.has(f.toLowerCase())) {
-      const txt = await ghReadFile(fullName, f, ref, accessToken);
+      const txt = await client.readFile(f, ref).catch(() => null);
       if (txt != null) keyContents[f] = txt.slice(0, 4000);
     }
   }

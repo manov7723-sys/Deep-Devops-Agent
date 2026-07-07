@@ -6,6 +6,8 @@ import { syncEksAlarmsToAlerts } from "@/lib/cloud/cloudwatch-alerts";
 import { aksClusterFromEnv } from "@/lib/cloud/azure-monitor";
 import { syncAksAlarmsToAlerts } from "@/lib/cloud/azure-monitor-alerts";
 import { evaluateLiveMetricAlerts } from "@/lib/observability/live-metric-alerts";
+import { runDueUptimeChecks } from "@/lib/observability/uptime";
+import { maybeEvaluateProjectCost } from "@/lib/insights/cost-eval";
 
 /**
  * GET /alerts/live
@@ -33,6 +35,10 @@ export async function GET() {
   if (projectIds.length === 0) {
     return NextResponse.json({ ok: true, alerts: [] });
   }
+
+  // Uptime: run any monitors that are due (best-effort, throttled by interval).
+  const nowTs = new Date();
+  await Promise.allSettled(projectIds.map((pid) => runDueUptimeChecks(pid, nowTs).catch(() => 0)));
 
   // Cloud envs in those projects that can carry alarms / in-cluster metrics
   // (AWS/EKS, Azure/AKS, GCP/GKE).
@@ -75,6 +81,11 @@ export async function GET() {
       }
     }),
   );
+
+  // Throttled cost check per project (re-fetches billing at most every 30 min) —
+  // raises the budget-breach alert automatically. Best-effort.
+  const now = new Date();
+  await Promise.allSettled(projectIds.map((pid) => maybeEvaluateProjectCost(pid, now)));
 
   // Return the user's currently-open alerts for the banner.
   const rows = await prisma.alert.findMany({

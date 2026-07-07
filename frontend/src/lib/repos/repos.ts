@@ -5,16 +5,17 @@
  * developer+ membership AND ownership of the repo. Disconnect is soft-delete
  * (deletedAt) — retained for undo + audit per the schema header.
  */
-import type { RepoKind, RepoVisibility } from "@prisma/client";
+import type { GitProvider, RepoKind, RepoVisibility } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 export type RepoRow = {
   id: string;
   oauthAccountId: string | null;
-  /** Denormalized for UI: GitHub login of the connected account this repo
-   *  belongs to. Null for legacy rows (oauthAccountId null) or when the
+  /** Denormalized for UI: login of the connected account (GitHub/GitLab) this
+   *  repo belongs to. Null for legacy rows (oauthAccountId null) or when the
    *  connected account has no `login` yet. */
   oauthAccountLogin: string | null;
+  provider: GitProvider;
   fullName: string;
   name: string;
   description: string | null;
@@ -33,6 +34,7 @@ type RepoWithAccount = {
   id: string;
   oauthAccountId: string | null;
   oauthAccount: { login: string | null } | null;
+  provider: GitProvider;
   fullName: string;
   name: string;
   description: string | null;
@@ -52,6 +54,7 @@ function row(r: RepoWithAccount): RepoRow {
     id: r.id,
     oauthAccountId: r.oauthAccountId,
     oauthAccountLogin: r.oauthAccount?.login ?? null,
+    provider: r.provider,
     fullName: r.fullName,
     name: r.name,
     description: r.description,
@@ -78,8 +81,12 @@ export async function listReposForUser(userId: string): Promise<RepoRow[]> {
 
 export type CreateRepoArgs = {
   ownerId: string;
-  /** The connected GitHub identity (OAuthAccount.id) this repo was discovered through. */
+  /** The connected git identity (OAuthAccount.id) this repo was discovered through. */
   oauthAccountId?: string | null;
+  /** Git host of the repo. Defaults to github for existing callers. */
+  provider?: GitProvider;
+  /** Provider-native repo id (GitLab numeric project id). Null for GitHub. */
+  providerRepoId?: string | null;
   fullName: string;
   description: string;
   lang: string;
@@ -99,7 +106,10 @@ export type CreateRepoResult =
  * legacy `(ownerId, fullName)` constraint.
  */
 export async function createRepo(args: CreateRepoArgs): Promise<CreateRepoResult> {
+  // Last path segment is the display name — also correct for GitLab nested
+  // groups ("group/sub/repo" → "repo").
   const name = args.fullName.split("/").pop()!;
+  const provider = args.provider ?? "github";
 
   // Prefer (oauthAccountId, fullName) when we have one — that matches the
   // real GitHub identity-scoping reality.
@@ -123,6 +133,8 @@ export async function createRepo(args: CreateRepoArgs): Promise<CreateRepoResult
       create: {
         ownerId: args.ownerId,
         oauthAccountId: args.oauthAccountId,
+        provider,
+        providerRepoId: args.providerRepoId ?? null,
         fullName: args.fullName,
         name,
         description: args.description,
@@ -134,6 +146,9 @@ export async function createRepo(args: CreateRepoArgs): Promise<CreateRepoResult
       update: {
         deletedAt: null,
         ownerId: args.ownerId,
+        // Refresh the provider-native id on re-discovery (repo may have been
+        // renamed/transferred since the soft-deleted row was created).
+        ...(args.providerRepoId ? { providerRepoId: args.providerRepoId } : {}),
         description: args.description,
         lang: args.lang,
         kind: args.kind,
@@ -145,14 +160,21 @@ export async function createRepo(args: CreateRepoArgs): Promise<CreateRepoResult
     return { ok: true, repo: row(upserted) };
   }
 
-  const existing = await prisma.repo.findUnique({
-    where: { ownerId_fullName: { ownerId: args.ownerId, fullName: args.fullName } },
-  });
+  const legacyKey = {
+    ownerId_provider_fullName: {
+      ownerId: args.ownerId,
+      provider,
+      fullName: args.fullName,
+    },
+  };
+  const existing = await prisma.repo.findUnique({ where: legacyKey });
   if (existing && !existing.deletedAt) return { ok: false, code: "duplicate" };
   const updated = await prisma.repo.upsert({
-    where: { ownerId_fullName: { ownerId: args.ownerId, fullName: args.fullName } },
+    where: legacyKey,
     create: {
       ownerId: args.ownerId,
+      provider,
+      providerRepoId: args.providerRepoId ?? null,
       fullName: args.fullName,
       name,
       description: args.description,
@@ -163,6 +185,7 @@ export async function createRepo(args: CreateRepoArgs): Promise<CreateRepoResult
     },
     update: {
       deletedAt: null,
+      ...(args.providerRepoId ? { providerRepoId: args.providerRepoId } : {}),
       description: args.description,
       lang: args.lang,
       kind: args.kind,
@@ -221,6 +244,35 @@ export async function attachRepoToProject(
 export async function detachRepoFromProject(projectId: string, repoId: string): Promise<boolean> {
   const { count } = await prisma.projectRepo.deleteMany({ where: { projectId, repoId } });
   return count > 0;
+}
+
+/**
+ * Make `repoId` the project's SINGLE repo — used by "Change repo" in the GitHub
+ * connection section so the new repo applies to the whole project. Detaches
+ * every other repo and attaches this one, atomically. Idempotent: re-setting
+ * the same repo is a no-op success.
+ */
+export async function setProjectRepo(
+  attachingUserId: string,
+  projectId: string,
+  repoId: string,
+): Promise<AttachRepoResult> {
+  const repo = await prisma.repo.findFirst({
+    where: { id: repoId, deletedAt: null },
+    select: { id: true, ownerId: true },
+  });
+  if (!repo) return { ok: false, code: "repo_not_found" };
+  if (repo.ownerId !== attachingUserId) return { ok: false, code: "repo_not_yours" };
+
+  await prisma.$transaction([
+    prisma.projectRepo.deleteMany({ where: { projectId, repoId: { not: repoId } } }),
+    prisma.projectRepo.upsert({
+      where: { projectId_repoId: { projectId, repoId } },
+      create: { projectId, repoId },
+      update: {},
+    }),
+  ]);
+  return { ok: true };
 }
 
 export async function listReposForProject(projectId: string): Promise<RepoRow[]> {

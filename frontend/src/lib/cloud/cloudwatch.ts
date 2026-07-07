@@ -149,10 +149,13 @@ export async function putEksAlarms(
   instances: NodeInstance[],
   metrics: MetricKey[],
   topicArn?: string,
+  thresholds?: Partial<Record<MetricKey, number>>,
 ): Promise<AlarmResult[]> {
   const out: AlarmResult[] = [];
   for (const key of metrics) {
-    const def = METRICS[key];
+    // User-configured threshold overrides the default for this metric.
+    const base = METRICS[key];
+    const def = thresholds?.[key] != null ? { ...base, threshold: thresholds[key]! } : base;
     if (def.perInstance) {
       for (const node of instances) {
         const name = `dda-${clusterName}-${key}-${node.instanceId}`;
@@ -249,6 +252,8 @@ export async function setupEksCloudWatchAlarms(opts: {
   region?: string;
   email?: string;
   metrics: MetricKey[];
+  /** Per-metric threshold overrides (percent) from the env's AlertThreshold rules. */
+  thresholdPercents?: Partial<Record<MetricKey, number>>;
 }): Promise<SetupResult> {
   const resolved = await resolveAwsExecEnv(opts.cloudProviderId);
   if (!resolved.ok) return { ok: false, clusterName: opts.clusterName, region: opts.region ?? "", nodeCount: 0, alarms: [], error: resolved.message };
@@ -274,7 +279,7 @@ export async function setupEksCloudWatchAlarms(opts: {
     ciNote = ci.note;
   }
 
-  const alarms = await putEksAlarms(env, region, opts.clusterName, nodes.instances, opts.metrics, topicArn);
+  const alarms = await putEksAlarms(env, region, opts.clusterName, nodes.instances, opts.metrics, topicArn, opts.thresholdPercents);
   return {
     ok: alarms.some((a) => a.ok),
     clusterName: opts.clusterName,

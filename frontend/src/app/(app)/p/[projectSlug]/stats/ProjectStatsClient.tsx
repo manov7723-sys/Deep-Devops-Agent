@@ -1,8 +1,11 @@
 "use client";
 
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
-import { Block, Btn, Icon, PageHead, StatusDot, TileGrid } from "@/components/ui";
+import { api, apiErrorMessage } from "@/lib/api/client";
+import { Badge, Block, Btn, Icon, PageHead, StatusDot, TileGrid } from "@/components/ui";
 import { EnvFilter, type EnvFilterValue } from "@/components/domain/EnvFilter";
 import { CloudStatsCard } from "@/components/domain/CloudStatsCard";
 import { ObservabilityKpi } from "@/components/domain/ObservabilityKpi";
@@ -33,6 +36,10 @@ export function ProjectStatsClient({ slug }: { slug: string }) {
   const tab = (sp.get("tab") as Tab | null) ?? "compute";
   const env = (sp.get("env") as EnvFilterValue | null) ?? "all";
 
+  const qc = useQueryClient();
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncErr, setSyncErr] = useState<string | null>(null);
+
   function setTab(next: Tab) {
     const p = new URLSearchParams(sp);
     p.set("tab", next);
@@ -40,20 +47,34 @@ export function ProjectStatsClient({ slug }: { slug: string }) {
     router.replace((q ? `${pathname}?${q}` : pathname) as Route);
   }
 
+  // Pull live compute inventory from the connected cloud into the dashboard.
+  const sync = useMutation({
+    mutationFn: () => api.post<{ ok: boolean; count: number; byEnv: Record<string, number>; errors: string[] }>(`/projects/${slug}/cloud/sync`, {}),
+    onMutate: () => { setSyncMsg(null); setSyncErr(null); },
+    onSuccess: (r) => {
+      const parts = Object.entries(r.byEnv).map(([k, v]) => `${v} in ${k}`);
+      setSyncMsg(`Synced ${r.count} cluster node${r.count === 1 ? "" : "s"}${parts.length ? ` (${parts.join(", ")})` : ""}.${r.errors.length ? ` Issues: ${r.errors.join("; ")}` : ""}`);
+      qc.invalidateQueries({ queryKey: ["p", slug, "cloud"] });
+    },
+    onError: (e) => setSyncErr(apiErrorMessage(e)),
+  });
+
   return (
     <div className="col gap-5">
       <PageHead
         title="Cloud stats"
-        sub="Every provisioned service with live metrics, grouped by type."
+        sub="Live nodes from your connected clusters — click “Refresh from cloud” to pull them. Open a node for metrics, pods, cordon/drain."
         actions={
-          <Btn variant="outline" icon="refresh">
-            Refresh
+          <Btn variant="outline" icon="refresh" loading={sync.isPending} onClick={() => sync.mutate()}>
+            {sync.isPending ? "Syncing…" : "Refresh from cloud"}
           </Btn>
         }
         tabs={TABS}
         tabValue={tab}
         onTabChange={(v) => setTab(v as Tab)}
       />
+      {syncMsg && <Badge tone="ok" icon="check">{syncMsg}</Badge>}
+      {syncErr && <Badge tone="danger" icon="alert">{syncErr}</Badge>}
       <EnvFilter />
 
       {tab === "observability" ? (
@@ -90,7 +111,7 @@ function CloudTab({ slug, cat, env }: { slug: string; cat: CloudCategory; env: E
   return (
     <TileGrid minTile={340}>
       {resources.map((r) => (
-        <CloudStatsCard key={r.id} resource={r} />
+        <CloudStatsCard key={r.id} resource={r} slug={slug} />
       ))}
     </TileGrid>
   );

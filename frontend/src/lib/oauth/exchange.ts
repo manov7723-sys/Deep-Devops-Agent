@@ -202,6 +202,21 @@ function normaliseProfile(
       accessToken,
     };
   }
+  if (providerId === "gitlab") {
+    // GitLab GET /api/v4/user (read_user scope) returns the authenticated
+    // user's email directly — no /user/emails fallback needed.
+    const login = typeof raw.username === "string" ? raw.username : "";
+    return {
+      providerAccountId: String(raw.id ?? ""),
+      email: typeof raw.email === "string" ? raw.email : "",
+      // GitLab only issues tokens to confirmed accounts.
+      emailVerified: typeof raw.email === "string" && raw.email.length > 0,
+      name: (typeof raw.name === "string" && raw.name) || login,
+      login,
+      avatarUrl: typeof raw.avatar_url === "string" ? raw.avatar_url : undefined,
+      accessToken,
+    };
+  }
   // google
   const email = typeof raw.email === "string" ? raw.email : "";
   return {
