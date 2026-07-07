@@ -1,6 +1,6 @@
 resource "proxmox_virtual_environment_vm" "git_vm" {
   name      = "git-vm"
-  node_name = "pve"
+  node_name = "proxmox-test"
 
   clone {
     vm_id = 9000
@@ -17,7 +17,7 @@ resource "proxmox_virtual_environment_vm" "git_vm" {
   }
 
   disk {
-    datastore_id = "local-lvm"
+    datastore_id = "local"
     interface    = "scsi0"
     size         = 20
   }
