@@ -6,7 +6,7 @@
  * a ballpark, not an invoice — actual cost varies by region, commitment
  * (savings plans / reserved), and data transfer. We surface the assumptions.
  */
-export type Cloud = "aws" | "azure" | "gcp";
+export type Cloud = "aws" | "azure" | "gcp" | "proxmox";
 
 export type EstimateSpec = {
   cloud: Cloud;
@@ -52,30 +52,33 @@ const INSTANCE_HOURLY: Record<Cloud, Record<string, number>> = {
     "n1-standard-1": 0.0475, "n1-standard-2": 0.095, "n1-standard-4": 0.19,
     "n2-standard-2": 0.0971, "n2-standard-4": 0.1942,
   },
+  // Proxmox is self-hosted — no metered per-instance cloud cost.
+  proxmox: {},
 };
 
 // Default hourly when the instance type isn't in the table (a ~2 vCPU / 4-8GB general box).
-const DEFAULT_HOURLY: Record<Cloud, number> = { aws: 0.0416, azure: 0.0416, gcp: 0.03351 };
+const DEFAULT_HOURLY: Record<Cloud, number> = { aws: 0.0416, azure: 0.0416, gcp: 0.03351, proxmox: 0 };
 
 /** Selectable instance types per cloud (the priced ones), for the UI dropdown. */
 export const INSTANCE_TYPES: Record<Cloud, string[]> = {
   aws: ["t3.micro", "t3.small", "t3.medium", "t3.large", "t3.xlarge", "m5.large", "m5.xlarge", "c5.large"],
   azure: ["b1s", "b2s", "b2ms", "d2s_v3", "d4s_v3", "f2s_v2", "f4s_v2"],
   gcp: ["e2-small", "e2-medium", "e2-standard-2", "e2-standard-4", "n1-standard-1", "n1-standard-2", "n2-standard-2"],
+  proxmox: [],
 };
 
 /** Sensible default instance type per cloud. */
-export const DEFAULT_INSTANCE_TYPE: Record<Cloud, string> = { aws: "t3.medium", azure: "b2s", gcp: "e2-medium" };
+export const DEFAULT_INSTANCE_TYPE: Record<Cloud, string> = { aws: "t3.medium", azure: "b2s", gcp: "e2-medium", proxmox: "custom" };
 
 // Managed-Kubernetes control plane, monthly USD.
-const CONTROL_PLANE: Record<Cloud, number> = { aws: 73, azure: 0, gcp: 73 }; // EKS $0.10/h; AKS free tier $0; GKE $0.10/h/cluster
-const CONTROL_PLANE_LABEL: Record<Cloud, string> = { aws: "EKS control plane", azure: "AKS control plane (free tier)", gcp: "GKE control plane" };
+const CONTROL_PLANE: Record<Cloud, number> = { aws: 73, azure: 0, gcp: 73, proxmox: 0 }; // EKS $0.10/h; AKS free tier $0; GKE $0.10/h/cluster; Proxmox self-hosted $0
+const CONTROL_PLANE_LABEL: Record<Cloud, string> = { aws: "EKS control plane", azure: "AKS control plane (free tier)", gcp: "GKE control plane", proxmox: "Proxmox (self-hosted)" };
 
 // Block storage per GB-month, USD (gp3 / managed disk / balanced PD, approx).
-const STORAGE_PER_GB: Record<Cloud, number> = { aws: 0.08, azure: 0.1, gcp: 0.1 };
+const STORAGE_PER_GB: Record<Cloud, number> = { aws: 0.08, azure: 0.1, gcp: 0.1, proxmox: 0 };
 
 // One public load balancer, monthly USD (approx, excludes data-processing charges).
-const LB_MONTHLY: Record<Cloud, number> = { aws: 18, azure: 18, gcp: 18 };
+const LB_MONTHLY: Record<Cloud, number> = { aws: 18, azure: 18, gcp: 18, proxmox: 0 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 

@@ -61,7 +61,7 @@ export type AttachRepoRequest = z.infer<typeof AttachRepoRequest>;
 // ──────────────────────────────────────────────────────────────────
 // Cloud providers
 // ──────────────────────────────────────────────────────────────────
-export const CloudKindApi = z.enum(["aws", "gcp", "azure"]);
+export const CloudKindApi = z.enum(["aws", "gcp", "azure", "proxmox"]);
 export type CloudKindApi = z.infer<typeof CloudKindApi>;
 
 export const CloudProviderSummary = z.object({

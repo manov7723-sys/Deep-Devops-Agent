@@ -20,6 +20,7 @@ import { prisma } from "@/lib/db/prisma";
 import { decryptSecret } from "@/lib/auth/crypto";
 import { getAwsKeys } from "@/lib/cloud/vault";
 import { getDecryptedAzureCreds } from "@/lib/cloud/azure";
+import { getDecryptedProxmoxCreds } from "@/lib/cloud/proxmox";
 import { getGcpAccessToken } from "@/lib/cloud/gcp";
 
 const KUBE_EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
@@ -141,7 +142,7 @@ export async function getKubeconfigForEnv(envId: string): Promise<KubeconfigResu
 }
 
 export type CloudCredsResult =
-  | { ok: true; env: Record<string, string>; kind: "aws" | "gcp" | "azure" }
+  | { ok: true; env: Record<string, string>; kind: "aws" | "gcp" | "azure" | "proxmox" }
   | { ok: false; code: "provider_not_found" | "decrypt_failed" | "kind_unsupported"; message: string };
 
 /**
@@ -212,6 +213,25 @@ export async function getDecryptedCloudCreds(
       base.ARM_SUBSCRIPTION_ID = az.subscriptionId;
     }
     return { ok: true, env: base, kind: "azure" };
+  }
+  if (cp.kind === "proxmox") {
+    // Feed the stored API token into the bpg/proxmox Terraform provider via
+    // PROXMOX_VE_* env vars (no secrets in the HCL). INSECURE=true because
+    // Proxmox typically serves a self-signed cert. Fresh env object so the
+    // AWS_REGION set above (from the node name) doesn't leak in.
+    const px = await getDecryptedProxmoxCreds(cp.id);
+    if (!px.ok) {
+      return { ok: false, code: "decrypt_failed", message: px.error };
+    }
+    return {
+      ok: true,
+      kind: "proxmox",
+      env: {
+        PROXMOX_VE_ENDPOINT: px.endpoint,
+        PROXMOX_VE_API_TOKEN: `${px.tokenId}=${px.tokenSecret}`,
+        PROXMOX_VE_INSECURE: "true",
+      },
+    };
   }
   return {
     ok: false,

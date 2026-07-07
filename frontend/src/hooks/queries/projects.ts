@@ -92,8 +92,8 @@ export type CreateProjectWithSetupInput = {
   repos?: RepoChoiceInput[];
   envs?: EnvChoiceInput[];
   cloud?: CloudChoiceInput | null;
-  /** Which cloud the project targets ("aws"|"gcp"|"azure"); locks the Connect-provider UI. */
-  cloudKind?: "aws" | "gcp" | "azure" | null;
+  /** Which cloud the project targets ("aws"|"gcp"|"azure"|"proxmox"); locks the Connect-provider UI. */
+  cloudKind?: "aws" | "gcp" | "azure" | "proxmox" | null;
 };
 
 export type CreateProjectWithSetupStep = {

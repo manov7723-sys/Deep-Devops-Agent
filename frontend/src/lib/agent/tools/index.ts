@@ -30,6 +30,7 @@ import { verifyDockerBuildTool } from "./verify-docker-build";
 import { savePipelineToProjectTool } from "./save-pipeline-to-project";
 import { runTerraformTool } from "./run-terraform";
 import { provisionEksTool } from "./provision-eks";
+import { provisionProxmoxVmTool } from "./provision-proxmox-vm";
 import { requestInfraApprovalTool } from "./request-infra-approval";
 import { listK8sManifestKindsTool } from "./list-k8s-manifest-kinds";
 import { generateK8sManifestTool } from "./generate-k8s-manifest";
@@ -128,6 +129,7 @@ export const ALL_TOOLS: Tool[] = [
   generateAcrWorkflowTool,
   // Infra (IaC)
   provisionEksTool,
+  provisionProxmoxVmTool,
   runTerraformTool,
   requestInfraApprovalTool,
   // Kubernetes manifests
@@ -168,9 +170,10 @@ export function getTool(name: string): Tool | undefined {
  * sees AWS tools (and vice-versa), so the agent can't fumble onto the wrong
  * cloud — and the smaller tool set also makes the model faster.
  */
-const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp"> = {
+const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp" | "proxmox"> = {
   list_ec2_instances: "aws",
   provision_eks: "aws",
+  provision_proxmox_vm: "proxmox",
   setup_cloudwatch_alarms: "aws",
   setup_github_oidc_ecr: "aws",
   generate_ecr_workflow: "aws",

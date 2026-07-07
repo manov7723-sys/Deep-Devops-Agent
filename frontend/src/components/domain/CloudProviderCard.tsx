@@ -15,6 +15,7 @@ const PROVIDER_BG: Record<string, string> = {
   aws: "linear-gradient(135deg, #ff9900, #ec7211)",
   gcp: "linear-gradient(135deg, #4285f4, #34a853)",
   azure: "linear-gradient(135deg, #0078d4, #50e6ff)",
+  proxmox: "linear-gradient(135deg, #e57000, #b34700)",
 };
 
 /** Pull a human message out of the api client's thrown ApiError ({ status,

@@ -18,7 +18,7 @@ import { useProjectProviders } from "@/hooks/queries/project";
 // whether AWS access/secret keys are stored in Vault).
 type AwsProviderItem = {
   providerId: string;
-  kind: "aws" | "gcp" | "azure";
+  kind: "aws" | "gcp" | "azure" | "proxmox";
   name: string;
   region: string;
   hasVaultCreds: boolean;
@@ -44,7 +44,7 @@ export function ProjectCloudClient({ slug }: { slug: string }) {
     queryFn: () => api.get<{ project: { cloud: string | null } }>(`/projects/${slug}`),
     staleTime: 60_000,
   });
-  const lockedKind = (projectInfo?.project?.cloud as "aws" | "gcp" | "azure" | null) ?? null;
+  const lockedKind = (projectInfo?.project?.cloud as "aws" | "gcp" | "azure" | "proxmox" | null) ?? null;
 
   return (
     <div className="col gap-5">

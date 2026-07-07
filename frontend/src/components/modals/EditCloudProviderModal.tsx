@@ -37,6 +37,11 @@ const CRED_LABEL: Record<string, { label: string; placeholder: string; hint: str
     placeholder: "00000000-0000-0000-0000-000000000000",
     hint: "Service principal in your Entra tenant.",
   },
+  proxmox: {
+    label: "API token ID",
+    placeholder: "root@pam!deepagent",
+    hint: 'Proxmox API token ID ("user@realm!tokenname").',
+  },
 };
 
 const EXTRA_LABEL: Record<string, { label: string; placeholder: string; hint: string }> = {
@@ -52,6 +57,11 @@ const EXTRA_LABEL: Record<string, { label: string; placeholder: string; hint: st
   },
   azure: {
     label: "Client secret",
+    placeholder: "leave blank to keep current secret",
+    hint: "AES-256-GCM encrypted at rest.",
+  },
+  proxmox: {
+    label: "API token secret",
     placeholder: "leave blank to keep current secret",
     hint: "AES-256-GCM encrypted at rest.",
   },

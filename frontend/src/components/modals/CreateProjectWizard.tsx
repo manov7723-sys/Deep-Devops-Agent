@@ -31,10 +31,7 @@ const CLOUDS = ["AWS", "GCP", "Azure"] as const;
  * ExternalId on AWS, service account on GCP, service principal on Azure) is done
  * afterward on the project's "Cloud providers" tab via ConnectCloudModal.
  */
-const CLOUD_FIELD_META: Record<
-  (typeof CLOUDS)[number],
-  { regionPlaceholder: string; note: string }
-> = {
+const CLOUD_FIELD_META: Record<string, { regionPlaceholder: string; note: string }> = {
   AWS: {
     regionPlaceholder: "us-east-1",
     note: "Deep Agent will assume a scoped AWS IAM role via STS (no long-lived keys).",
@@ -46,6 +43,10 @@ const CLOUD_FIELD_META: Record<
   Azure: {
     regionPlaceholder: "eastus",
     note: "Deep Agent will sign in as an Azure service principal.",
+  },
+  Proxmox: {
+    regionPlaceholder: "pve",
+    note: "On-prem: after creating the project, connect your Proxmox server (host URL + API token) on the Cloud providers tab, then create VMs with Terraform.",
   },
 };
 
@@ -62,6 +63,8 @@ type Draft = {
   // region. No account is connected here — that happens on the Cloud tab.
   cloud: string;
   region: string;
+  /** First-screen choice: cloud (AWS/GCP/Azure) vs on-prem (Proxmox). null = not chosen yet. */
+  mode: "cloud" | "onprem" | null;
 };
 
 const DEFAULT_DRAFT: Draft = {
@@ -77,6 +80,7 @@ const DEFAULT_DRAFT: Draft = {
   envs: { alpha: false, beta: false, release: true },
   cloud: "AWS",
   region: "us-east-1",
+  mode: null,
 };
 
 const DRAFT_KEY_PREFIX = "dda-create-project-draft:";
@@ -284,7 +288,7 @@ export function CreateProjectWizard({
         cloud: null,
         // Record which cloud the project targets so the Connect-provider UI
         // locks to it. Selection-only — no provider is provisioned here.
-        cloudKind: draft.cloud.toLowerCase() as "aws" | "gcp" | "azure",
+        cloudKind: draft.cloud.toLowerCase() as "aws" | "gcp" | "azure" | "proxmox",
       });
 
       // Surface partial failures so the user isn't blindsided when, say, a
@@ -316,12 +320,12 @@ export function CreateProjectWizard({
       title="Create a project"
       footer={
         <>
-          {stepIdx > 0 && (
+          {draft.mode && (
             <Btn
               variant="ghost"
               icon="chevL"
               style={{ marginRight: "auto" }}
-              onClick={() => onStepChange(stepIdx)}
+              onClick={() => (stepIdx === 0 ? setDraft((d) => ({ ...d, mode: null })) : onStepChange(stepIdx))}
             >
               Back
             </Btn>
@@ -329,22 +333,67 @@ export function CreateProjectWizard({
           <Btn variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Btn>
-          <Btn
-            variant="primary"
-            icon={last ? "check" : undefined}
-            iconRight={last ? undefined : "chevR"}
-            disabled={!canNext}
-            loading={create.isPending}
-            onClick={next}
-          >
-            {last ? "Create project" : "Continue"}
-          </Btn>
+          {draft.mode && (
+            <Btn
+              variant="primary"
+              icon={last ? "check" : undefined}
+              iconRight={last ? undefined : "chevR"}
+              disabled={!canNext}
+              loading={create.isPending}
+              onClick={next}
+            >
+              {last ? "Create project" : "Continue"}
+            </Btn>
+          )}
         </>
       }
     >
-      <WizardSteps steps={STEPS as unknown as string[]} current={stepIdx} />
+      {/* First screen: where will this project run? Cloud runs the usual
+          wizard; on-prem targets a self-hosted Proxmox server. */}
+      {!draft.mode && (
+        <div className="col gap-3">
+          <p className="muted" style={{ fontSize: 13 }}>
+            Where will this project run? Pick one — you&apos;ll connect the account or server in the following steps.
+          </p>
+          <div className="row gap-3 wrap">
+            {([
+              { m: "cloud", icon: "cloud", title: "Cloud", sub: "AWS · GCP · Azure" },
+              { m: "onprem", icon: "server", title: "On-prem", sub: "Proxmox VE (self-hosted)" },
+            ] as const).map((o) => (
+              <button
+                key={o.m}
+                type="button"
+                onClick={() =>
+                  setDraft((d) =>
+                    o.m === "onprem"
+                      ? { ...d, mode: "onprem", cloud: "Proxmox", region: "pve" }
+                      : { ...d, mode: "cloud", cloud: "AWS", region: "us-east-1" },
+                  )
+                }
+                className="col gap-2"
+                style={{
+                  flex: "1 1 200px",
+                  alignItems: "flex-start",
+                  textAlign: "left",
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: 16,
+                  cursor: "pointer",
+                  background: "var(--surface-2, transparent)",
+                }}
+              >
+                <Icon name={o.icon} size={22} />
+                <strong style={{ fontSize: 15 }}>{o.title}</strong>
+                <span className="muted" style={{ fontSize: 12.5 }}>{o.sub}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
-      {stepIdx === 0 && (
+      {draft.mode && <WizardSteps steps={STEPS as unknown as string[]} current={stepIdx} />}
+
+      {draft.mode && stepIdx === 0 && (
         <div className="col gap-4">
           <div className="row gap-4" style={{ alignItems: "center" }}>
             <ProjectAvatar name={initial} hue={draft.hue} size={60} radius={15} />
@@ -375,7 +424,7 @@ export function CreateProjectWizard({
         </div>
       )}
 
-      {stepIdx === 1 && (
+      {draft.mode && stepIdx === 1 && (
         <div className="col gap-4">
           {!draft.ghConnected ? (
             <div className="col center gap-3 dda-wizard-gh-card">
@@ -523,7 +572,7 @@ export function CreateProjectWizard({
         </div>
       )}
 
-      {stepIdx === 2 && (
+      {draft.mode && stepIdx === 2 && (
         <div className="col gap-4">
           <p className="muted" style={{ fontSize: 13 }}>
             Each environment listens to a specific branch. Pushes to that branch trigger a
@@ -561,39 +610,57 @@ export function CreateProjectWizard({
         </div>
       )}
 
-      {stepIdx === 3 && (
+      {draft.mode && stepIdx === 3 && (
         <div className="col gap-4">
-          <Field label="Cloud provider">
-            <div className="row gap-2 wrap">
-              {CLOUDS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={`chip ${draft.cloud === c ? "active" : ""}`}
-                  style={{ height: 38 }}
-                  onClick={() =>
-                    setDraft((d) => ({
-                      ...d,
-                      cloud: c,
-                      // Reset region to the chosen cloud's typical default if
-                      // the user hadn't customized it.
-                      region: CLOUD_FIELD_META[c]?.regionPlaceholder ?? d.region,
-                    }))
-                  }
-                >
-                  <Icon name="cloud" size={15} />
-                  {c}
-                </button>
-              ))}
-            </div>
-          </Field>
+          {draft.mode === "onprem" ? (
+            <Field label="On-prem infrastructure">
+              <div
+                className="row gap-2"
+                style={{ alignItems: "center", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}
+              >
+                <Icon name="server" size={18} style={{ flex: "none" }} />
+                <span style={{ fontSize: 13 }}>
+                  <strong>Proxmox VE</strong> — after creating the project, connect your server (host URL + API
+                  token) on the <b>Cloud providers</b> tab, then create VMs with Terraform.
+                </span>
+              </div>
+            </Field>
+          ) : (
+            <Field label="Cloud provider">
+              <div className="row gap-2 wrap">
+                {CLOUDS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`chip ${draft.cloud === c ? "active" : ""}`}
+                    style={{ height: 38 }}
+                    onClick={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        cloud: c,
+                        // Reset region to the chosen cloud's typical default if
+                        // the user hadn't customized it.
+                        region: CLOUD_FIELD_META[c]?.regionPlaceholder ?? d.region,
+                      }))
+                    }
+                  >
+                    <Icon name="cloud" size={15} />
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          )}
           {(() => {
             const meta =
-              CLOUD_FIELD_META[draft.cloud as (typeof CLOUDS)[number]] ?? CLOUD_FIELD_META.AWS;
+              CLOUD_FIELD_META[draft.cloud] ?? CLOUD_FIELD_META.AWS;
             return (
               <>
                 <div style={{ maxWidth: 240 }}>
-                  <Field label="Default region" hint="You can change this per environment later.">
+                  <Field
+                    label={draft.cloud === "Proxmox" ? "Default node" : "Default region"}
+                    hint={draft.cloud === "Proxmox" ? "Proxmox node new VMs land on (e.g. pve)." : "You can change this per environment later."}
+                  >
                     <Input
                       value={draft.region}
                       onChange={(e) => setDraft((d) => ({ ...d, region: e.target.value }))}

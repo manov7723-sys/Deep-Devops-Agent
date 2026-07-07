@@ -51,6 +51,7 @@ enum CloudKind {
   azure
   cloudflare
   digitalocean
+  proxmox
 }
 
 enum ResourceCategory {

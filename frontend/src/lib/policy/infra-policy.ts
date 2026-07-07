@@ -12,7 +12,7 @@
  * These defaults are sensible starting rules — later they can be made per-project
  * settings, and OPA/conftest can be added as an optional advanced source.
  */
-export type Cloud = "aws" | "azure" | "gcp";
+export type Cloud = "aws" | "azure" | "gcp" | "proxmox";
 
 export type PolicySpec = {
   cloud: Cloud;
@@ -32,6 +32,10 @@ const ALLOWED_REGIONS: Record<Cloud, string[]> = {
   aws: ["us-east-1", "us-east-2", "us-west-2", "eu-west-1", "eu-central-1", "ap-south-1"],
   azure: ["eastus", "eastus2", "westus2", "westeurope", "centralus", "southeastasia"],
   gcp: ["us-central1", "us-east1", "us-west1", "europe-west1", "asia-south1"],
+  // Proxmox is self-hosted — "region" is a node name, not a cloud region. The
+  // region rule only runs when a spec.region is set, so an empty list is a
+  // no-op for Proxmox VMs (which carry a node, not a region).
+  proxmox: [],
 };
 
 /** Instance is "oversized"/GPU → block by default (opt-in for big spend). */

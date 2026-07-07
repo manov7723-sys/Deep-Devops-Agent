@@ -4,6 +4,7 @@ import { getActiveSession } from "@/lib/auth/session";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { createProvider, listProvidersForUser } from "@/lib/cloud/providers";
 import { connectAzureServicePrincipal, encryptAzureSecret } from "@/lib/cloud/azure";
+import { connectProxmox, encryptProxmoxSecret, normalizeProxmoxEndpoint } from "@/lib/cloud/proxmox";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
@@ -68,6 +69,27 @@ export async function POST(req: Request) {
     // Persist the validated subscription + encrypt the secret.
     data.accountRef = conn.subscriptionId;
     data.externalId = encryptAzureSecret(clientSecret);
+  }
+
+  // Proxmox API token: validate against /api2/json/version BEFORE storing, then
+  // encrypt the token secret. Field mapping: accountRef=endpoint URL,
+  // roleArn=token id (user@realm!name), externalId=token secret, region=node.
+  if (data.kind === "proxmox") {
+    const endpoint = data.accountRef ?? "";
+    const tokenId = data.roleArn ?? "";
+    const tokenSecret = data.externalId ?? "";
+    if (!endpoint || !tokenId || !tokenSecret) {
+      return NextResponse.json(
+        { ok: false, code: "invalid_request", message: "Proxmox needs the host URL, API token ID and token secret." },
+        { status: 400 },
+      );
+    }
+    const conn = await connectProxmox({ endpoint, tokenId, tokenSecret });
+    if (!conn.ok) {
+      return NextResponse.json({ ok: false, code: "proxmox_connect_failed", message: conn.error }, { status: 400 });
+    }
+    data.accountRef = normalizeProxmoxEndpoint(endpoint);
+    data.externalId = encryptProxmoxSecret(tokenSecret);
   }
 
   const provider = await createProvider({ userId: sess.userId, projectId, ...data });

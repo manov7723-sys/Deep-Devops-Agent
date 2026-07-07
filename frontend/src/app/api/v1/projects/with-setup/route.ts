@@ -80,7 +80,7 @@ const Body = z.object({
   envs: z.array(EnvChoice).max(20).default([]),
   cloud: CloudChoice.nullable().default(null),
   // The project's intended cloud (records the wizard pick; locks the Connect UI).
-  cloudKind: z.enum(["aws", "gcp", "azure"]).nullable().default(null),
+  cloudKind: z.enum(["aws", "gcp", "azure", "proxmox"]).nullable().default(null),
 });
 
 type StepReport = {

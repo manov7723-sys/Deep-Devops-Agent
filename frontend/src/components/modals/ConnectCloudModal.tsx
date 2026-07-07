@@ -13,29 +13,32 @@ export interface ConnectCloudModalProps {
   /** When set, the modal also offers to bind the new provider to envs of this project. */
   projectSlug?: string;
   /** Pre-select a provider tab when the modal opens (e.g. the project's chosen cloud). */
-  initialKind?: "aws" | "gcp" | "azure";
+  initialKind?: "aws" | "gcp" | "azure" | "proxmox";
   /** Lock the modal to ONE cloud (hides the provider chips). Used for cloud-specific projects. */
-  lockedKind?: "aws" | "gcp" | "azure" | null;
+  lockedKind?: "aws" | "gcp" | "azure" | "proxmox" | null;
 }
 
-type CloudKind = "aws" | "gcp" | "azure";
+type CloudKind = "aws" | "gcp" | "azure" | "proxmox";
 
 const KIND_OPTIONS: Array<{ kind: CloudKind; label: string; hint: string }> = [
   { kind: "aws", label: "AWS", hint: "Cross-account IAM role + STS ExternalId" },
   { kind: "gcp", label: "GCP", hint: "Sign in with Google (OAuth)" },
   { kind: "azure", label: "Azure", hint: "Subscription + Service principal" },
+  { kind: "proxmox", label: "Proxmox", hint: "Self-hosted Proxmox VE + API token" },
 ];
 
 const REGION_DEFAULTS: Record<CloudKind, string> = {
   aws: "us-east-1",
   gcp: "us-central1",
   azure: "eastus",
+  proxmox: "pve", // Proxmox has no region — this is the default node name.
 };
 
 const REGION_HINT: Record<CloudKind, string> = {
   aws: "AWS region (e.g. us-east-1, eu-west-2).",
   gcp: "GCP region or multi-region (e.g. us-central1, europe-west1).",
   azure: "Azure region (e.g. eastus, westeurope).",
+  proxmox: "Default Proxmox node name (e.g. pve) — where new VMs land unless overridden.",
 };
 
 /**
@@ -53,7 +56,36 @@ type FieldSpec = {
   required?: boolean;
 };
 
-const PROVIDER_FIELDS: Record<"gcp" | "azure", { fields: FieldSpec[] }> = {
+const PROVIDER_FIELDS: Record<"gcp" | "azure" | "proxmox", { fields: FieldSpec[] }> = {
+  proxmox: {
+    fields: [
+      {
+        schemaColumn: "accountRef",
+        label: "Proxmox host URL",
+        placeholder: "https://pve.example.com:8006",
+        hint: "The Proxmox VE API endpoint (host + port 8006).",
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "roleArn",
+        label: "API token ID",
+        placeholder: "root@pam!deepagent",
+        hint: 'The token ID, formatted "user@realm!tokenname".',
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "externalId",
+        label: "API token secret",
+        placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        hint: "Shown once when you created the token. Encrypted at rest (AES-256-GCM).",
+        mono: true,
+        secret: true,
+        required: true,
+      },
+    ],
+  },
   gcp: {
     fields: [
       {
@@ -358,10 +390,11 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
     });
   }
 
-  const helpCopy = useMemo<Record<"gcp" | "azure", string>>(
+  const helpCopy = useMemo<Record<"gcp" | "azure" | "proxmox", string>>(
     () => ({
       gcp: "Deep Agent impersonates a service account. Use workload identity federation if you can — no long-lived keys.",
       azure: "Deep Agent signs in as a service principal in your Entra tenant. The client secret is encrypted at rest.",
+      proxmox: "Deep Agent connects to your Proxmox VE server with a scoped API token (encrypted at rest) and uses it to create VMs via Terraform.",
     }),
     [],
   );
@@ -376,7 +409,9 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
           ? "AWS — cross-account IAM role + STS ExternalId. No long-lived keys are stored."
           : kind === "gcp"
             ? "GCP — sign in with Google. An encrypted refresh token is stored; no service-account key to manage."
-            : "Azure — sign in with Microsoft. An encrypted refresh token is stored; no secrets to manage."
+            : kind === "azure"
+              ? "Azure — sign in with Microsoft. An encrypted refresh token is stored; no secrets to manage."
+              : "Proxmox — connect a self-hosted Proxmox VE server with an API token. The token secret is encrypted at rest."
       }
       width={620}
       footer={
@@ -454,7 +489,7 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
               Sign in with Microsoft
             </Btn>
           </div>
-        ) : (
+        ) : isGcp ? (
           /* GCP — interactive "Sign in with Google" (OAuth + PKCE). The popup
              completes the connection; no fields to fill here. */
           <div className="col gap-3">
@@ -468,6 +503,30 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
             <Btn variant="primary" icon="cloud" loading={azureBusy} onClick={() => openOAuthPopup("gcp")}>
               Sign in with Google
             </Btn>
+          </div>
+        ) : (
+          /* Proxmox — self-hosted PVE via API token. Credential fields written
+             to the CloudProvider row (endpoint/token id/token secret); the
+             connect route validates against /api2/json/version + encrypts. */
+          <div className="col gap-4">
+            <div className="row gap-2 dda-wizard-iam-note">
+              <Icon name="shield" size={16} style={{ flex: "none" }} />
+              <span style={{ fontSize: 12.5 }}>
+                Connect a self-hosted Proxmox VE server with an API token. The token secret is encrypted at
+                rest; DeepAgent uses it to create VMs via Terraform.
+              </span>
+            </div>
+            {PROVIDER_FIELDS.proxmox.fields.map((f) => (
+              <Field key={f.schemaColumn} label={f.label} required={f.required} hint={f.hint}>
+                <Input
+                  className={f.mono ? "mono" : undefined}
+                  type={f.secret ? "password" : "text"}
+                  placeholder={f.placeholder}
+                  value={values[f.schemaColumn] ?? ""}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.schemaColumn]: e.target.value }))}
+                />
+              </Field>
+            ))}
           </div>
         )}
 
