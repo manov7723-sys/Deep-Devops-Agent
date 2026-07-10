@@ -1,0 +1,440 @@
+import { prisma } from "@/lib/db/prisma";
+import { decryptSecret } from "@/lib/auth/crypto";
+import { analyzeAppServices, type AppService } from "@/lib/automation/repo-analyze";
+import { getAzureAccessToken } from "@/lib/cloud/azure";
+import { parseAksClusterRef, setupAzureDeployRegistry } from "@/lib/cloud/azure-acr";
+import { findAksClusterByName } from "@/lib/cloud/azure-arm";
+import { parseEksClusterRef } from "@/lib/cloud/eks-access";
+import { parseGkeClusterRef, setupGcpDeployRegistry } from "@/lib/cloud/gcp-artifact-registry";
+import { buildCicdArtifacts } from "@/lib/devops/cicd-pipeline";
+import { listDeployTargets } from "@/lib/devops/deploy";
+import { sanitizeAppName } from "@/lib/devops/deploy-manifest";
+import { setRepoActionsVariable } from "@/lib/github/secrets";
+import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
+import { grantEksAccessTool } from "./grant-eks-access";
+import { setupGithubOidcEcrTool } from "./setup-github-oidc-ecr";
+import { setKubeconfigSecretTool } from "./deploy-tools";
+import { writeRepoFileTool } from "./write-repo-file";
+import type { Tool } from "./types";
+
+/**
+ * deploy_my_app — the single from-scratch flow for non-DevOps users.
+ *
+ *   1. ANALYZE the repo → every deployable service (one app, OR a monorepo with
+ *      a separate frontend + backend, each with its own build path/stack/port).
+ *   2. Per service: ensure an ECR repo + keyless GitHub-OIDC role. The caller can
+ *      pass which ECR repo to use per service (existing or auto-create).
+ *   3. GENERATE everything from vetted templates: Dockerfile (per service dir),
+ *      the CI build→scan→push workflow (one per service), and production-style
+ *      manifests. Single service uses repo-level GitHub vars; a monorepo bakes
+ *      each service's registry values in (repo vars can't differ per workflow).
+ *   4. Push it all as ONE PR (or commit directly).
+ *
+ * After merge the agent chains per service: wait_for_workflow_run(its workflow
+ * file) → deploy_app(its imageRef/containerPort), server-side + approval-gated.
+ */
+type ServiceInput = {
+  /** Role from analyze_app_services: "frontend" | "backend" | "app". */
+  name?: string;
+  /** Build-context subdir; "" = repo root. */
+  path?: string;
+  /** ECR/image repo name to use for this service (an existing one, or a new name to auto-create). */
+  imageName?: string;
+  /** Expose this service publicly via Ingress (needs host). Usually true for a frontend. */
+  expose?: boolean;
+  host?: string;
+};
+
+type Input = {
+  repoFullName: string;
+  envKey: string;
+  /**
+   * Kubernetes namespace to deploy into — the USER's choice (never defaulted
+   * silently). Ask via list_kubernetes_resources(envKey, kind:"namespaces") +
+   * one ```options``` question offering the existing namespaces plus
+   * "Create new: <default>".
+   */
+  namespace: string;
+  /**
+   * Explicit per-service targets (from analyze_app_services + the user's ECR
+   * choice). Omit to auto-deploy every detected service with suggested ECR names.
+   */
+  services?: ServiceInput[];
+  /** Base app name (lowercase DNS label). Defaults to the repo name. */
+  appName?: string;
+  replicas?: number;
+  /** "pr" (default — review then merge) or "direct" (commit to the default branch). */
+  commitMode?: "pr" | "direct";
+  overwriteDockerfile?: boolean;
+};
+
+type DeployedService = {
+  name: string;
+  path: string;
+  appName: string;
+  imageRef: string;
+  containerPort: number;
+  registryUri: string;
+  workflowFile: string;
+  cdWorkflowFile: string;
+  expose: boolean;
+  keptExistingDockerfile: boolean;
+};
+
+type Output = {
+  monorepo: boolean;
+  services: DeployedService[];
+  files: string[];
+  branch: string;
+  namespace: string;
+  pullRequest?: { number: number; url: string };
+  registrySteps: string[];
+  next: string;
+};
+
+/** Match an explicit service target to a detected service (by path, then name). */
+function matchService(detected: AppService[], t: ServiceInput): AppService | undefined {
+  const path = (t.path ?? "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
+  if (t.path !== undefined) {
+    const byPath = detected.find((d) => d.path === path);
+    if (byPath) return byPath;
+  }
+  if (t.name) {
+    const byName = detected.find((d) => d.name.toLowerCase() === t.name!.toLowerCase());
+    if (byName) return byName;
+  }
+  return detected.length === 1 ? detected[0] : undefined;
+}
+
+export const deployMyAppTool: Tool<Input, Output> = {
+  name: "deploy_my_app",
+  description:
+    "ONE-SHOT from-scratch pipeline for an app repo, on AWS (EKS+ECR), GCP (GKE+Artifact Registry) OR Azure (AKS+ACR) — " +
+    "picked automatically from the target env's connected cloud. ANALYZES the repo's real files to find every " +
+    "deployable service (a single app, OR a monorepo with a separate FRONTEND and BACKEND), ensures a registry repo + " +
+    "keyless auth per service (and grants that identity cluster access), generates the Dockerfile(s), the CI " +
+    "build→scan→push workflow(s), production-style Kubernetes manifests AND the CD deploy workflow (runs after CI, " +
+    "keyless), and pushes everything as ONE PR (or directly, commitMode='direct'). REQUIRED order: " +
+    "(1) analyze_app_services, (2) list_kubernetes_resources(envKey, kind:'namespaces') and ask the user which " +
+    "namespace to deploy into (```options``` — existing namespaces + 'Create new'), (3) list existing registry repos " +
+    "(list_ecr_repos on AWS, list_artifact_registries on GCP, list_acr on Azure), (4) ask the user which repo to use " +
+    "for EACH service (```options``` — existing repos + 'Create new'), (5) call this with `namespace` (the user's " +
+    "choice) and `services` ([{name,path,imageName,expose}]) where imageName is the user's choice. The call FAILS " +
+    "without `namespace` or `services`. AFTER merge everything is automatic: CI builds+pushes, then the CD workflow " +
+    "deploys — watch each service with wait_for_workflow_run(workflowFile, then cdWorkflowFile) and confirm with " +
+    "deployment_status. deploy_app is only the fallback if a CD run fails.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoFullName: { type: "string", description: 'The app repo as "owner/name" (attached to the project).' },
+      envKey: { type: "string", description: "Target env (from list_deploy_targets) — its cluster is the deploy target." },
+      namespace: {
+        type: "string",
+        description:
+          "REQUIRED. Kubernetes namespace to deploy into — the USER's choice, never the env's default silently. " +
+          "Ask via list_kubernetes_resources(envKey, kind:'namespaces') then an ```options``` question (existing " +
+          "namespaces + 'Create new: <default>').",
+      },
+      services: {
+        type: "array",
+        description:
+          "REQUIRED. One entry per service from analyze_app_services, with imageName = the ECR repository the USER " +
+          "chose (you must have asked them via an ```options``` question built from list_ecr_repos — even for a single service).",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: '"frontend" | "backend" | "app" (matches analyze_app_services).' },
+            path: { type: "string", description: 'Build-context subdir; "" for repo root.' },
+            imageName: { type: "string", description: "ECR repo name the user chose (existing) or the new name to create." },
+            expose: { type: "boolean", description: "Expose publicly via Ingress (needs host). Usually true for a frontend." },
+            host: { type: "string", description: "Public hostname when exposing." },
+          },
+          required: ["name", "imageName"],
+          additionalProperties: false,
+        },
+      },
+      appName: { type: "string", description: "Base app name (lowercase DNS label). Defaults to the repo name." },
+      replicas: { type: "number", description: "Replicas. Default 1." },
+      commitMode: { type: "string", enum: ["pr", "direct"], description: "'pr' (default) opens one PR; 'direct' commits to the default branch." },
+      overwriteDockerfile: { type: "boolean", description: "Replace an existing Dockerfile with the vetted template. Default false." },
+    },
+    required: ["repoFullName", "envKey", "namespace", "services"],
+    additionalProperties: false,
+  },
+  async execute(input, ctx) {
+    // 0 — the repo must be attached; the env must exist.
+    const repo = await prisma.repo.findFirst({
+      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      select: { id: true, defaultBranch: true },
+    });
+    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    const targets = await listDeployTargets(ctx.projectId);
+    const target = targets.find((t) => t.envKey === input.envKey);
+    if (!target) return { ok: false, error: `No deployable env "${input.envKey}" — use list_deploy_targets.` };
+
+    // GATE: the namespace is the USER's choice — never default to the env's
+    // namespace silently. The model must have asked (options built from
+    // list_kubernetes_resources kind:"namespaces") and pass the answer.
+    const namespace = (input.namespace || "").trim();
+    if (!namespace) {
+      return {
+        ok: false,
+        error:
+          `Missing the user's namespace choice. Do NOT default to "${target.namespace || "default"}" or any other namespace yourself: ` +
+          "(1) call list_kubernetes_resources(envKey, kind:\"namespaces\"), (2) ask ONE ```options``` question — the " +
+          `existing namespace names plus "Create new: ${sanitizeAppName(input.repoFullName.split("/").pop() || "app")}", ` +
+          "(3) call deploy_my_app again with the user's answer as `namespace`.",
+      };
+    }
+
+    // 1 — ANALYZE → every deployable service.
+    const det = await analyzeAppServices(ctx.projectId, input.repoFullName);
+    if (!det.ok) return { ok: false, error: `Repo analysis failed: ${det.error}` };
+
+    // GATE: the ECR choice is the USER's — this tool refuses to guess it. The
+    // model must have asked (options built from list_ecr_repos) and pass the
+    // answer via services[].imageName, even for a single-service repo.
+    if (!input.services || input.services.length === 0 || input.services.some((s) => !(s.imageName || "").trim())) {
+      return {
+        ok: false,
+        error:
+          "Missing the user's container-registry choice. Do NOT pick a registry yourself: (1) list the existing registry repos (list_ecr_repos on AWS, list_artifact_registries on GCP), (2) ask the user ONE ```options``` question per detected service — the existing repo names plus \"Create new: <suggestedImageName>\" — services detected here: " +
+          det.services.map((s) => `${s.name} (suggested: ${s.suggestedImageName})`).join(", ") +
+          ", (3) call deploy_my_app again with services:[{name, path, imageName: the user's answer, expose}].",
+      };
+    }
+
+    // Resolve the list of services to deploy + their ECR name / expose choice.
+    type Plan = { svc: AppService; imageName: string; expose: boolean; host?: string };
+    const plans: Plan[] = [];
+    for (const t of input.services) {
+      const svc = matchService(det.services, t);
+      if (!svc) return { ok: false, error: `Service "${t.name ?? t.path ?? "?"}" not found in the repo analysis (detected: ${det.services.map((s) => s.name).join(", ")}).` };
+      plans.push({ svc, imageName: (t.imageName || svc.suggestedImageName).toLowerCase(), expose: !!t.expose, host: t.host });
+    }
+    for (const p of plans) {
+      if (p.expose && !(p.host || "").trim()) return { ok: false, error: `A host is required to expose "${p.svc.name}" publicly.` };
+    }
+
+    const multi = plans.length > 1;
+    const branch = repo.defaultBranch || "main";
+    const short = sanitizeAppName(input.repoFullName.split("/").pop() || "app");
+    const baseApp = sanitizeAppName(input.appName || short);
+    const tok = await resolveTokenForRepo(repo.id);
+
+    // Which cloud is this env on? Drives the registry (ECR / Artifact Registry /
+    // ACR) and the keyless CD auth (EKS OIDC / GKE WIF / AKS federated OIDC).
+    const envRow = await prisma.env.findFirst({
+      where: { projectId: ctx.projectId, key: input.envKey },
+      select: { kubeconfigRef: true, cloudProvider: { select: { id: true, kind: true, region: true, accountRef: true } } },
+    });
+    const cloud = envRow?.cloudProvider?.kind;
+    if (cloud !== "aws" && cloud !== "gcp" && cloud !== "azure") {
+      return { ok: false, error: `deploy_my_app supports AWS (EKS + ECR), GCP (GKE + Artifact Registry), and Azure (AKS + ACR). The env "${input.envKey}" is on "${cloud ?? "no connected cloud"}".` };
+    }
+    const cloudProviderId = envRow!.cloudProvider!.id;
+
+    // Cluster ref for the keyless CD, parsed from the env's stored kubeconfig.
+    let eksRef: { region: string; accountId: string; clusterName: string } | null = null;
+    let gkeRef: { projectId: string; location: string; clusterName: string } | null = null;
+    let aksRef: { clusterName: string; resourceGroup: string } | null = null;
+    if (envRow?.kubeconfigRef) {
+      try {
+        const kc = await decryptSecret(envRow.kubeconfigRef);
+        if (cloud === "aws") eksRef = parseEksClusterRef(kc);
+        else if (cloud === "gcp") gkeRef = parseGkeClusterRef(kc);
+        else {
+          const parsed = parseAksClusterRef(kc);
+          if (parsed) {
+            let rg = parsed.resourceGroup;
+            if (!rg) {
+              // Kubeconfig didn't carry the resource group — resolve it via ARM.
+              const tok = await getAzureAccessToken(cloudProviderId);
+              const subscription = envRow.cloudProvider!.accountRef?.trim();
+              if (tok.ok && subscription) {
+                const found = await findAksClusterByName(tok.accessToken, subscription, parsed.clusterName);
+                if (found.ok) rg = found.resourceGroup;
+              }
+            }
+            if (rg) aksRef = { clusterName: parsed.clusterName, resourceGroup: rg };
+          }
+        }
+      } catch {
+        /* no cluster ref → AWS CD falls back to the KUBECONFIG_B64 secret */
+      }
+    }
+    const cdNotes: string[] = [];
+    // Only when the cluster ref couldn't be resolved does the CD fall back to
+    // the KUBECONFIG_B64 secret — EKS/GKE/AKS are otherwise all keyless.
+    const needsSecretFallback = (cloud === "aws" && !eksRef) || (cloud === "gcp" && !gkeRef) || (cloud === "azure" && !aksRef);
+    if (needsSecretFallback) {
+      const kc = await setKubeconfigSecretTool.execute({ repoFullName: input.repoFullName, envKey: input.envKey }, ctx);
+      cdNotes.push(kc.ok ? "Set the KUBECONFIG_B64 repo secret for the CD workflow." : `Could not set KUBECONFIG_B64 (${kc.error}) — set it with set_kubeconfig_secret.`);
+    }
+
+    // 2+3 — per service: ensure the registry + keyless auth, then generate files.
+    const allFiles: { path: string; content: string }[] = [];
+    const deployed: DeployedService[] = [];
+    const registrySteps: string[] = [];
+    for (const { svc, imageName, expose, host } of plans) {
+      const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
+      const cdWorkflowFile = multi ? `deploy-${svc.name}.yml` : "deploy.yml";
+      const cdWorkflowName = multi ? `Deploy ${svc.name} to Kubernetes (CD)` : "Deploy to Kubernetes (CD)";
+      const manifestDir = multi ? `k8s/${input.envKey}/${svc.name}` : `k8s/${input.envKey}`;
+      const keepDockerfile = svc.existingDockerfile && !input.overwriteDockerfile;
+      const label = multi ? `[${svc.name}] ` : "";
+      const commonSpec = {
+        stack: svc.stack,
+        dockerParams: svc.params,
+        branch,
+        context: svc.path,
+        cdWorkflowName,
+        cdFileName: cdWorkflowFile,
+        include: { dockerfile: !keepDockerfile, nginx: !keepDockerfile, compose: !keepDockerfile, cdWorkflow: true },
+        deploy: { appName, namespace, replicas: Math.max(1, input.replicas ?? 1), containerPort: svc.port, env: [], expose, host },
+        manifestDir,
+      };
+
+      let built: ReturnType<typeof buildCicdArtifacts>;
+      let registryUri: string;
+      let workflowFile: string;
+
+      if (cloud === "gcp") {
+        const location = envRow!.cloudProvider!.region || "us-central1";
+        const gcp = await setupGcpDeployRegistry(cloudProviderId, input.repoFullName, location, imageName);
+        if (!gcp.ok) return { ok: false, error: `Registry/WIF setup for "${svc.name}" failed: ${gcp.error}` };
+        registrySteps.push(`${label}Artifact Registry "${imageName}" + keyless WIF ready.`);
+        if (gkeRef) cdNotes.push(`${label}Granted the CI service account GKE deploy access (keyless CD ready).`);
+        workflowFile = multi ? `build-and-push-${svc.name}-gar.yml` : "build-and-push-gar.yml";
+        const ciWorkflowName = multi ? `Build and push ${svc.name} to Artifact Registry` : "Build and push to Artifact Registry";
+        registryUri = `${location}-docker.pkg.dev/${gcp.data.projectId}/${imageName}/${appName}`;
+        built = buildCicdArtifacts({
+          ...commonSpec,
+          ciWorkflowName,
+          ciFileName: workflowFile,
+          registryUseVars: false,
+          registry: { cloud: "gcp", workloadIdentityProvider: gcp.data.workloadIdentityProvider, serviceAccount: gcp.data.serviceAccount, location, projectId: gcp.data.projectId, repository: imageName, image: appName },
+          gkeCluster: gkeRef ? { clusterName: gkeRef.clusterName, location: gkeRef.location } : undefined,
+        });
+      } else if (cloud === "azure") {
+        const providerRow = await prisma.cloudProvider.findUnique({ where: { id: cloudProviderId }, select: { resourceGroup: true, region: true } });
+        const resourceGroup = aksRef?.resourceGroup || providerRow?.resourceGroup;
+        if (!resourceGroup) return { ok: false, error: `No Azure resource group known for "${svc.name}" — connect an AKS cluster on this env or set a default resource group on the Cloud providers tab.` };
+        const location = providerRow?.region || "eastus";
+        const azureAcrName = imageName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50) || "app";
+        const az = await setupAzureDeployRegistry(cloudProviderId, input.repoFullName, resourceGroup, azureAcrName, location, branch, aksRef ?? undefined);
+        if (!az.ok) return { ok: false, error: `Registry/OIDC setup for "${svc.name}" failed: ${az.error}` };
+        registrySteps.push(`${label}ACR "${azureAcrName}" + keyless federated OIDC ready.`);
+        if (aksRef) cdNotes.push(`${label}Granted the CI app AKS admin credential access (keyless CD ready).`);
+        workflowFile = multi ? `build-and-push-${svc.name}-acr.yml` : "build-and-push-acr.yml";
+        const ciWorkflowName = multi ? `Build and push ${svc.name} to ACR` : "Build and push to ACR";
+        registryUri = `${az.data.loginServer}/${appName}`;
+        built = buildCicdArtifacts({
+          ...commonSpec,
+          ciWorkflowName,
+          ciFileName: workflowFile,
+          registryUseVars: false,
+          registry: { cloud: "azure", clientId: az.data.clientId, tenantId: az.data.tenantId, subscriptionId: az.data.subscriptionId, registry: az.data.registry, image: appName },
+          aksCluster: aksRef ? { clusterName: aksRef.clusterName, resourceGroup: aksRef.resourceGroup } : undefined,
+        });
+      } else {
+        const oidc = await setupGithubOidcEcrTool.execute({ repoFullName: input.repoFullName, ecrRepoName: imageName }, ctx);
+        if (!oidc.ok) return { ok: false, error: `Registry setup for "${svc.name}" failed: ${oidc.error}` };
+        registrySteps.push(...oidc.output.steps.map((s) => `${label}${s}`));
+        // Single service uses repo-level GitHub vars; a monorepo bakes values in.
+        if (!multi && tok.ok) {
+          await setRepoActionsVariable(tok.accessToken, input.repoFullName, "AWS_ROLE_ARN", oidc.output.roleArn);
+          await setRepoActionsVariable(tok.accessToken, input.repoFullName, "AWS_REGION", oidc.output.region);
+          await setRepoActionsVariable(tok.accessToken, input.repoFullName, "ECR_REPOSITORY", oidc.output.ecrRepositoryUri);
+        }
+        // Keyless CD needs the CI role to have cluster RBAC (idempotent Access Entries).
+        if (eksRef) {
+          const grant = await grantEksAccessTool.execute({ envKey: input.envKey, roleArn: oidc.output.roleArn, accessLevel: "admin" }, ctx);
+          cdNotes.push(grant.ok
+            ? `${label}Granted ${oidc.output.roleArn} access to cluster ${eksRef.clusterName} (keyless CD ready).`
+            : `${label}Could not grant cluster access (${grant.error}) — if the CD run fails "Unauthorized", call grant_eks_access(envKey, roleArn).`);
+        }
+        workflowFile = multi ? `build-and-push-${svc.name}.yml` : "build-and-push.yml";
+        const ciWorkflowName = multi ? `Build and push ${svc.name} to ECR` : "Build and push to ECR";
+        registryUri = oidc.output.ecrRepositoryUri;
+        built = buildCicdArtifacts({
+          ...commonSpec,
+          ciWorkflowName,
+          ciFileName: workflowFile,
+          eksCluster: eksRef ? { clusterName: eksRef.clusterName, region: eksRef.region } : undefined,
+          registryUseVars: !multi,
+          registry: { cloud: "aws", roleArn: oidc.output.roleArn, region: oidc.output.region, ecrRepositoryUri: oidc.output.ecrRepositoryUri },
+        });
+      }
+
+      for (const f of built.files) allFiles.push(f);
+      deployed.push({
+        name: svc.name,
+        path: svc.path,
+        appName,
+        imageRef: built.imageRef,
+        containerPort: svc.port,
+        registryUri,
+        workflowFile,
+        cdWorkflowFile,
+        expose,
+        keptExistingDockerfile: keepDockerfile,
+      });
+    }
+    registrySteps.push(...cdNotes);
+
+    // 4 — Push everything as ONE PR (or straight to the default branch).
+    const direct = input.commitMode === "direct";
+    const pushBranch = direct ? branch : `deploy/${baseApp}`;
+    const svcList = deployed.map((d) => `**${d.name}**${d.path ? ` (\`./${d.path}\`)` : ""} → \`${d.imageRef}\``).join("\n- ");
+    const prBody =
+      `End-to-end pipeline generated by DeepAgent for **${baseApp}**` +
+      (multi ? ` (monorepo — ${deployed.length} services).` : ` (${det.services[0].stackTitle}).`) +
+      `\n\nServices:\n- ${svcList}\n\n` +
+      allFiles.map((f) => `- \`${f.path}\``).join("\n") +
+      `\n\nOn \`${branch}\`: CI builds → scans → pushes each image, then the CD workflow deploys it to the cluster automatically (${eksRef || gkeRef || aksRef ? "keyless — no stored cluster credentials" : "via the KUBECONFIG_B64 secret"}).`;
+
+    const committed: string[] = [];
+    let pullRequest: { number: number; url: string } | undefined;
+    let first = true;
+    for (const f of allFiles) {
+      const res = await writeRepoFileTool.execute(
+        {
+          repoFullName: input.repoFullName,
+          path: f.path,
+          content: f.content,
+          branch: pushBranch,
+          message: `Add app pipeline for ${baseApp} (DeepAgent)`,
+          openPullRequest: !direct && first,
+          pullRequestBody: prBody,
+        },
+        ctx,
+      );
+      if (!res.ok) return { ok: false, error: `Failed writing ${f.path}: ${res.error}` };
+      committed.push(f.path);
+      if (res.output.pullRequest) pullRequest = res.output.pullRequest;
+      first = false;
+    }
+
+    const watchHint = deployed
+      .map((d) => `wait_for_workflow_run("${d.workflowFile}") then wait_for_workflow_run("${d.cdWorkflowFile}") then deployment_status(envKey:"${input.envKey}", appName:"${d.appName}")`)
+      .join("; and for the next service ");
+    const next = direct
+      ? `Files committed to ${branch} — CI is starting, and the CD workflow will deploy automatically after CI succeeds. Watch it: ${watchHint}. deploy_app is only the fallback if the CD run fails.`
+      : `PR #${pullRequest?.number ?? "?"} opened — after the user merges it, CI builds each image and the CD workflow deploys it automatically. Then watch: ${watchHint}. deploy_app is only the fallback if the CD run fails.`;
+
+    return {
+      ok: true,
+      output: {
+        monorepo: multi,
+        services: deployed,
+        files: committed,
+        branch: pushBranch,
+        namespace,
+        pullRequest,
+        registrySteps,
+        next,
+      },
+    };
+  },
+};

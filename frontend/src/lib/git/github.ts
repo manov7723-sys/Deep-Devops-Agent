@@ -44,8 +44,32 @@ export class GithubRepoClient implements GitRepoClient {
     };
   }
 
+  /**
+   * fetch with retries on NETWORK failures ("fetch failed" — flaky link, DNS,
+   * broken IPv6) and 5xx gateway blips. Git object POSTs are content-addressed,
+   * so a duplicate retry is harmless; without this, one dropped packet aborted
+   * a whole multi-file push halfway through.
+   */
+  private async http(url: string, init?: RequestInit, attempts = 3): Promise<Response> {
+    let lastErr: unknown;
+    for (let i = 1; i <= attempts; i++) {
+      try {
+        const res = await fetch(url, init);
+        if ((res.status === 502 || res.status === 503 || res.status === 504) && i < attempts) {
+          await new Promise((r) => setTimeout(r, i * 1000));
+          continue;
+        }
+        return res;
+      } catch (err) {
+        lastErr = err;
+        if (i < attempts) await new Promise((r) => setTimeout(r, i * 1000));
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error("Network request to GitHub failed.");
+  }
+
   private async post(path: string, body: unknown): Promise<Response> {
-    return fetch(`${this.apiBase}${path}`, {
+    return this.http(`${this.apiBase}${path}`, {
       method: "POST",
       headers: { ...this.headers(), "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -60,7 +84,7 @@ export class GithubRepoClient implements GitRepoClient {
   }
 
   async listFiles(path: string, ref?: string): Promise<GitEntry[]> {
-    const res = await fetch(this.contentsUrl(path, ref), { headers: this.headers(), cache: "no-store" });
+    const res = await this.http(this.contentsUrl(path, ref), { headers: this.headers(), cache: "no-store" });
     if (res.status === 404) return [];
     if (!res.ok) throw new Error(`GitHub contents ${res.status} for ${this.fullName}/${path}`);
     const body = (await res.json()) as unknown;
@@ -71,7 +95,7 @@ export class GithubRepoClient implements GitRepoClient {
   }
 
   async readFile(path: string, ref?: string): Promise<string | null> {
-    const res = await fetch(this.contentsUrl(path, ref), { headers: this.headers(), cache: "no-store" });
+    const res = await this.http(this.contentsUrl(path, ref), { headers: this.headers(), cache: "no-store" });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`GitHub read ${res.status} for ${this.fullName}/${path}`);
     const body = (await res.json()) as { type?: string; content?: string; encoding?: string };
@@ -80,7 +104,7 @@ export class GithubRepoClient implements GitRepoClient {
   }
 
   private async refSha(branch: string): Promise<string | null> {
-    const res = await fetch(
+    const res = await this.http(
       `${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodeURIComponent(branch)}`,
       { headers: this.headers(), cache: "no-store" },
     );
@@ -104,7 +128,7 @@ export class GithubRepoClient implements GitRepoClient {
     if (!headSha) throw new Error(`Branch "${branch}" not found in ${this.fullName} — call ensureBranch first.`);
 
     // Base tree of the branch HEAD.
-    const commitRes = await fetch(`${this.apiBase}/repos/${this.fullName}/git/commits/${headSha}`, { headers: this.headers(), cache: "no-store" });
+    const commitRes = await this.http(`${this.apiBase}/repos/${this.fullName}/git/commits/${headSha}`, { headers: this.headers(), cache: "no-store" });
     if (!commitRes.ok) throw new Error(`Could not read HEAD commit: ${commitRes.status}`);
     const baseTree = ((await commitRes.json()) as { tree: { sha: string } }).tree.sha;
 
@@ -125,7 +149,7 @@ export class GithubRepoClient implements GitRepoClient {
     if (!commit.ok) throw new Error(`Commit failed: ${commit.status} ${await commit.text().catch(() => "")}`);
     const newCommitSha = ((await commit.json()) as { sha: string }).sha;
 
-    const patch = await fetch(`${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
+    const patch = await this.http(`${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
       method: "PATCH",
       headers: { ...this.headers(), "Content-Type": "application/json" },
       body: JSON.stringify({ sha: newCommitSha }),
@@ -143,8 +167,23 @@ export class GithubRepoClient implements GitRepoClient {
       body: args.body ?? "",
       maintainer_can_modify: true,
     });
-    if (!res.ok) throw new Error(`Could not open pull request: ${res.status} ${await res.text().catch(() => "")}`);
-    const j = (await res.json()) as { number: number; html_url: string };
-    return { number: j.number, url: j.html_url };
+    if (res.ok) {
+      const j = (await res.json()) as { number: number; html_url: string };
+      return { number: j.number, url: j.html_url };
+    }
+    // 422 "A pull request already exists" — e.g. a retried push after a network
+    // blip. Idempotent: return the existing open PR for this branch instead.
+    if (res.status === 422) {
+      const owner = this.fullName.split("/")[0];
+      const existing = await this.http(
+        `${this.apiBase}/repos/${this.fullName}/pulls?state=open&head=${encodeURIComponent(`${owner}:${args.sourceBranch}`)}`,
+        { headers: this.headers(), cache: "no-store" },
+      );
+      if (existing.ok) {
+        const list = (await existing.json()) as Array<{ number: number; html_url: string }>;
+        if (list[0]) return { number: list[0].number, url: list[0].html_url };
+      }
+    }
+    throw new Error(`Could not open pull request: ${res.status} ${await res.text().catch(() => "")}`);
   }
 }

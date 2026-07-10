@@ -109,7 +109,59 @@ export async function createAcr(cloudProviderId: string, resourceGroup: string, 
   return { ok: true, data: { name, resourceGroup, loginServer: r.data.properties?.loginServer ?? `${name}.azurecr.io` } };
 }
 
-export type AzureOidcResult = { clientId: string; tenantId: string; subscriptionId: string };
+export type AzureOidcResult = { clientId: string; tenantId: string; subscriptionId: string; servicePrincipalObjectId: string };
+
+/**
+ * Parse an AKS kubeconfig's cluster name + resource group. The context name IS
+ * the cluster name (no gke_/eks_-style prefix); the resource group is embedded
+ * in the credential user, e.g. "clusterAdmin_rg-devops_agent-cluster" or
+ * "clusterUser_<rg>_<cluster>" — the format `az aks get-credentials` writes.
+ */
+export function parseAksClusterRef(kubeconfig: string): { clusterName: string; resourceGroup: string | null } | null {
+  const clusterName = kubeconfig.match(/current-context:\s*([A-Za-z0-9._-]+)/)?.[1];
+  if (!clusterName) return null;
+  const escaped = clusterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rg = kubeconfig.match(new RegExp(`user:\\s*cluster(?:Admin|User)_([A-Za-z0-9._-]+)_${escaped}\\b`))?.[1];
+  return { clusterName, resourceGroup: rg ?? null };
+}
+
+/** Built-in role id for "Azure Kubernetes Service Cluster Admin Role". */
+const AKS_CLUSTER_ADMIN_ROLE = "0ab0b1a8-8aac-4efd-b8c2-3ee1fb270be8";
+
+/**
+ * Grant a service principal admin access to fetch AKS credentials (the same
+ * privilege level this app's own stored AKS kubeconfigs use — bypasses
+ * in-cluster RBAC entirely, so it works regardless of whether the cluster uses
+ * local accounts or Entra ID). Used so the CD workflow's federated app can
+ * `az aks get-credentials --admin` with no stored secret. Idempotent.
+ */
+export async function grantAksClusterAdmin(
+  cloudProviderId: string,
+  servicePrincipalObjectId: string,
+  resourceGroup: string,
+  clusterName: string,
+): Promise<Res<true>> {
+  const armTok = await getAzureAccessToken(cloudProviderId);
+  if (!armTok.ok) return { ok: false, error: armTok.error };
+  const sp = await resolveSp(cloudProviderId);
+  if (!sp.ok) return sp;
+  const aksId = `/subscriptions/${sp.data.subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ContainerService/managedClusters/${clusterName}`;
+  const assignmentName = await deterministicGuid(`${servicePrincipalObjectId}:${clusterName}:aksadmin`);
+  const ra = await http(
+    armTok.accessToken,
+    `${ARM}${aksId}/providers/Microsoft.Authorization/roleAssignments/${assignmentName}?api-version=2022-04-01`,
+    "PUT",
+    {
+      properties: {
+        roleDefinitionId: `/subscriptions/${sp.data.subscription}/providers/Microsoft.Authorization/roleDefinitions/${AKS_CLUSTER_ADMIN_ROLE}`,
+        principalId: servicePrincipalObjectId,
+        principalType: "ServicePrincipal",
+      },
+    },
+  );
+  if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error)) return { ok: false, error: `AKS admin role assignment failed: ${ra.error}` };
+  return { ok: true, data: true };
+}
 
 /**
  * Set up keyless GitHub→Azure auth for one repo + ACR: AD app, federated
@@ -202,7 +254,57 @@ export async function setupGithubFederatedCredential(
   );
   if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error)) return { ok: false, error: `Role assignment failed: ${ra.error}` };
 
-  return { ok: true, data: { clientId: appClientId, tenantId, subscriptionId: subscription } };
+  return { ok: true, data: { clientId: appClientId, tenantId, subscriptionId: subscription, servicePrincipalObjectId: spObjectId } };
+}
+
+export type AzureDeployRegistry = {
+  registry: string;
+  loginServer: string;
+  resourceGroup: string;
+  clientId: string;
+  tenantId: string;
+  subscriptionId: string;
+  servicePrincipalObjectId: string;
+};
+
+/**
+ * Full Azure setup for the one-shot deploy flow, for ONE service: ensure the
+ * ACR (create if new), set up keyless federated OIDC + AcrPush, and (if an AKS
+ * cluster is given) grant the same app admin AKS credential access so the CD
+ * workflow can deploy. Idempotent. Returns everything the CI + CD need.
+ */
+export async function setupAzureDeployRegistry(
+  cloudProviderId: string,
+  repoFullName: string,
+  resourceGroup: string,
+  acrName: string,
+  location: string,
+  branch: string,
+  aks?: { clusterName: string; resourceGroup: string },
+): Promise<Res<AzureDeployRegistry>> {
+  const acr = await createAcr(cloudProviderId, resourceGroup, acrName, location);
+  if (!acr.ok) return { ok: false, error: `Creating the ACR failed. ${acr.error}` };
+
+  const oidc = await setupGithubFederatedCredential(cloudProviderId, repoFullName, acrName, resourceGroup, branch);
+  if (!oidc.ok) return oidc;
+
+  if (aks) {
+    const grant = await grantAksClusterAdmin(cloudProviderId, oidc.data.servicePrincipalObjectId, aks.resourceGroup, aks.clusterName);
+    if (!grant.ok) return { ok: false, error: `Granting AKS deploy access failed. ${grant.error}` };
+  }
+
+  return {
+    ok: true,
+    data: {
+      registry: acrName,
+      loginServer: acr.data.loginServer,
+      resourceGroup,
+      clientId: oidc.data.clientId,
+      tenantId: oidc.data.tenantId,
+      subscriptionId: oidc.data.subscriptionId,
+      servicePrincipalObjectId: oidc.data.servicePrincipalObjectId,
+    },
+  };
 }
 
 /** A stable v5-ish GUID from a string (for idempotent role-assignment names). */

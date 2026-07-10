@@ -65,3 +65,41 @@ export async function setRepoActionsSecret(token: string, fullName: string, name
   }
   return { ok: true };
 }
+
+/**
+ * Create or update a repository Actions VARIABLE (`vars.NAME`). Variables are
+ * plain config (NOT secrets) — no encryption — the right home for non-sensitive
+ * pipeline config like the OIDC role ARN, region and ECR URI so workflows stay
+ * generic instead of hardcoding values.
+ */
+export async function setRepoActionsVariable(token: string, fullName: string, name: string, value: string): Promise<Res> {
+  // Try update first; create if it doesn't exist yet.
+  let res: Response;
+  try {
+    res = await fetch(`${GH}/repos/${fullName}/actions/variables/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: headers(token),
+      body: JSON.stringify({ name, value }),
+    });
+  } catch (e) {
+    return { ok: false, error: `Network error writing the variable: ${e instanceof Error ? e.message : "error"}` };
+  }
+  if (res.status === 204) return { ok: true };
+  if (res.status === 404) {
+    let create: Response;
+    try {
+      create = await fetch(`${GH}/repos/${fullName}/actions/variables`, {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify({ name, value }),
+      });
+    } catch (e) {
+      return { ok: false, error: `Network error creating the variable: ${e instanceof Error ? e.message : "error"}` };
+    }
+    if (create.status === 201) return { ok: true };
+    const t = await create.text().catch(() => "");
+    return { ok: false, error: `Couldn't create the variable (HTTP ${create.status}). ${t.slice(0, 160)}` };
+  }
+  const t = await res.text().catch(() => "");
+  return { ok: false, error: `Couldn't set the variable (HTTP ${res.status}). ${t.slice(0, 160)}` };
+}

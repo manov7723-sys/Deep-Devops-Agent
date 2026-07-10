@@ -51,7 +51,7 @@ const INFRA_PLAYBOOK = [
   `- Ask requirements ONE at a time. ${OPTIONS_RULE} Gather: resource specifics, name (globally-unique where needed), region, environment, repo (for push), prod settings (encryption, HA, tags).`,
   "- COST FIRST: before showing the create/apply options, call estimate_infra_cost with the chosen specs (cloud, instanceType, nodeCount, managedK8s for EKS/AKS/GKE, storageGb, loadBalancers) and show the user the estimated MONTHLY cost + line-item breakdown. Say it's an approximate on-demand estimate. Only proceed once they've seen it.",
   '- Then show a short SUMMARY and ask the mode: ```options``` {"question":"How should I create it?","options":["Generate & push to GitHub","Submit for approval & apply","Cancel"],"key":"mode"}.',
-  "- APPROVAL GATE (MANDATORY — never apply directly): to APPLY any infra, do NOT call run_terraform action='apply'. First run_terraform action='plan' to preview, then call request_infra_approval with the SAME files/stack + the cloud/region/instanceType/nodeCount so it runs policy checks + cost and creates a PENDING approval. If it returns status='blocked', STOP — tell the user exactly which policy rule failed (public storage, oversized/GPU instance, non-allowed region, admin port open to the world) and how to fix it; do NOT retry until they change the spec. If status='pending_approval', tell the user the change is waiting for approval on the Approvals page and that it will be applied automatically once a human approves — do NOT try to apply it yourself.",
+  "- APPROVAL GATE (MANDATORY — never apply directly): to APPLY any infra, do NOT call run_terraform action='apply'. First run_terraform action='plan' to preview, then call request_infra_approval with the SAME files/stack + the cloud/region/instanceType/nodeCount so it runs policy checks + cost and creates a PENDING approval. If it returns status='blocked', STOP — tell the user exactly which policy rule failed (public storage, oversized/GPU instance, non-allowed region, admin port open to the world) and how to fix it; do NOT retry until they change the spec. If status='pending_approval', respond with a fenced ```approval-card``` block containing {\"approvalId\":\"<the returned approvalId>\"} (JSON inside the fence) so the user can approve/reject right there in chat — do NOT tell them to go find an Approvals page, and do NOT try to apply it yourself.",
   "- EKS → ALWAYS provision_eks for generating the Terraform; NEVER hand-write EKS Terraform. Other resources → write production-grade Terraform (encryption, least-privilege, remote state). Push = write_repo_file openPullRequest=true. The apply ALWAYS goes through request_infra_approval (the gate), never run_terraform apply directly. Use a stable descriptive `stack` name and REUSE it across runs.",
 ].join("\n");
 
@@ -95,7 +95,7 @@ const CI_PLAYBOOK = [
   "3. verify_docker_build with the generated files — runs a real docker build, no commit/tokens. If built=false, read `log`, fix, verify again until it builds. If docker isn't on the server, warn and proceed carefully.",
   "4. setup_github_oidc_ecr (repoFullName, optional ecrRepoName/region) → creates the OIDC provider + repo-scoped IAM role + ECR push policy + ECR repo; returns roleArn + ecrRepositoryUri + region. Report `steps`. Needs an AWS account connected.",
   "5. generate_ecr_workflow with those values (NEVER hand-write the YAML) → .github/workflows/build-and-push.yml. Explain the flow (checkout → OIDC assume-role → ECR login → build → push) and ASK: are you satisfied — save this to the CI/CD pipeline?",
-  "6. Do NOT push to GitHub here. On 'yes', call save_pipeline_to_project (repoFullName, a short name, ALL generated files) — this saves the pipeline to the project's CI/CD tab where the user edits the script and clicks 'Run pipeline' (that step commits it to the default branch + triggers the GitHub Actions run, all monitored in-app). Tell the user it's saved to the CI/CD tab and they can edit + Run it there. Only use write_repo_file (PR) instead if the user explicitly asks for a pull request rather than the CI/CD pipeline.",
+  "6. Do NOT push to GitHub without asking. Ask via ```options``` whether to commit now (opens a PR) or save it and commit later. On 'commit now', call write_repo_file for each generated file with openPullRequest=true on the first file — share the PR link. On 'save for later', call save_pipeline_to_project (repoFullName, a short name, ALL generated files) and tell the user it's saved — they can ask you to 'run the saved pipeline' anytime and you'll commit it then (write_repo_file, same as above).",
 ].join("\n");
 
 /**
@@ -128,12 +128,13 @@ const DEPLOY_APP_PLAYBOOK = [
   "## Deploy an app (quick) — triggers: 'deploy my app', 'deploy the application', 'get my app running', 'deploy <image>'",
   "This is the DIRECT deploy path for when an image already exists. (If the user has NOT built/pushed an image yet, offer the full build pipeline instead — see the full deploy pipeline playbook.) Start immediately, asking only what's needed:",
   "0. TIMING FIRST — before anything else, ASK '''Deploy now, or schedule it for later?''' via an ```options``` block (options: 'Deploy now', 'Schedule for later'). If they pick 'Schedule for later', ALSO ask when (```options``` with e.g. 'In 1 hour', 'Tonight 9 PM', 'Tomorrow 9 AM', 'Custom'). Remember the choice; still collect all the same deploy settings below either way.",
-  "1. list_deploy_targets → if more than one env, ASK which environment/cluster (```options```); if exactly one, use it and say so; if none, tell them to connect a cluster on the Clusters tab first.",
+  "1. Environment: use the DEFAULT deploy environment from your system context and say so — do NOT ask (only deviate if the user explicitly names another env). If the context has no default env, call list_deploy_targets; none → respond with an empty fenced ```cluster-connect``` block so they can connect an existing cluster right there in chat (or the eks-create/gke-create/aks-create/proxmox-vm fence if they want to provision a NEW one).",
   "2. Image: if the user named one, use it. Otherwise list_registry_images and ASK which to deploy (```options```, default the newest). If the registry is empty, say so and offer to set up the full build+push pipeline.",
   "3. Ask the settings the manifest needs, one at a time via ```options``` (WAIT for each), offering sensible defaults so the user can accept quickly: app name (default the repo/image name), namespace (default the env's), container port (default 8080 or the detected port), replicas (default 1), expose publicly? (+ host if yes). Keep it short.",
   "4. Optionally ask which EXTRA files beyond Deployment+Service they want (Ingress if exposing, ConfigMap/Secret/HPA) — default to just Deployment+Service if they don't care.",
-  "5. RUN IT — respect the timing choice from step 0: if 'Deploy now', call deploy_app(envKey, appName, image, containerPort, replicas, env, expose, host). IMPORTANT — deploy_app does NOT deploy immediately: EVERY deploy goes through an APPROVAL GATE. deploy_app returns pendingApproval=true with an approvalId; tell the user the deploy is WAITING FOR APPROVAL and must be approved on the Approvals page before it runs — do NOT claim the app is live yet. If 'Schedule for later', call schedule_deployment with the SAME fields plus the time (runAtISO or delayMinutes); confirm the run time and tell them the scheduler will run it.",
-  "6. After deploy_app, DON'T poll deployment_status yet — nothing is deployed until a human approves. Just report that it's pending approval (with what they're approving: image, env, replicas). Once they say it's approved, THEN poll deployment_status until healthy. If you scheduled it instead, remind them they can 'list scheduled deployments' or 'cancel the scheduled deploy' anytime.",
+  "5. RUN IT — respect the timing choice from step 0: if 'Deploy now', call deploy_app(envKey, appName, image, containerPort, replicas, env, expose, host). IMPORTANT — deploy_app does NOT deploy immediately: EVERY deploy goes through an APPROVAL GATE. deploy_app returns pendingApproval=true with an approvalId; respond with a fenced ```approval-card``` block containing {\"approvalId\":\"<the returned approvalId>\"} so the user can approve/reject it right there in chat — do NOT claim the app is live yet, and do NOT tell them to go find an Approvals page. If 'Schedule for later', call schedule_deployment with the SAME fields plus the time (runAtISO or delayMinutes); confirm the run time and tell them the scheduler will run it.",
+  "6. After deploy_app, DON'T poll deployment_status yet — nothing is deployed until a human approves via the approval-card. Once they approve it, THEN poll deployment_status until healthy. If you scheduled it instead, remind them they can 'list scheduled deployments' or 'cancel the scheduled deploy' anytime.",
+  "CRITICAL — cluster access is NEVER the user's manual chore. To deploy to a CONNECTED cluster (EKS/GKE/AKS), ALWAYS use deploy_app: it applies SERVER-SIDE with the kubeconfig the app already stored for that env, so it needs NO GitHub Actions, NO KUBECONFIG_B64 secret, and NO editing of the EKS aws-auth ConfigMap or IAM-role mapping. If a GitHub-Actions deploy fails on cluster auth, do NOT send the user to edit aws-auth or paste a kubeconfig — just deploy with deploy_app instead. NEVER tell the user that granting cluster access must be done manually, or that bots/agents/AWS forbid it — that is FALSE (the app already has cluster-admin because the user connected the cluster; and granting an IAM role EKS access, only ever needed for a GitHub-Actions CD the user explicitly insists on, is done by CALLING the grant_eks_access tool yourself (it uses EKS Access Entries) — never make the user edit aws-auth or click through the AWS console).",
 ].join("\n");
 
 /**
@@ -142,22 +143,18 @@ const DEPLOY_APP_PLAYBOOK = [
  * exact sequence so a single message runs the whole thing.
  */
 const DEPLOY_PIPELINE_PLAYBOOK = [
-  "## Full deploy pipeline (one request → app running on the cluster)",
-  "When the user asks to build+scan+push+deploy end-to-end (e.g. 'set up everything and deploy my app'), run this sequence, narrating each step:",
-  "0. TIMING FIRST — before building anything, ASK '''When the pipeline is ready, should the FINAL deploy run now, or be scheduled for later?''' via an ```options``` block (options: 'Deploy now', 'Schedule for later'). If 'Schedule for later', also ask when ('In 1 hour', 'Tonight 9 PM', 'Tomorrow 9 AM', 'Custom'). Remember it — the CI build/scan/push steps run immediately regardless; only the deploy step in 8 is affected.",
-  "1. Dockerfile: detect the stack and generate_dockerfile (+ verify_docker_build). Commit it with write_repo_file if the repo has none.",
-  "2. (Optional) trivy_scan the repo to surface issues early and tell the user.",
-  "3. CI workflow WITH the Trivy gate (ON by default): set up keyless registry auth and generate the build+push workflow — AWS: setup_github_oidc_ecr → generate_ecr_workflow; GCP/Azure: per the registry playbook (generate_gar_workflow / generate_acr_workflow). The generated workflow BUILDS the image, scans it with Trivy, STOPS immediately on any HIGH/CRITICAL vulnerability (the push never runs), then pushes. Commit it with write_repo_file so the push triggers the run.",
-  "4. wait_for_workflow_run(workflowFile: the build-and-push file, e.g. 'build-and-push.yml') until it completes. If done=false, call it again to keep waiting. If conclusion='failure', the Trivy gate most likely stopped it on HIGH/CRITICAL — DO NOT deploy; tell the user and offer to fix the vulnerabilities first. Only continue on conclusion='success'.",
-  "5. Get the image: list_registry_images — the newest entry is the image CI just pushed. NEVER invent an image reference; always take it from here.",
-  "6. INTERACTIVE MANIFEST BUILD — do NOT auto-generate. After CI succeeds, before writing anything, ASK the user which Kubernetes files they want and collect every field, in this order:",
-  "   6a. list_k8s_manifest_kinds, then present the resource kinds and ASK (```options``` block, allow multiple) which files to create — e.g. Namespace, Deployment, Service, Ingress, ConfigMap, Secret, HorizontalPodAutoscaler, PersistentVolumeClaim. Recommend the common set (Namespace + Deployment + Service, add Ingress if they want public access) but let the USER decide. WAIT for their selection.",
-  "   6b. FIRST ask the namespace name (```options``` — default the env's namespace or offer 'Custom'). Use it for every file.",
-  "   6c. Then for EACH selected file, ask its required fields one at a time via ```options``` (from that kind's `fields`): Deployment → name, image (PREFILL the image from step 5 as the default), replicas, containerPort, env vars, probe path, resources; Service → type, port, targetPort, selector; Ingress → host, path, TLS; ConfigMap/Secret → keys/values; HPA → target, min/max, CPU%. WAIT for each answer. Only after ALL selected files' questions are answered do you start creating manifests.",
-  "   6d. generate_k8s_manifest per selected kind with the collected values (NEVER hand-write YAML). Show each.",
-  "   6e. ASK the user the REPO PATH/folder to save the manifests in (```options``` — default 'k8s', offer e.g. 'manifests', 'deploy/<env>', or Custom). Then commit each manifest with write_repo_file under <that path>/<name>.yaml (openPullRequest on the first file = one PR). Remember this path.",
-  "7. Write the CD workflow: write_cd_files(..., manifestPath=<the path the user chose in 6e>, writeWorkflowOnly=true) → commits ONLY .github/workflows/deploy.yml, which applies the manifests from THAT path (don't let it re-generate the manifest). Pass the SAME manifestPath so the workflow's `kubectl apply -f <path>/` matches where you saved the files. Then set_kubeconfig_secret(repoFullName, envKey) to publish the cluster kubeconfig as the KUBECONFIG_B64 repo secret automatically, so the deploy workflow can reach the cluster with no manual step.",
-  "8. Deploy + verify — honor the timing choice from step 0: use list_deploy_targets for the envKey/namespace. If 'Deploy now', call deploy_app — but note EVERY deploy goes through the APPROVAL GATE: deploy_app returns pendingApproval=true, so tell the user the deploy is WAITING FOR APPROVAL on the Approvals page and will run once approved (don't claim it's live). Only after they confirm it's approved, poll deployment_status until healthy. If 'Schedule for later', call schedule_deployment(...) with the image from step 5 and confirm the run time.",
+  "## Full deploy pipeline — triggers: 'deploy my app', 'set up everything and deploy my app', 'deploy my app from scratch', 'build and deploy this repo'",
+  "HARD RULES for this flow — violating any is a failure: (a) every question MUST be one fenced ```options``` block — NEVER free-text, NEVER one-field-per-message; (b) the ONLY questions you may ask are: the mode (step 0), the NAMESPACE (step 3), and the container-registry choice PER service (step 4) — nothing else; (c) NEVER ask for the repo name — the project's app repository is in your system context; NEVER ask which environment — use the DEFAULT deploy environment from your system context (only deviate if the user explicitly names another env); (d) NEVER ask the stack, build dir, port, image name or app name — analyze_app_services / deploy_my_app DETECT them from the repo; (e) default expose=false (internal) and commitMode='pr' without asking — only ask a hostname if the user SAID they want the app public.",
+  '0. YOUR FIRST REPLY to a deploy request is EXACTLY this fenced block, verbatim, and NOTHING else (the JSON must be INSIDE the fence — never print it as plain text, and never print it twice):\n```options\n{"question":"How should I set this up?","options":["Fully automated — analyze my repo and generate everything","Form — let me fill the settings myself"],"key":"setupMode"}\n```\nWAIT for the answer. FORM → emit the empty ```cicd-setup``` fence and stop (resume at step 6 once the user says the PR is merged). FULLY AUTOMATED → step 1.',
+  "1. Repo = the project's app repository from your system context; env = the DEFAULT deploy environment from your system context. Both are known — ask NOTHING here, just proceed (you'll state them in your step-5 report).",
+  "2. Call analyze_app_services(repoFullName = the app repository). It returns every deployable service — a SINGLE app, OR a monorepo with a separate FRONTEND and BACKEND (each has a path, stackTitle and suggestedImageName). Then call list_kubernetes_resources(envKey, kind:'namespaces') to fetch the existing namespaces on the cluster. Do these silently — do not narrate tool calls.",
+  '3. MANDATORY for every deployment: ask ONE ```options``` question for the namespace — {"question":"Which namespace should I deploy to?","options":[<one entry per existing namespace from step 2>,"Create new: <repo-name-based default>"],"key":"namespace"} — WAIT for the answer. NEVER default silently to the env\'s namespace or "default" — deploy_my_app REJECTS calls without the user\'s namespace choice.',
+  "4. List the container registries that already exist for this env's cloud: list_ecr_repos (AWS), list_artifact_registries (GCP), or list_acr (Azure). Do this silently. Then — MANDATORY even when only ONE service is detected — for EACH service, ask ONE ```options``` block to choose its container registry (a frontend+backend repo gets TWO questions, asked one after another): {\"question\":\"Which container registry should I use for the <name> service (<stackTitle>)?\",\"options\":[<one entry per existing registry repo name>,\"Create new: <that service's suggestedImageName>\"],\"key\":\"registry_<name>\"} — WAIT for each answer before asking the next. If the user picks an existing repo name, that is the service's imageName; if they pick \"Create new: X\", the imageName is X (deploy_my_app creates it automatically). If none exist, still offer just the \"Create new: <suggested>\" option. NEVER skip this question and never pick a registry yourself — deploy_my_app REJECTS calls without the user's choice.",
+  "5. Call deploy_my_app(repoFullName, envKey, namespace, services:[{name, path, imageName, expose}]) — `namespace` and `services` are REQUIRED: namespace = the user's answer from step 3; services = one entry per service with name+path from analyze_app_services, imageName = the repo the user chose in step 4, expose=true only for a service the user wants public (else false). It generates the Dockerfile(s), CI workflow(s) and production-style manifests and opens ONE PR. Report what it detected, the PR link, and each service's image name + workflow file.",
+  "6. Once the files are on the default branch (PR merged, or commitMode='direct'), everything is AUTOMATIC — deploy_my_app also wrote a CD workflow that deploys after CI succeeds (keyless on EKS: the CI role assumes via OIDC; deploy_my_app already granted it cluster access). For EACH service: wait_for_workflow_run(that service's workflowFile) — on conclusion='failure' read the failure back (Trivy gate stops HIGH/CRITICAL; a build error needs a Dockerfile/app fix) and stop for that service; on success wait_for_workflow_run(that service's cdWorkflowFile).",
+  "7. When the CD run succeeds, confirm with deployment_status(envKey, appName=service.appName) and report the result. If a CD run FAILS: on 'Unauthorized' / 'must be logged in to the server', fix it YOURSELF with grant_eks_access(envKey, roleArn=that service's AWS role) and re-run; otherwise fall back to the server-side deploy_app(envKey, appName, image=service.imageRef, containerPort=service.containerPort) — it goes through the APPROVAL GATE (respond with a fenced ```approval-card``` block containing the returned approvalId; after approval, poll deployment_status until healthy).",
+  "CRITICAL — cluster access is NEVER the user's manual chore. The CD workflow is keyless (no KUBECONFIG_B64 on EKS) and deploy_my_app grants the role access automatically. If cluster auth still fails, call grant_eks_access yourself — never send the user to edit aws-auth, paste a kubeconfig, or click the AWS console.",
+  "CUSTOMIZE PATH (only when the user explicitly wants to hand-pick manifests/fields): use the interactive tools — generate_dockerfile / verify_docker_build, setup_github_oidc_ecr → generate_ecr_workflow, list_k8s_manifest_kinds → generate_k8s_manifest per kind (never hand-write YAML), write_repo_file to commit (one PR), then steps 6–7 above for build + server-side deploy.",
 ].join("\n");
 
 /**
@@ -187,7 +184,7 @@ const AZURE_PLAYBOOK = [
   "2. Resource group: call list_azure_resource_groups for the chosen subscription, then ask which via an ```options``` block (skip only for subscription-wide reads like 'list all VMs'). Offer 'Create new' + 'Custom' when relevant.",
   "3. Region (only when CREATING a resource): ask via an ```options``` block — East US, West Europe, Southeast Asia, Central US, Custom.",
   "4. As soon as the user picks subscription / resource group / region, call set_azure_context to SAVE them so you (and future chats) remember. Then for list_azure_vms pass the chosen resourceGroup (omit it only for a subscription-wide list).",
-  "5. If no Azure account is connected, tell the user to connect one with 'Sign in with Microsoft' on the Cloud providers tab — don't guess.",
+  "5. If no Azure account is connected, respond with an empty fenced ```cloud-connect``` block so the user can sign in with Microsoft right there in chat — don't guess.",
 ].join("\n");
 
 /** GCP context playbook — included only for projects with GCP connected. */
@@ -199,7 +196,7 @@ const GCP_PLAYBOOK = [
   "2. Region (only when CREATING a resource): ask via an ```options``` block — us-central1, us-east1, europe-west1, asia-south1, Custom.",
   "3. As soon as the user picks the project/region, call set_gcp_context to SAVE it. Then list_gcp_instances uses that project automatically.",
   "4. If a tool reports the Compute Engine API is disabled, tell the user to enable it at console.cloud.google.com/apis/library/compute.googleapis.com for that project, then retry.",
-  "5. If no GCP account is connected, tell the user to connect one with 'Sign in with Google' on the Cloud providers tab — don't guess.",
+  "5. If no GCP account is connected, respond with an empty fenced ```cloud-connect``` block so the user can sign in with Google right there in chat — don't guess.",
 ].join("\n");
 
 /**
@@ -258,6 +255,66 @@ async function loadClusterContext(projectId: string): Promise<string> {
 }
 
 /**
+ * The project's attached repo(s) — injected so the agent NEVER asks the user
+ * for a repo name. One attached repo (the overwhelmingly common case) means
+ * every repo-taking tool call uses it silently.
+ */
+async function loadRepoContext(projectId: string): Promise<string> {
+  try {
+    const repos = await prisma.repo.findMany({
+      where: { deletedAt: null, projectRepos: { some: { projectId } } },
+      select: { fullName: true, defaultBranch: true },
+      orderBy: { createdAt: "asc" },
+    });
+    if (repos.length === 0) return "";
+    if (repos.length === 1) {
+      const r = repos[0];
+      return (
+        `## This project's app repository: ${r.fullName} (default branch "${r.defaultBranch || "main"}").\n` +
+        `Every tool that takes repoFullName uses "${r.fullName}" — NEVER ask the user for the repo name; it is this one.`
+      );
+    }
+    return (
+      "## Attached repositories:\n" +
+      repos.map((r) => `- ${r.fullName} (default branch "${r.defaultBranch || "main"}")`).join("\n") +
+      "\nIf the task needs ONE repo and the user didn't name it, ask which via an ```options``` block (one option per repo) — never free-text."
+    );
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The project's DEFAULT deploy environment — the env with BOTH a cluster and a
+ * cloud account connected. Injected so the agent deploys to it silently instead
+ * of asking, even when other (non-deployable or cloud-less) envs exist.
+ */
+async function loadDeployEnvContext(projectId: string): Promise<string> {
+  try {
+    const envs = await prisma.env.findMany({
+      where: { projectId },
+      select: { key: true, name: true, namespace: true, kubeconfigRef: true, cloudProviderId: true },
+      orderBy: { createdAt: "asc" },
+    });
+    const deployable = envs.filter((e) => e.kubeconfigRef);
+    if (deployable.length === 0) return "";
+    // Fully wired = cluster + cloud account. That's where "deploy my app" goes.
+    const full = deployable.filter((e) => e.cloudProviderId);
+    const primary = full[0] ?? deployable[0];
+    const others = deployable.filter((e) => e.key !== primary.key);
+    return (
+      `## DEFAULT deploy environment: "${primary.key}"${primary.name ? ` (${primary.name})` : ""}, namespace "${primary.namespace}".\n` +
+      `It has the cluster${primary.cloudProviderId ? " AND the cloud account" : ""} connected — for every deploy/CI/CD flow use envKey "${primary.key}" SILENTLY and just state it; do NOT ask which environment.` +
+      (others.length
+        ? ` Only deploy to ${others.map((e) => `"${e.key}"`).join("/")} if the user EXPLICITLY names it${full.length < deployable.length ? " (note: envs without a cloud account can't do ECR/registry setup)" : ""}.`
+        : "")
+    );
+  } catch {
+    return "";
+  }
+}
+
+/**
  * The project's SAVED Azure context (subscription / resource group / region).
  * Surfaced so the agent already knows the scope and doesn't re-ask every time.
  */
@@ -307,6 +364,8 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
   });
   const kb = await loadKnowledgeContext(projectId);
   const clusters = await loadClusterContext(projectId);
+  const repoCtx = await loadRepoContext(projectId);
+  const deployEnvCtx = await loadDeployEnvContext(projectId);
 
   // ISOLATION: tell the agent which clouds THIS project is connected to. Only
   // the matching cloud tools are exposed, so it must not offer/assume others.
@@ -314,7 +373,7 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
   const cloudLine =
     clouds.size > 0
       ? `## Connected clouds for this project: ${[...clouds].map((c) => c.toUpperCase()).join(", ")}. Only act on these. You have tools ONLY for the connected cloud(s); this project is NOT connected to the others, so don't try them or ask for their accounts.`
-      : "## This project has NO cloud account connected yet. If the user asks about cloud resources (VMs, EC2, etc.), tell them to connect an account on the Cloud providers tab first — don't guess.";
+      : "## This project has NO cloud account connected yet. If the user asks about cloud resources (VMs, EC2, etc.), respond with an empty fenced ```cloud-connect``` block so they can connect an account right there in chat — don't guess.";
   const azureCtx = clouds.has("azure") ? await loadAzureContext(projectId) : "";
   const gcpCtx = clouds.has("gcp") ? await loadGcpContext(projectId) : "";
 
@@ -342,7 +401,34 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
       : "",
     "Be concise. When you don't know something specific about the user's infra, say so plainly rather than guess.",
     cloudLine,
+    clouds.has("proxmox")
+      ? "## This project runs on Proxmox (on-prem). When the user asks to CREATE A VM, respond with an empty fenced block ```proxmox-vm``` on its own lines — the UI renders an interactive VM-creation form in the chat there (env, name, cores, memory, disk, template/ISO, repo). Don't hand-write VM Terraform in chat; that form (and the provision_proxmox_vm tool) generate + apply it."
+      : "",
+    clouds.has("aws")
+      ? "## When the user asks to CREATE a brand-new EKS cluster, respond with an empty fenced ```eks-create``` block on its own lines — an interactive create-cluster form renders in chat. Don't hand-write EKS Terraform in chat."
+      : "",
+    clouds.has("gcp")
+      ? "## When the user asks to CREATE a brand-new GKE cluster, respond with an empty fenced ```gke-create``` block on its own lines — an interactive create-cluster form renders in chat. Don't hand-write GKE Terraform in chat."
+      : "",
+    clouds.has("azure")
+      ? "## When the user asks to CREATE a brand-new AKS cluster, respond with an empty fenced ```aks-create``` block on its own lines — an interactive create-cluster form renders in chat. Don't hand-write AKS Terraform in chat."
+      : "",
+    clouds.size > 0
+      ? "## When the user wants to CONNECT an EXISTING Kubernetes cluster (not provision a new one), respond with an empty fenced ```cluster-connect``` block on its own lines — an interactive connect form (cloud, environment, region/resource-group/project, cluster name, or paste-kubeconfig fallback) renders in chat."
+      : "",
+    "## App secrets (DATABASE_URL, API keys, etc.): NEVER call set_app_secret with a value the user typed in chat — that value would leak into the chat transcript. Instead respond with an empty fenced ```secret-entry``` block on its own lines; the UI renders a masked key/value form that posts the value directly, bypassing the model entirely. Use list_app_secrets / sync_app_secrets as normal (those never touch a raw value).",
+    "## Environments: use list_environments / create_environment / update_environment / delete_environment to manage them from chat — ask the key/name/production-flag via ```options``` if not given, everything else has defaults. Cluster wiring for an environment happens separately via ```cluster-connect``` or a create-cluster fence, not through these tools.",
+    "## Repos: use list_available_repos to show repos not yet attached to this project (offer them via ```options```), then attach_project_repo to wire the chosen one in. Pass asOnly=true only when the user is REPLACING the project's repo, not adding an additional one.",
+    "## Manually triggering a pipeline run (repo + branch + env, outside the normal CI workflow) uses trigger_pipeline. If it returns an approvalId, respond with a fenced ```approval-card``` block containing that id so the user can approve it in chat.",
+    hasGithub
+      ? '## CI/CD & deploy setup — ASK THE MODE FIRST. When the user asks to set up CI/CD or deploy their app end-to-end, FIRST ask exactly ONE question via an ```options``` block: {"question":"How should I set this up?","options":["Fully automated — analyze my repo and generate everything","Form — let me fill the settings myself"],"key":"setupMode"} and WAIT. If they pick the FORM (or explicitly ask for the form/box), respond with an EMPTY fenced block ```cicd-setup``` on its own lines — the UI renders the deterministic setup form in chat (repo, stack, image name, branch, files to write, Trivy gate, deploy env); it generates everything production-style and opens ONE PR. If they pick FULLY AUTOMATED, follow the full-pipeline playbook (deploy_my_app analyzes the repo and writes all the files itself) — do NOT emit the fence. In BOTH modes, after the user merges the PR, continue with the build + server-side deploy steps of the full-pipeline playbook. NEVER ask the settings one-by-one and never hand-write the files.'
+      : "",
+    hasGithub
+      ? "## GitHub secrets are automatable: you CAN create/update GitHub Actions repository secrets yourself with the set_github_actions_secret tool (it encrypts the value with the repo's public key and PUTs it via GitHub's Secrets API — the same mechanism the app already uses for KUBECONFIG_B64). If a workflow needs a secret (e.g. AWS_ROLE_ARN, a registry token, KUBECONFIG_B64), SET IT with that tool and tell the user it's done. NEVER tell the user that secrets must be added manually, or that bots/agents/GitHub don't allow programmatic secret creation — that is FALSE. (Still prefer keyless OIDC — an inline role-to-assume in the workflow, no stored secret — when the registry/cloud supports it, which the generated ECR/GAR/ACR workflows already do.)"
+      : "",
     gitLine,
+    repoCtx,
+    deployEnvCtx,
     azureCtx,
     gcpCtx,
     INFRA_PLAYBOOK,
@@ -601,6 +687,30 @@ const MAX_TOOL_LOOPS = 10;
  * (including the just-posted user one), calls Claude, then writes the agent's
  * reply back to the same thread.
  */
+/**
+ * Deterministic first step of the deploy flow. When the user's message IS a
+ * deploy request ("deploy my app"), the reply must be the mode question — every
+ * time, as clickable options. Models (especially cheaper ones) skip it when the
+ * conversation already contains an earlier deploy, so we don't ask the model at
+ * all: the route returns this canned ```options``` block directly. The user's
+ * button click arrives as the next message and the model takes over from there.
+ */
+const DEPLOY_MODE_QUESTION =
+  '```options\n{"question":"How should I set this up?","options":["Fully automated — analyze my repo and generate everything","Form — let me fill the settings myself"],"key":"setupMode"}\n```';
+
+function deployModeIntercept(history: Array<{ role: string; text: string }>): string | null {
+  const last = history[history.length - 1];
+  if (!last || last.role !== "user") return null;
+  const msg = last.text.trim();
+  // Long messages carry extra intent (env, host, "without questions") — let the model handle those.
+  if (msg.length > 80) return null;
+  const isDeploy = /^(please\s+|pls\s+|can you\s+|i want to\s+)*(deploy|ship|launch)\s+(my|the|this)\s+(app|application|repo|project)\b/i.test(msg);
+  if (!isDeploy) return null;
+  // The user already picked a mode in the same breath → no question needed.
+  if (/fully automated|form|chatbox|chat box/i.test(msg)) return null;
+  return DEPLOY_MODE_QUESTION;
+}
+
 export async function runAgentTurn(args: {
   projectId: string;
   threadId: string;
@@ -628,6 +738,17 @@ export async function runAgentTurn(args: {
     select: { role: true, text: true },
   });
   history.reverse();
+
+  // Deterministic deploy-mode question — never left to the model (see helper).
+  const intercept = deployModeIntercept(history);
+  if (intercept) {
+    const saved = await prisma.chatMessage.create({
+      data: { projectId: args.projectId, threadId: args.threadId, role: "agent", agentId: args.agentId ?? null, text: intercept },
+      select: { id: true },
+    });
+    await prisma.chatThread.update({ where: { id: args.threadId }, data: { updatedAt: new Date() } });
+    return { ok: true, agentMessageId: saved.id, text: intercept };
+  }
 
   // Identity + project context + standing infra playbook + knowledge base.
   const system = await buildSystemPrompt(args.projectId);
@@ -712,6 +833,7 @@ export async function* runAgentTurnStream(args: {
   projectId: string;
   threadId: string;
   agentId?: string | null;
+  userId: string;
 }): AsyncGenerator<AgentStreamEvent, void, void> {
   const thread = await prisma.chatThread.findFirst({
     where: { id: args.threadId, projectId: args.projectId },
@@ -758,6 +880,19 @@ export async function* runAgentTurnStream(args: {
   });
   history.reverse();
 
+  // Deterministic deploy-mode question — never left to the model (see helper).
+  const intercepted = deployModeIntercept(history);
+  if (intercepted) {
+    yield { type: "delta", text: intercepted };
+    const saved = await prisma.chatMessage.create({
+      data: { projectId: args.projectId, threadId: args.threadId, role: "agent", agentId: args.agentId ?? null, text: intercepted },
+      select: { id: true },
+    });
+    await prisma.chatThread.update({ where: { id: args.threadId }, data: { updatedAt: new Date() } });
+    yield { type: "done", agentMessageId: saved.id, text: intercepted };
+    return;
+  }
+
   // Identity + project context + standing infra playbook + knowledge base.
   const system = await buildSystemPrompt(args.projectId);
 
@@ -786,6 +921,7 @@ export async function* runAgentTurnStream(args: {
           system,
           history: userAssistantHistory,
           projectId: args.projectId,
+          userId: args.userId,
           provider: model.provider,
           tools: projectTools,
         })
@@ -794,6 +930,7 @@ export async function* runAgentTurnStream(args: {
           system,
           history: userAssistantHistory,
           projectId: args.projectId,
+          userId: args.userId,
           tools: projectTools,
         });
 
@@ -830,6 +967,7 @@ type ProviderLoopArgs = {
   system: string;
   history: Array<{ role: "user" | "assistant"; text: string }>;
   projectId: string;
+  userId: string;
   /** Tools available for this project (already filtered to its connected clouds). */
   tools: Tool[];
 };
@@ -840,7 +978,7 @@ async function* runAnthropicLoop(args: ProviderLoopArgs): AsyncGenerator<AgentSt
     content: m.text,
   }));
   const tools = toAnthropicTools(args.tools);
-  const toolCtx = { projectId: args.projectId, userId: "" };
+  const toolCtx = { projectId: args.projectId, userId: args.userId };
 
   loop: for (let turn = 0; turn < MAX_TOOL_LOOPS; turn++) {
     // Per-turn buffers: tool_use blocks the model emits, plus a small map
@@ -964,7 +1102,7 @@ async function* runOpenAILoop(
     ...args.history.map((m) => ({ role: m.role, content: m.text }) as OpenAI.Chat.Completions.ChatCompletionMessageParam),
   ];
   const tools = toOpenAITools(args.tools);
-  const toolCtx = { projectId: args.projectId, userId: "" };
+  const toolCtx = { projectId: args.projectId, userId: args.userId };
   // Groq + OpenAI share the same Chat Completions wire format, so the same
   // streaming loop works for both — only the client differs.
   const provider = openAIShapedClient(args.provider);

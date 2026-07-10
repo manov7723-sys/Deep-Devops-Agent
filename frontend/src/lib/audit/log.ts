@@ -69,6 +69,7 @@ export type AuditAction =
   | "env.cluster_verify_failed"
   | "env.tf_backend_set"
   | "eks.terraform_generated"
+  | "proxmox.vm_terraform_generated"
   | "gke.terraform_generated"
   | "aks.terraform_generated"
   | "terraform.run_started"

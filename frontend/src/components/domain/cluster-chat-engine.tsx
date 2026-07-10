@@ -32,6 +32,17 @@ export type RepoRow = { id: string; fullName: string; name: string; defaultBranc
 export type Answers = Record<string, string | number | boolean>;
 type Opt = { value: string; label: string };
 
+/** Parse a "list" step's stored JSON value back into rows. Never throws. */
+export function parseListRows(v: string | number | boolean | undefined): Record<string, string>[] {
+  if (typeof v !== "string" || !v.trim()) return [];
+  try {
+    const parsed = JSON.parse(v) as unknown;
+    return Array.isArray(parsed) ? (parsed as Record<string, string>[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Context handed to a step's dynamic option/default functions. */
 export type StepCtx = {
   answers: Answers;
@@ -54,6 +65,18 @@ type BaseStep = {
   skip?: (a: Answers) => boolean;
   optional?: boolean;
 };
+/** A single field within a "list" step's repeatable row. */
+export type ListField = {
+  key: string;
+  label: string;
+  kind: "text" | "select";
+  mono?: boolean;
+  placeholder?: string;
+  options?: (c: StepCtx) => Opt[];
+  default?: (c: StepCtx) => string;
+  validate?: (v: string) => string | null;
+};
+
 export type Step =
   | (BaseStep & {
       kind: "select";
@@ -78,10 +101,24 @@ export type Step =
       kind: "multiselect";
       options: (c: StepCtx) => Opt[];
       emptyNote?: string;
+    })
+  | (BaseStep & {
+      // Read-only informational block — no input, no stored value.
+      kind: "info";
+      text: (c: StepCtx) => string;
+    })
+  | (BaseStep & {
+      // A repeatable group of rows (e.g. "+ Add user"). Stored as a
+      // JSON-stringified array of per-field records so it fits the Answers
+      // type without widening it.
+      kind: "list";
+      fields: ListField[];
+      addLabel?: string; // "+ Add user"
+      max?: number;
     });
 
 export type ClusterChatConfig = {
-  cloud: "aws" | "gcp" | "azure";
+  cloud: "aws" | "gcp" | "azure" | "proxmox";
   cloudLabel: string; // "AWS"
   title: string; // "Create EKS cluster"
   blueprintSub: string;
@@ -225,6 +262,16 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
       return chosen.length === 0 && !s.optional ? "Select at least one." : null;
     }
     if (s.kind === "choice") return v === undefined ? "Choose one." : null;
+    if (s.kind === "info") return null;
+    if (s.kind === "list") {
+      for (const row of parseListRows(v)) {
+        for (const f of s.fields) {
+          const err = f.validate?.(String(row[f.key] ?? "").trim());
+          if (err) return err;
+        }
+      }
+      return null;
+    }
     if (s.kind === "number") {
       const n = Number(v);
       if (!Number.isFinite(n)) return "Enter a number.";
@@ -268,6 +315,10 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
       return chosen.map((v) => opts.find((o) => o.value === v)?.label ?? v).join(", ") || "—";
     }
     if (s.kind === "choice") return s.choices.find((c) => c.value === value)?.label ?? String(value);
+    if (s.kind === "list") {
+      const rows = parseListRows(value);
+      return rows.length === 0 ? "—" : `${rows.length} ${rows.length === 1 ? "entry" : "entries"}`;
+    }
     return String(value);
   }
 
@@ -279,6 +330,17 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
     setGenerated(null);
     setRunId(null);
     setNote(null);
+  }
+
+  // After a failed apply: return to the review page KEEPING all answers, so the
+  // user can regenerate (picks up any fix) + re-apply without re-filling the
+  // form. Clears the prior generate so Apply is re-enabled only after a fresh one.
+  function backToForm() {
+    setPhase("form");
+    setRunId(null);
+    setGenerated(null);
+    setNote(null);
+    setPageIdx(pages.length); // the review page
   }
 
   // STEP 1 — generate the HCL and push it INTO the GitHub repo.
@@ -424,7 +486,12 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
             <div>
               <TerraformStageView run={run} />
               {(run.status === "succeeded" || run.status === "failed") && (
-                <div style={{ marginTop: 10 }}>
+                <div className="row gap-2" style={{ marginTop: 10, flexWrap: "wrap" }}>
+                  {run.status === "failed" && (
+                    <Btn variant="primary" size="sm" icon="refresh" onClick={backToForm}>
+                      Back to form &amp; retry
+                    </Btn>
+                  )}
                   <Btn variant="ghost" size="sm" icon="refresh" onClick={restart}>Create another</Btn>
                 </div>
               )}
@@ -511,6 +578,64 @@ function FieldControl({
             ))}
           </div>
         )}
+      </Field>
+    );
+  }
+
+  if (step.kind === "info") {
+    return (
+      <Field label={step.label}>
+        <span className="muted" style={{ fontSize: 13 }}>{step.text(ctx)}</span>
+      </Field>
+    );
+  }
+
+  if (step.kind === "list") {
+    const rows = parseListRows(value);
+    const setRows = (next: Record<string, string>[]) => onChange(JSON.stringify(next));
+    const updateRow = (i: number, key: string, v: string) =>
+      setRows(rows.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)));
+    const removeRow = (i: number) => setRows(rows.filter((_, idx) => idx !== i));
+    const addRow = () => {
+      const blank: Record<string, string> = {};
+      for (const f of step.fields) blank[f.key] = f.default ? f.default(ctx) : "";
+      setRows([...rows, blank]);
+    };
+    const atMax = step.max !== undefined && rows.length >= step.max;
+    return (
+      <Field label={step.label} hint={step.hint} error={error}>
+        <div className="col gap-2">
+          {rows.map((row, i) => (
+            <div key={i} className="row gap-2" style={{ alignItems: "flex-end" }}>
+              {step.fields.map((f) => (
+                <div key={f.key} className="col gap-1" style={{ flex: 1, minWidth: 0 }}>
+                  <span className="faint" style={{ fontSize: 11 }}>{f.label}</span>
+                  {f.kind === "select" ? (
+                    <Select
+                      value={row[f.key] ?? ""}
+                      onValueChange={(v) => updateRow(i, f.key, v)}
+                      ariaLabel={f.label}
+                      options={f.options ? f.options(ctx) : []}
+                    />
+                  ) : (
+                    <Input
+                      className={f.mono ? "mono" : undefined}
+                      value={row[f.key] ?? ""}
+                      placeholder={f.placeholder}
+                      onChange={(e) => updateRow(i, f.key, e.target.value)}
+                    />
+                  )}
+                </div>
+              ))}
+              <Btn variant="ghost" size="icon" aria-label="Remove" onClick={() => removeRow(i)}>
+                <Icon name="x" size={14} />
+              </Btn>
+            </div>
+          ))}
+          <Btn variant="outline" size="sm" icon="plus" disabled={atMax} onClick={addRow}>
+            {step.addLabel ?? "+ Add"}
+          </Btn>
+        </div>
       </Field>
     );
   }

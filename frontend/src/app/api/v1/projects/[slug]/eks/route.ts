@@ -9,6 +9,7 @@ import {
   EKS_K8S_VERSIONS,
   EKS_DISK_SIZES,
   EKS_CAPACITY_TYPES,
+  EKS_ACCESS_POLICIES,
   type EksSpec,
 } from "@/lib/devops/eks";
 import { audit } from "@/lib/audit/log";
@@ -25,6 +26,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
     kubernetesVersions: EKS_K8S_VERSIONS,
     diskSizes: EKS_DISK_SIZES,
     capacityTypes: EKS_CAPACITY_TYPES,
+    accessPolicies: EKS_ACCESS_POLICIES,
   });
 }
 
@@ -67,6 +69,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     createVpc: a.createVpc,
     existingVpcId: a.existingVpcId,
     existingSubnetIds: a.existingSubnetIds,
+    nodeSubnetIds: a.nodeSubnetIds,
     // Production options.
     environment: a.environment,
     team: a.team,
@@ -82,6 +85,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     appMinNodes: a.appMinNodes,
     appMaxNodes: a.appMaxNodes,
     appDesiredNodes: a.appDesiredNodes,
+    accessEntries: a.accessEntries,
   };
 
   // If the chosen env has an S3 backend, wire the cluster's remote state to it.

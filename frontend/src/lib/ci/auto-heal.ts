@@ -21,14 +21,48 @@ export const MAX_HEAL_ATTEMPTS = 3;
 type FileEntry = { path: string; content: string };
 
 const SYSTEM =
-  "You are a CI/CD expert fixing a GitHub Actions workflow. You are given the current workflow YAML " +
-  "and the tail of the failed job log. Return ONLY the corrected, complete workflow YAML — no prose, no " +
-  "markdown fences. Keep the same intent (build the image and push to ECR via OIDC). Fix the actual cause " +
-  "shown in the log (e.g. wrong action version, bad step, missing permission, syntax).";
+  "You are a DevOps engineer fixing a failed CI/CD run. You are given the failed job log and the project's " +
+  "DevOps files (Dockerfile, docker-compose, nginx config, Kubernetes manifests, GitHub Actions workflows). " +
+  "Diagnose the failure from the log and fix it by editing ONLY those DevOps files.\n\n" +
+  "HARD RULES:\n" +
+  "- NEVER touch application source code. You are given ONLY DevOps files; only return fixes for those exact paths.\n" +
+  "- Return ONLY the file(s) you actually changed, each complete, keeping its original intent.\n" +
+  "- Fix the real cause shown in the log: wrong build-output dir (Create React App builds to build/, Vite to " +
+  "dist/, Angular to dist/<name>), wrong COPY path, wrong action version, missing permission, bad image ref, YAML syntax.\n" +
+  '- Respond with STRICT JSON and nothing else: {"files":[{"path":"<exact given path>","content":"<full corrected file>"}]}. ' +
+  "No prose, no markdown fences.";
 
-/** Strip accidental ```yaml fences the model might add. */
-function cleanYaml(s: string): string {
-  return s.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```\s*$/, "").trim();
+/**
+ * Files the reviewer is allowed to touch — DevOps only, NEVER app source. This
+ * is a belt-and-suspenders allowlist; the primary guarantee is that auto-heal
+ * only ever edits paths already in the pipeline's saved file set (all DevOps).
+ */
+function isDevopsFile(path: string): boolean {
+  const p = path.replace(/^\/+/, "");
+  const base = p.split("/").pop() ?? p;
+  return (
+    /^Dockerfile(\..+)?$/i.test(base) ||
+    base === ".dockerignore" ||
+    /^(docker-)?compose\.ya?ml$/i.test(base) ||
+    /\.conf$/i.test(base) ||
+    /^\.github\/workflows\/.+\.ya?ml$/i.test(p) ||
+    /^\.gitlab-ci\.ya?ml$/i.test(base) ||
+    /^(namespace|deployment|service|ingress|configmap|secret|hpa|pvc|manifest|kustomization)\.ya?ml$/i.test(base) ||
+    (/\.ya?ml$/i.test(base) && /(^|\/)(k8s|manifests?|kubernetes|deploy|kustomize|helm|charts?)(\/|$)/i.test(p))
+  );
+}
+
+/** Parse the reviewer's strict-JSON {files:[{path,content}]} response. */
+function parseFixes(text: string): Record<string, string> {
+  const cleaned = text.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```\s*$/, "").trim();
+  try {
+    const j = JSON.parse(cleaned) as { files?: Array<{ path?: string; content?: string }> };
+    const out: Record<string, string> = {};
+    for (const f of j.files ?? []) if (f.path && typeof f.content === "string") out[f.path.replace(/^\/+/, "")] = f.content;
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 export type HealResult =
@@ -63,27 +97,37 @@ export async function autoHealPipeline(pipelineId: string): Promise<HealResult> 
   const gh = { token: tok.accessToken, repoFullName: repo.fullName };
 
   const files = (p.files as FileEntry[]) ?? [];
-  const wfFile = files.find((f) => f.path === p.workflowPath);
-  if (!wfFile) return { ok: true, healed: false, reason: "workflow file not in saved files" };
+  // DevOps files the reviewer may edit — NEVER application source. Primary
+  // guarantee: changes are applied ONLY to paths already in this set (all
+  // DevOps), so a fix can't create or touch anything outside it.
+  const editable = files.filter((f) => isDevopsFile(f.path));
+  if (editable.length === 0) return { ok: true, healed: false, reason: "no DevOps files to fix" };
 
   // 1 — read the failure log.
   const log = (p.runId ? await getFailedJobLog(gh, p.runId) : null) ?? "(no job log available)";
 
-  // 2 — ask the model to fix the workflow.
+  // 2 — hand the model the DevOps files + log; it returns only the changed ones.
+  const filesBlock = editable.map((f) => `### FILE: ${f.path}\n${f.content}`).join("\n\n");
   const fix = await completeText({
     projectId: p.projectId,
     system: SYSTEM,
-    prompt: `Current workflow (${p.workflowPath}):\n\n${wfFile.content}\n\n--- Failed job log (tail) ---\n${log.slice(-4000)}`,
-    maxTokens: 2000,
+    prompt: `--- DevOps files ---\n${filesBlock}\n\n--- Failed job log (tail) ---\n${log.slice(-4000)}`,
+    maxTokens: 4000,
   });
   if (!fix.ok) return { ok: false, error: `reviewer failed: ${fix.error}` };
-  const fixedYaml = cleanYaml(fix.text);
-  if (!fixedYaml || fixedYaml === wfFile.content.trim()) {
-    return { ok: true, healed: false, reason: "reviewer produced no change" };
-  }
 
-  // 3 — update saved files with the fix.
-  const newFiles = files.map((f) => (f.path === p.workflowPath ? { ...f, content: fixedYaml } : f));
+  // 3 — apply returned fixes to EXISTING DevOps files only (ignore anything else).
+  const editablePaths = new Set(editable.map((f) => f.path.replace(/^\/+/, "")));
+  const byPath = new Map(files.map((f) => [f.path.replace(/^\/+/, ""), f.content] as const));
+  const changed = Object.entries(parseFixes(fix.text)).filter(
+    ([path, content]) => editablePaths.has(path) && content.trim() && content.trim() !== (byPath.get(path) ?? "").trim(),
+  );
+  if (changed.length === 0) return { ok: true, healed: false, reason: "reviewer produced no change" };
+  const changeMap = new Map(changed);
+  const newFiles = files.map((f) => {
+    const key = f.path.replace(/^\/+/, "");
+    return changeMap.has(key) ? { ...f, content: changeMap.get(key)! } : f;
+  });
   const attempt = p.healAttempts + 1;
   await prisma.ciPipeline.update({
     where: { id: p.id },
@@ -92,7 +136,8 @@ export async function autoHealPipeline(pipelineId: string): Promise<HealResult> 
 
   // 4 — re-commit + re-trigger.
   const branch = repo.defaultBranch || p.branch || "main";
-  const commit = await commitFiles(gh, branch, newFiles, `ci: auto-heal ${p.name} (attempt ${attempt})`);
+  const commitList = changed.map(([path, content]) => ({ path, content }));
+  const commit = await commitFiles(gh, branch, commitList, `ci: auto-heal ${p.name} — fixed ${commitList.map((f) => f.path).join(", ")} (attempt ${attempt})`);
   if (!commit.ok) {
     await prisma.ciPipeline.update({ where: { id: p.id }, data: { status: "error", lastError: commit.error } });
     return { ok: false, error: commit.error };

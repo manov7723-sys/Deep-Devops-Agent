@@ -84,6 +84,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
 
   const projectId = gate.access.project.id;
   const threadId = thread.id;
+  const userId = gate.access.session.userId;
   const userMessage = post.message;
 
   const encoder = new TextEncoder();
@@ -104,7 +105,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       send(controller, "user_message", userMessage);
 
       try {
-        for await (const ev of runAgentTurnStream({ projectId, threadId })) {
+        for await (const ev of runAgentTurnStream({ projectId, threadId, userId })) {
           switch (ev.type) {
             case "delta":
               send(controller, "delta", { text: ev.text });

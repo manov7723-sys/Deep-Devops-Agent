@@ -46,12 +46,39 @@ async function gapi<T = Record<string, unknown>>(
     return { ok: false, error: `Network error reaching GCP: ${e instanceof Error ? e.message : "error"}` };
   }
   const text = await res.text();
-  const data = text ? (JSON.parse(text) as T & { error?: { message?: string } }) : ({} as T);
+  let data: T & { error?: { message?: string; status?: string } };
+  try {
+    data = (text ? JSON.parse(text) : {}) as T & { error?: { message?: string; status?: string } };
+  } catch {
+    // Non-JSON body (proxy/HTML error page) used to throw here and surface as a
+    // bogus "unexpected response from the GCP API". Return the raw text instead.
+    if (!res.ok) return { ok: false, error: `GCP HTTP ${res.status}: ${text.slice(0, 200) || "no body"}` };
+    return { ok: true, data: {} as T };
+  }
   if (!res.ok) {
-    const msg = (data as { error?: { message?: string } })?.error?.message || text.slice(0, 300) || `HTTP ${res.status}`;
-    return { ok: false, error: msg };
+    const msg = data?.error?.message || text.slice(0, 300) || `HTTP ${res.status}`;
+    return { ok: false, error: hintGcpError(res.status, data?.error?.status, msg) };
   }
   return { ok: true, data };
+}
+
+/** Turn a raw GCP API error into an actionable message for a non-DevOps user. */
+function hintGcpError(httpStatus: number, apiStatus: string | undefined, message: string): string {
+  const m = message.toLowerCase();
+  if (apiStatus === "PERMISSION_DENIED" || httpStatus === 403) {
+    return (
+      `${message}\n\nThe Google account you connected doesn't have permission to do this. ` +
+      "Keyless CI setup needs the connected identity to have the roles Workload Identity Pool Admin, Service Account Admin, and Project IAM Admin (or Owner). " +
+      "Ask your GCP admin to grant those, or reconnect with an owner account on the Cloud providers tab."
+    );
+  }
+  if (/api .*not been used|service_disabled|it is disabled/i.test(m) || apiStatus === "FAILED_PRECONDITION") {
+    return (
+      `${message}\n\nA required Google API is disabled. Enable these in the GCP project, then retry: ` +
+      "IAM (iam.googleapis.com), Security Token Service (sts.googleapis.com), IAM Credentials (iamcredentials.googleapis.com), Cloud Resource Manager (cloudresourcemanager.googleapis.com), and Artifact Registry (artifactregistry.googleapis.com)."
+    );
+  }
+  return message;
 }
 
 /** Poll a long-running operation until done (pools/providers are LROs). */
@@ -124,7 +151,7 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
     displayName: "GitHub Actions",
     description: "Keyless GitHub OIDC (DeepAgent).",
   });
-  if (!poolCreate.ok && !/already exists/i.test(poolCreate.error)) return poolCreate;
+  if (!poolCreate.ok && !/already exists/i.test(poolCreate.error)) return { ok: false, error: `Creating the workload identity pool failed. ${poolCreate.error}` };
   if (poolCreate.ok && poolCreate.data.name) await awaitLro(token, poolCreate.data.name);
 
   // 2 — OIDC provider in the pool, scoped to this GitHub repo.
@@ -135,7 +162,7 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
     attributeMapping: { "google.subject": "assertion.sub", "attribute.repository": "assertion.repository" },
     attributeCondition: `assertion.repository == "${repoFullName}"`,
   });
-  if (!provCreate.ok && !/already exists/i.test(provCreate.error)) return provCreate;
+  if (!provCreate.ok && !/already exists/i.test(provCreate.error)) return { ok: false, error: `Creating the OIDC provider failed. ${provCreate.error}` };
   if (provCreate.ok && provCreate.data.name) await awaitLro(token, provCreate.data.name);
 
   // 3 — Service account (ignore ALREADY_EXISTS).
@@ -145,16 +172,16 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
     accountId: saId,
     serviceAccount: { displayName: "DeepAgent GitHub Actions" },
   });
-  if (!saCreate.ok && !/already exists/i.test(saCreate.error)) return saCreate;
+  if (!saCreate.ok && !/already exists/i.test(saCreate.error)) return { ok: false, error: `Creating the service account failed. ${saCreate.error}` };
 
   // 4 — Grant the SA push access at the project level (read-modify-write IAM policy).
   const grant = await addProjectBinding(token, project, `serviceAccount:${saEmail}`, "roles/artifactregistry.writer");
-  if (!grant.ok) return grant;
+  if (!grant.ok) return { ok: false, error: `Granting Artifact Registry Writer to the service account failed. ${grant.error}` };
 
   // 5 — Let the GitHub repo principal impersonate the SA.
   const principal = `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${repoFullName}`;
   const impersonate = await addServiceAccountBinding(token, project, saEmail, principal, "roles/iam.workloadIdentityUser");
-  if (!impersonate.ok) return impersonate;
+  if (!impersonate.ok) return { ok: false, error: `Binding the GitHub repo to the service account failed. ${impersonate.error}` };
 
   return {
     ok: true,
@@ -162,6 +189,62 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
       workloadIdentityProvider: `projects/${projectNumber}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}`,
       serviceAccount: saEmail,
       projectNumber,
+    },
+  };
+}
+
+/** Parse a GKE kubeconfig's `gke_<project>_<location>_<cluster>` context. */
+export function parseGkeClusterRef(kubeconfig: string): { projectId: string; location: string; clusterName: string } | null {
+  const tok = kubeconfig.match(/gke_[a-z0-9-]+_[a-z0-9-]+_[A-Za-z0-9-]+/)?.[0];
+  if (!tok) return null;
+  const parts = tok.split("_"); // [gke, project, location, cluster]
+  if (parts.length < 4) return null;
+  return { projectId: parts[1], location: parts[2], clusterName: parts.slice(3).join("_") };
+}
+
+export type GcpDeployRegistry = {
+  location: string;
+  projectId: string;
+  repository: string;
+  workloadIdentityProvider: string;
+  serviceAccount: string;
+};
+
+/**
+ * Full GCP setup for the one-shot deploy flow, for ONE service: ensure the
+ * Artifact Registry repo, set up keyless WIF, and grant the CI service account
+ * BOTH Artifact Registry Writer (push) and Container Developer (so the CD
+ * workflow can deploy to GKE). Idempotent. Returns everything the CI + CD
+ * workflows need.
+ */
+export async function setupGcpDeployRegistry(
+  cloudProviderId: string,
+  repoFullName: string,
+  location: string,
+  repository: string,
+): Promise<GcpResult<GcpDeployRegistry>> {
+  const r = await resolveGcp(cloudProviderId);
+  if (!r.ok) return r;
+  const { token, project } = r.data;
+
+  const reg = await createArtifactRegistry(cloudProviderId, location, repository);
+  if (!reg.ok) return reg;
+
+  const wif = await setupGithubWif(cloudProviderId, repoFullName);
+  if (!wif.ok) return wif;
+
+  // The CD workflow deploys to GKE as this SA — needs container.developer.
+  const grant = await addProjectBinding(token, project, `serviceAccount:${wif.data.serviceAccount}`, "roles/container.developer");
+  if (!grant.ok) return { ok: false, error: `Granting GKE deploy access to the service account failed. ${grant.error}` };
+
+  return {
+    ok: true,
+    data: {
+      location,
+      projectId: project,
+      repository,
+      workloadIdentityProvider: wif.data.workloadIdentityProvider,
+      serviceAccount: wif.data.serviceAccount,
     },
   };
 }
@@ -187,7 +270,8 @@ async function addProjectBinding(token: string, project: string, member: string,
 /** Add a member→role binding on a SERVICE ACCOUNT's IAM policy. */
 async function addServiceAccountBinding(token: string, project: string, saEmail: string, member: string, role: string): Promise<GcpResult<true>> {
   const url = `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts/${saEmail}`;
-  const get = await gapi<{ bindings?: Array<{ role: string; members: string[] }> }>(token, `${url}:getIamPolicy`);
+  // getIamPolicy on a service account is a POST endpoint (GET returns a 404 HTML page).
+  const get = await gapi<{ bindings?: Array<{ role: string; members: string[] }> }>(token, `${url}:getIamPolicy`, "POST", {});
   if (!get.ok) return get;
   const policy = get.data;
   const bindings = policy.bindings ?? [];

@@ -29,7 +29,8 @@ const CLOUDS = ["AWS", "GCP", "Azure"] as const;
  * Per-provider strings for the wizard's step 4. The wizard only PICKS the cloud
  * (and a default region) here — the actual account connection (IAM role + STS
  * ExternalId on AWS, service account on GCP, service principal on Azure) is done
- * afterward on the project's "Cloud providers" tab via ConnectCloudModal.
+ * afterward on the project's "Cloud providers" tab (ConnectCloudModal), or from
+ * chat via the ```cloud-connect``` fence (CloudConnectBox).
  */
 const CLOUD_FIELD_META: Record<string, { regionPlaceholder: string; note: string }> = {
   AWS: {
@@ -277,8 +278,9 @@ export function CreateProjectWizard({
 
       // Step 4 is selection-only — the project records which cloud it targets,
       // but no provider account is created here. The user connects the account
-      // afterward on the "Cloud providers" tab (ConnectCloudModal). So we send
-      // no cloud payload; with-setup creates nothing cloud-related.
+      // afterward on the "Cloud providers" tab (ConnectCloudModal), or from chat
+      // via the ```cloud-connect``` fence. So we send no cloud payload;
+      // with-setup creates nothing cloud-related.
       const result = await create.mutateAsync({
         name: draft.name.trim(),
         description: draft.description.trim(),

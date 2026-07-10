@@ -22,6 +22,7 @@ import { getAwsKeys } from "@/lib/cloud/vault";
 import { getDecryptedAzureCreds } from "@/lib/cloud/azure";
 import { getDecryptedProxmoxCreds } from "@/lib/cloud/proxmox";
 import { getGcpAccessToken } from "@/lib/cloud/gcp";
+import { resolveAwsExecEnv } from "@/lib/cloud/aws-onboard";
 
 const KUBE_EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 
@@ -59,9 +60,20 @@ export async function kubeExecEnv(
     if (v) out[k] = v;
   }
   // The env's provider creds (Vault keys / role) take precedence when present.
+  // For AWS, resolveAwsExecEnv does the real STS AssumeRole exchange for
+  // role-based providers — the raw getDecryptedCloudCreds only returns role
+  // METADATA (AWS_ROLE_ARN/AWS_EXTERNAL_ID), which the `aws eks get-token`
+  // exec plugin can't authenticate with, causing "security token invalid"
+  // even though the cluster IS connected. Fall back to the raw resolver for
+  // non-AWS providers (azure/gcp/proxmox) and as a last resort for AWS.
   if (cloudProviderId) {
-    const creds = await getDecryptedCloudCreds(cloudProviderId);
-    if (creds.ok) Object.assign(out, creds.env);
+    const aws = await resolveAwsExecEnv(cloudProviderId);
+    if (aws.ok) {
+      Object.assign(out, aws.env);
+    } else {
+      const creds = await getDecryptedCloudCreds(cloudProviderId);
+      if (creds.ok) Object.assign(out, creds.env);
+    }
   }
   return out;
 }

@@ -310,7 +310,7 @@ export function generateDockerArtifacts(args: {
 function trivyGateStep(imageRefWithTag: string): string {
   return `
       - name: Scan image for vulnerabilities (Trivy — stop on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: "${imageRefWithTag}"
           format: table
@@ -328,10 +328,31 @@ export function generateEcrWorkflow(args: {
   branch: string;
   /** Insert a Trivy gate that stops the pipeline on HIGH/CRITICAL before push. Default true. */
   scanGate?: boolean;
+  /**
+   * Production style: reference GitHub Actions variables (vars.AWS_ROLE_ARN,
+   * vars.AWS_REGION, vars.ECR_REPOSITORY) instead of hardcoding the ARN/region/
+   * URI in the YAML. The caller must set those repo variables (setup does this).
+   * For MULTI-service repos (frontend + backend) leave this off — repo-level
+   * variables can't differ per workflow, so each service bakes in its own values.
+   */
+  useVars?: boolean;
+  /** Build context / service subdir (e.g. "frontend"). Default "." (repo root). */
+  context?: string;
+  /** The workflow `name:` — must be unique per service. Default "Build and push to ECR". */
+  workflowName?: string;
+  /** Workflow file basename (e.g. "build-and-push-frontend.yml"). Default "build-and-push.yml". */
+  fileName?: string;
 }): GeneratedFile {
   const gate = args.scanGate !== false;
-  const scanStep = gate ? trivyGateStep(`${args.ecrRepositoryUri}:\${{ github.sha }}`) : "";
-  const content = `name: Build and push to ECR
+  const roleRef = args.useVars ? "\${{ vars.AWS_ROLE_ARN }}" : args.roleArn;
+  const regionRef = args.useVars ? "\${{ vars.AWS_REGION }}" : args.region;
+  const ecrRef = args.useVars ? "\${{ vars.ECR_REPOSITORY }}" : args.ecrRepositoryUri;
+  const scanStep = gate ? trivyGateStep(`${ecrRef}:\${{ github.sha }}`) : "";
+  const ctx = (args.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
+  const buildArgs = ctx ? `-f "${ctx}/Dockerfile" "${ctx}"` : ".";
+  const workflowName = args.workflowName || "Build and push to ECR";
+  const fileName = args.fileName || "build-and-push.yml";
+  const content = `name: ${workflowName}
 
 on:
   push:
@@ -352,27 +373,27 @@ jobs:
       - name: Configure AWS credentials (OIDC — no stored secrets)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${args.roleArn}
-          aws-region: ${args.region}
+          role-to-assume: ${roleRef}
+          aws-region: ${regionRef}
 
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and tag image
         env:
-          ECR_REPOSITORY: ${args.ecrRepositoryUri}
+          ECR_REPOSITORY: ${ecrRef}
           IMAGE_TAG: \${{ github.sha }}
-        run: docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REPOSITORY:latest" .
+        run: docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REPOSITORY:latest" ${buildArgs}
 ${scanStep}
       - name: Push image
         env:
-          ECR_REPOSITORY: ${args.ecrRepositoryUri}
+          ECR_REPOSITORY: ${ecrRef}
           IMAGE_TAG: \${{ github.sha }}
         run: |
           docker push "$ECR_REPOSITORY:$IMAGE_TAG"
           docker push "$ECR_REPOSITORY:latest"
 `;
-  return { path: ".github/workflows/build-and-push.yml", content };
+  return { path: `.github/workflows/${fileName}`, content };
 }
 
 /**
@@ -397,10 +418,20 @@ export function generateGarWorkflow(args: {
   branch: string;
   /** Insert a Trivy gate that stops the pipeline on HIGH/CRITICAL before push. Default true. */
   scanGate?: boolean;
+  /** Build context / service subdir (e.g. "frontend"). Default "." (repo root). */
+  context?: string;
+  /** Workflow `name:` — unique per service. Default "Build and push to Artifact Registry". */
+  workflowName?: string;
+  /** Workflow file basename. Default "build-and-push-gar.yml". */
+  fileName?: string;
 }): GeneratedFile {
   const imageBase = `${args.location}-docker.pkg.dev/${args.projectId}/${args.repository}/${args.image}`;
   const scanStep = args.scanGate !== false ? trivyGateStep(`${imageBase}:\${{ github.sha }}`) : "";
-  const content = `name: Build and push to Artifact Registry
+  const ctx = (args.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
+  const buildArgs = ctx ? `-f "${ctx}/Dockerfile" "${ctx}"` : ".";
+  const workflowName = args.workflowName || "Build and push to Artifact Registry";
+  const fileName = args.fileName || "build-and-push-gar.yml";
+  const content = `name: ${workflowName}
 
 on:
   push:
@@ -434,7 +465,7 @@ jobs:
         env:
           IMAGE: ${imageBase}
           IMAGE_TAG: \${{ github.sha }}
-        run: docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
+        run: docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" ${buildArgs}
 ${scanStep}
       - name: Push image
         env:
@@ -444,7 +475,7 @@ ${scanStep}
           docker push "$IMAGE:$IMAGE_TAG"
           docker push "$IMAGE:latest"
 `;
-  return { path: ".github/workflows/build-and-push-gar.yml", content };
+  return { path: `.github/workflows/${fileName}`, content };
 }
 
 /**
@@ -463,10 +494,20 @@ export function generateAcrWorkflow(args: {
   branch: string;
   /** Insert a Trivy gate that stops the pipeline on HIGH/CRITICAL before push. Default true. */
   scanGate?: boolean;
+  /** Build context / service subdir (e.g. "frontend"). Default "." (repo root). */
+  context?: string;
+  /** Workflow `name:` — unique per service. Default "Build and push to ACR". */
+  workflowName?: string;
+  /** Workflow file basename. Default "build-and-push-acr.yml". */
+  fileName?: string;
 }): GeneratedFile {
   const imageBase = `${args.registry}.azurecr.io/${args.image}`;
   const scanStep = args.scanGate !== false ? trivyGateStep(`${imageBase}:\${{ github.sha }}`) : "";
-  const content = `name: Build and push to ACR
+  const ctx = (args.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
+  const buildArgs = ctx ? `-f "${ctx}/Dockerfile" "${ctx}"` : ".";
+  const workflowName = args.workflowName || "Build and push to ACR";
+  const fileName = args.fileName || "build-and-push-acr.yml";
+  const content = `name: ${workflowName}
 
 on:
   push:
@@ -498,7 +539,7 @@ jobs:
         env:
           IMAGE: ${imageBase}
           IMAGE_TAG: \${{ github.sha }}
-        run: docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
+        run: docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" ${buildArgs}
 ${scanStep}
       - name: Push image
         env:
@@ -508,7 +549,7 @@ ${scanStep}
           docker push "$IMAGE:$IMAGE_TAG"
           docker push "$IMAGE:latest"
 `;
-  return { path: ".github/workflows/build-and-push-acr.yml", content };
+  return { path: `.github/workflows/${fileName}`, content };
 }
 
 /**
@@ -670,7 +711,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
           scan-ref: .

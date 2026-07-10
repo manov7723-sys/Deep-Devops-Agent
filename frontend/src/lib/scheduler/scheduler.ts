@@ -8,6 +8,7 @@
 import { runAllDueUptimeChecks } from "@/lib/observability/uptime";
 import { runDueScheduledDeploys } from "@/lib/devops/scheduled-deploy";
 import { runDeployWatchdog } from "@/lib/devops/deploy-watch";
+import { runPipelineWatchdog } from "@/lib/ci/pipeline-watch";
 
 const TICK_MS = 60_000; // evaluate what's due once a minute
 let started = false;
@@ -35,6 +36,11 @@ export function startScheduler(): void {
       if (rolledBack > 0) {
         // eslint-disable-next-line no-console
         console.log(`[scheduler] watchdog auto-rolled-back ${rolledBack} app${rolledBack === 1 ? "" : "s"}`);
+      }
+      const autoHealed = await runPipelineWatchdog();
+      if (autoHealed > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[scheduler] agent reviewer auto-healed ${autoHealed} pipeline${autoHealed === 1 ? "" : "s"}`);
       }
     } catch (e) {
       // eslint-disable-next-line no-console

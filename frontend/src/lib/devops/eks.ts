@@ -26,8 +26,10 @@ export type EksSpec = {
   createVpc?: boolean;
   /** Existing VPC id (when createVpc is false). */
   existingVpcId?: string;
-  /** Explicit subnet ids for the cluster (when createVpc is false). Auto-discovered if omitted. */
+  /** Explicit subnet ids for the cluster control plane (when createVpc is false). Auto-discovered if omitted. */
   existingSubnetIds?: string[];
+  /** Explicit subnet ids for worker nodes (when createVpc is false). Defaults to existingSubnetIds when omitted. */
+  nodeSubnetIds?: string[];
   /** Optional S3 remote-state backend. */
   stateBucket?: string;
   stateRegion?: string;
@@ -54,7 +56,12 @@ export type EksSpec = {
   appMinNodes?: number;
   appMaxNodes?: number;
   appDesiredNodes?: number;
+  /** Additional IAM users/roles granted cluster access via EKS Access Entries. */
+  accessEntries?: EksAccessEntry[];
 };
+
+export type EksAccessPolicy = "AmazonEKSClusterAdminPolicy" | "AmazonEKSAdminPolicy" | "AmazonEKSEditPolicy" | "AmazonEKSViewPolicy";
+export type EksAccessEntry = { principalArn: string; policy: EksAccessPolicy };
 
 export type EksDefaults = Omit<EksSpec, "name">;
 
@@ -86,6 +93,12 @@ export const EKS_INSTANCE_TYPES = ["t3.medium", "t3.large", "m5.large", "m5.xlar
 export const EKS_K8S_VERSIONS = ["1.31", "1.30", "1.29", "1.28"];
 export const EKS_DISK_SIZES = [50, 100, 150, 200];
 export const EKS_CAPACITY_TYPES = ["ON_DEMAND", "SPOT"];
+export const EKS_ACCESS_POLICIES: EksAccessPolicy[] = [
+  "AmazonEKSClusterAdminPolicy",
+  "AmazonEKSAdminPolicy",
+  "AmazonEKSEditPolicy",
+  "AmazonEKSViewPolicy",
+];
 
 function backendBlock(spec: EksSpec): string {
   if (!spec.stateBucket) {
@@ -117,15 +130,21 @@ provider "aws" {
 `;
 
   const useExisting = spec.createVpc === false;
+  const nodeSubnetsOverride = spec.nodeSubnetIds && spec.nodeSubnetIds.length > 0 ? spec.nodeSubnetIds : undefined;
 
   // VPC source: a fresh VPC module, or wiring to an existing VPC. When reusing
   // an existing VPC we either take explicit subnet ids or auto-discover them.
+  // node_subnet_ids controls where WORKER NODES land — defaults to the same
+  // subnets as the control plane (subnet_ids) unless the user picked different
+  // ones (only offered when reusing an existing VPC; a freshly-created VPC has
+  // one subnet set, so nodes always share it there).
   const vpcSection = useExisting
     ? (spec.existingSubnetIds && spec.existingSubnetIds.length > 0
         ? `# Reusing existing VPC ${spec.existingVpcId ?? ""} with the given subnets.
 locals {
-  vpc_id     = "${spec.existingVpcId ?? ""}"
-  subnet_ids = [${spec.existingSubnetIds.map((s) => `"${s}"`).join(", ")}]
+  vpc_id         = "${spec.existingVpcId ?? ""}"
+  subnet_ids     = [${spec.existingSubnetIds.map((s) => `"${s}"`).join(", ")}]
+  node_subnet_ids = ${nodeSubnetsOverride ? `[${nodeSubnetsOverride.map((s) => `"${s}"`).join(", ")}]` : "local.subnet_ids"}
 }
 `
         : `# Reusing existing VPC ${spec.existingVpcId ?? ""}; subnets auto-discovered.
@@ -137,8 +156,9 @@ data "aws_subnets" "cluster" {
 }
 
 locals {
-  vpc_id     = "${spec.existingVpcId ?? ""}"
-  subnet_ids = data.aws_subnets.cluster.ids
+  vpc_id         = "${spec.existingVpcId ?? ""}"
+  subnet_ids     = data.aws_subnets.cluster.ids
+  node_subnet_ids = ${nodeSubnetsOverride ? `[${nodeSubnetsOverride.map((s) => `"${s}"`).join(", ")}]` : "local.subnet_ids"}
 }
 `)
     : `module "vpc" {
@@ -163,8 +183,9 @@ locals {
 }
 
 locals {
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
+  vpc_id          = module.vpc.vpc_id
+  subnet_ids      = module.vpc.private_subnets
+  node_subnet_ids = module.vpc.private_subnets
 }
 `;
 
@@ -215,6 +236,7 @@ locals {
   const appGroup = hasApp
     ? `
     application = {
+      subnet_ids     = local.node_subnet_ids
       instance_types = [${appTypes}]
       capacity_type  = "${appCapacity}"
       min_size       = ${spec.appMinNodes ?? 2}
@@ -223,6 +245,33 @@ locals {
       labels = { role = "application", env = "${env}" }
     }`
     : "";
+
+  // EKS Access Entries — additional IAM users/roles granted cluster access
+  // beyond the Terraform-applying identity (enable_cluster_creator_admin_permissions
+  // covers that one). Uses EKS's own cluster-access-policy ARNs, not IAM policies.
+  const accessEntries = spec.accessEntries?.filter((e) => e.principalArn.trim()) ?? [];
+  const accessEntriesBlock =
+    accessEntries.length > 0
+      ? `
+  access_entries = {
+${accessEntries
+  .map(
+    (e, i) => `    entry${i} = {
+      principal_arn = "${e.principalArn.trim()}"
+      policy_associations = {
+        main = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/${e.policy}"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }`,
+  )
+  .join("\n")}
+  }
+`
+      : "";
 
   const main = `locals {
   cluster_name = "${cluster}"
@@ -261,9 +310,10 @@ ${encrypt ? `
   subnet_ids = local.subnet_ids
 
   enable_cluster_creator_admin_permissions = true
-
+${accessEntriesBlock}
   eks_managed_node_groups = {
     system = {
+      subnet_ids     = local.node_subnet_ids
       instance_types = ["${spec.instanceType}"]
       capacity_type  = "ON_DEMAND"
       min_size       = ${spec.minNodes}

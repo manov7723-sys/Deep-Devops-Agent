@@ -101,6 +101,26 @@ export const UpdateCloudProviderRequest = z
   .refine((d) => Object.keys(d).length > 0, { message: "At least one field is required" });
 export type UpdateCloudProviderRequest = z.infer<typeof UpdateCloudProviderRequest>;
 
+// Proxmox VM creation (the VM box + agent). Terraform is generated from this.
+export const CreateProxmoxVmRequest = z.object({
+  envKey: z.string().trim().min(1),
+  name: z
+    .string()
+    .trim()
+    .regex(/^[a-z][a-z0-9-]{1,38}$/, "Lowercase letters, digits, hyphens; start with a letter."),
+  node: z.string().trim().min(1).default("pve"),
+  cores: z.coerce.number().int().min(1).max(128).default(2),
+  memoryMB: z.coerce.number().int().min(128).max(1048576).default(2048),
+  diskGB: z.coerce.number().int().min(1).max(16384).default(20),
+  datastore: z.string().trim().min(1).default("local-lvm"),
+  bridge: z.string().trim().min(1).default("vmbr0"),
+  templateVmId: z.coerce.number().int().positive().optional(),
+  isoFile: z.string().trim().optional(),
+  ipv4: z.string().trim().optional(),
+  gateway: z.string().trim().optional(),
+});
+export type CreateProxmoxVmRequest = z.infer<typeof CreateProxmoxVmRequest>;
+
 // ──────────────────────────────────────────────────────────────────
 // AWS access/secret keys (stored in HashiCorp Vault, not Postgres)
 // ──────────────────────────────────────────────────────────────────
@@ -170,6 +190,9 @@ export const CreateEksRequest = z.object({
   createVpc: z.boolean().default(true),
   existingVpcId: z.string().trim().max(40).optional(),
   existingSubnetIds: z.array(z.string().trim().max(40)).max(12).optional(),
+  // Node placement: defaults to the cluster's subnets (existingSubnetIds) when
+  // omitted. Only meaningful when reusing an existing VPC.
+  nodeSubnetIds: z.array(z.string().trim().max(40)).max(12).optional(),
   // Production options.
   environment: z.string().trim().max(40).optional(),
   team: z.string().trim().max(40).optional(),
@@ -185,6 +208,21 @@ export const CreateEksRequest = z.object({
   appMinNodes: z.number().int().min(0).max(50).optional(),
   appMaxNodes: z.number().int().min(1).max(100).optional(),
   appDesiredNodes: z.number().int().min(0).max(50).optional(),
+  // EKS Access Entries — grant additional IAM users/roles cluster access
+  // beyond the Terraform-applying identity (which always gets admin via
+  // enable_cluster_creator_admin_permissions).
+  accessEntries: z
+    .array(
+      z.object({
+        principalArn: z
+          .string()
+          .trim()
+          .regex(/^arn:aws:iam::\d{12}:(user|role)\/.+$/, "Must be an IAM user/role ARN, e.g. arn:aws:iam::123456789012:role/devops"),
+        policy: z.enum(["AmazonEKSClusterAdminPolicy", "AmazonEKSAdminPolicy", "AmazonEKSEditPolicy", "AmazonEKSViewPolicy"]),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 export type CreateEksRequest = z.infer<typeof CreateEksRequest>;
 

@@ -3,6 +3,7 @@ import { listReposTool } from "./list-repos";
 import { readGithubFileTool } from "./read-github-file";
 import { listFilesInRepoTool } from "./list-files-in-repo";
 import { writeRepoFileTool } from "./write-repo-file";
+import { setGithubSecretTool } from "./set-github-secret";
 import { scaffoldHelmChartTool } from "./scaffold-helm-chart";
 import { listKubernetesResourcesTool } from "./list-kubernetes-resources";
 import { getKubernetesLogsTool } from "./get-kubernetes-logs";
@@ -23,6 +24,10 @@ import { setupGcpMonitorAlarmsTool } from "./setup-gcp-monitor-alarms";
 import { listGcpInstancesTool } from "./list-gcp-instances";
 import { listGcpProjectsTool, setGcpContextTool } from "./gcp-context-tools";
 import { setupGithubOidcEcrTool } from "./setup-github-oidc-ecr";
+import { grantEksAccessTool } from "./grant-eks-access";
+import { listEcrReposTool } from "./list-ecr-repos";
+import { analyzeAppServicesTool } from "./analyze-app-services";
+import { deployMyAppTool } from "./deploy-my-app";
 import { listDockerfileStacksTool } from "./list-dockerfile-stacks";
 import { generateDockerfileTool } from "./generate-dockerfile";
 import { generateEcrWorkflowTool } from "./generate-ecr-workflow";
@@ -51,6 +56,9 @@ import { listAcrTool, createAcrTool, setupAzureGithubOidcTool, generateAcrWorkfl
 import { listDeployTargetsTool, listRegistryImagesTool, deployAppTool, deploymentStatusTool, writeCdFilesTool, waitForWorkflowRunTool, setKubeconfigSecretTool } from "./deploy-tools";
 import { scheduleDeploymentTool, listScheduledDeploymentsTool, cancelScheduledDeploymentTool } from "./scheduled-deploy-tools";
 import { rollbackDeploymentTool, listRolloutHistoryTool } from "./rollback-tools";
+import { listAvailableReposTool, attachProjectRepoTool } from "./repo-tools";
+import { listEnvironmentsTool, createEnvironmentTool, updateEnvironmentTool, deleteEnvironmentTool } from "./env-tools";
+import { triggerPipelineTool } from "./pipeline-tools";
 import type { Tool, ToolContext, ToolExecuteResult } from "./types";
 
 export type { Tool, ToolContext, ToolExecuteResult } from "./types";
@@ -67,7 +75,18 @@ export const ALL_TOOLS: Tool[] = [
   readGithubFileTool,
   // GitHub write
   writeRepoFileTool,
+  setGithubSecretTool,
   scaffoldHelmChartTool,
+  // Repo attach (project ↔ repo wiring, replaces the "CI/CD & Repos" tab)
+  listAvailableReposTool,
+  attachProjectRepoTool,
+  // Environments CRUD (replaces the "Environments" tab)
+  listEnvironmentsTool,
+  createEnvironmentTool,
+  updateEnvironmentTool,
+  deleteEnvironmentTool,
+  // Manual pipeline trigger (replaces "Trigger deployment")
+  triggerPipelineTool,
   // Kubernetes read
   listKubernetesResourcesTool,
   getKubernetesLogsTool,
@@ -156,6 +175,13 @@ export const ALL_TOOLS: Tool[] = [
   generateHelmChartTool,
   // Deploy
   runHelmUpgradeTool,
+  // EKS cluster access — grant an IAM role K8s RBAC via Access Entries (no aws-auth)
+  grantEksAccessTool,
+  // Registry + service analysis for the deploy flow (list ECR repos, detect frontend/backend)
+  listEcrReposTool,
+  analyzeAppServicesTool,
+  // The single from-scratch flow: analyze repo → Dockerfile + CI + manifests → registry → (build → deploy)
+  deployMyAppTool,
 ] as Tool[];
 
 const TOOLS_BY_NAME = new Map(ALL_TOOLS.map((t) => [t.name, t]));
@@ -177,6 +203,12 @@ const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp" | "proxmox"> = {
   setup_cloudwatch_alarms: "aws",
   setup_github_oidc_ecr: "aws",
   generate_ecr_workflow: "aws",
+  grant_eks_access: "aws",
+  list_ecr_repos: "aws",
+  // analyze_app_services + deploy_my_app are cloud-agnostic at the gating level:
+  // deploy_my_app supports AWS (EKS/ECR), GCP (GKE/Artifact Registry) AND Azure
+  // (AKS/ACR), picking the path from the env's cloud — so it must stay visible
+  // on all three, not gated to one.
   list_azure_vms: "azure",
   setup_azure_monitor_alarms: "azure",
   list_azure_subscriptions: "azure",
@@ -211,6 +243,8 @@ const TOOL_GIT_PROVIDER: Record<string, "github"> = {
   setup_azure_github_oidc: "github",
   generate_acr_workflow: "github",
   generate_trivy_workflow: "github",
+  set_github_actions_secret: "github",
+  deploy_my_app: "github",
 };
 
 /**

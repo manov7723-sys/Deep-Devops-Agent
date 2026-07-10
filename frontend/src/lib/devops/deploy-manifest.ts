@@ -155,13 +155,30 @@ function ingress(spec: DeploySpec, app: string): string {
   ].join("\n");
 }
 
+function namespace(spec: DeploySpec): string {
+  return [
+    `apiVersion: v1`,
+    `kind: Namespace`,
+    `metadata:`,
+    `  name: ${q(spec.namespace)}`,
+    `  labels:`,
+    labels(spec.namespace, 4),
+    ``,
+  ].join("\n");
+}
+
 export type BuiltManifest = { yaml: string; resources: string[] };
 
-/** Build Deployment + Service (+ Ingress when exposed) as one multi-doc YAML. */
+/**
+ * Build Namespace + Deployment + Service (+ Ingress when exposed) as one
+ * multi-doc YAML. The Namespace doc comes first so `kubectl apply` creates it
+ * before the resources that live in it — every deploy is self-contained and
+ * never assumes the namespace already exists on the cluster.
+ */
 export function buildDeployManifest(spec: DeploySpec): BuiltManifest {
   const app = sanitizeAppName(spec.appName);
-  const docs = [deployment(spec, app), service(spec, app)];
-  const resources = ["Deployment", "Service"];
+  const docs = [namespace(spec), deployment(spec, app), service(spec, app)];
+  const resources = ["Namespace", "Deployment", "Service"];
   if (spec.expose && (spec.host || "").trim()) {
     docs.push(ingress(spec, app));
     resources.push("Ingress");

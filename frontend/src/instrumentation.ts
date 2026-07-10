@@ -5,6 +5,7 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  const { startScheduler } = await import("@/lib/scheduler/scheduler");
-  startScheduler();
+  // All Node-only startup (IPv4-first DNS + the scheduler) lives in a separate
+  // file so the Edge bundle never statically sees node: imports.
+  await import("./instrumentation-node");
 }

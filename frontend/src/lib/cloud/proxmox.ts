@@ -24,12 +24,23 @@ export type ProxmoxInput = {
   tokenSecret: string;
 };
 
-/** Normalize an endpoint to a base origin (strip trailing slash + /api2/json, add https). */
+/**
+ * Normalize an endpoint to just its origin (scheme://host:port). Robust to a
+ * pasted Proxmox *browser* URL, which carries a "#v1:0:…" fragment (the web
+ * UI's view state) and sometimes a /api2/json path — none of which belong in
+ * the API base. Everything after the host is dropped.
+ */
 export function normalizeProxmoxEndpoint(raw: string): string {
-  let e = (raw || "").trim().replace(/\/+$/, "");
-  e = e.replace(/\/api2\/json$/i, "");
+  let e = (raw || "").trim();
+  if (!e) return "";
   if (!/^https?:\/\//i.test(e)) e = `https://${e}`;
-  return e;
+  try {
+    const u = new URL(e);
+    return `${u.protocol}//${u.host}`; // origin only — drops path, query, and #fragment
+  } catch {
+    // Fallback: strip fragment/query/path/trailing slash by hand.
+    return e.replace(/[#?].*$/, "").replace(/\/api2\/json.*$/i, "").replace(/\/+$/, "");
+  }
 }
 
 function proxmoxAuthHeader(tokenId: string, tokenSecret: string): string {
@@ -142,4 +153,89 @@ export async function getDecryptedProxmoxCreds(cloudProviderId: string): Promise
     tokenSecret,
     node: cp.region || "pve",
   };
+}
+
+export type ProxmoxTemplate = { vmid: number; name: string };
+export type ProxmoxOptions = {
+  nodes: string[];
+  defaultNode: string;
+  datastores: string[];
+  bridges: string[];
+  templates: ProxmoxTemplate[];
+};
+
+/**
+ * Best-effort live inventory for the VM-creation box: the real node name(s),
+ * plus the default node's storage pools, network bridges, and VM templates —
+ * read straight from the Proxmox REST API. Every call is defensive: a failure
+ * or a missing token permission yields an empty list, never a throw, so the box
+ * still renders (falling back to its static defaults). The node list falls back
+ * to the provider's stored default node so the box never offers a bogus node the
+ * server doesn't actually have (which is what made a clone fail with "hostname
+ * lookup 'pve' failed").
+ */
+export async function getProxmoxOptions(cloudProviderId: string): Promise<ProxmoxOptions> {
+  const empty: ProxmoxOptions = { nodes: [], defaultNode: "", datastores: [], bridges: [], templates: [] };
+  const creds = await getDecryptedProxmoxCreds(cloudProviderId);
+  if (!creds.ok) return empty;
+  const auth = proxmoxAuthHeader(creds.tokenId, creds.tokenSecret);
+
+  // 1) Nodes — the critical bit for the clone to target a node that exists.
+  let nodes: string[] = [];
+  try {
+    const res = await proxmoxGet(creds.endpoint, "/api2/json/nodes", auth);
+    if (res.status >= 200 && res.status < 300) {
+      const j = JSON.parse(res.body) as { data?: Array<{ node?: string }> };
+      nodes = (j.data ?? []).map((n) => n.node).filter((n): n is string => !!n);
+    }
+  } catch {
+    /* fall through to the stored default node */
+  }
+  if (!nodes.length && creds.node) nodes = [creds.node];
+  const defaultNode =
+    creds.node && nodes.includes(creds.node) ? creds.node : nodes[0] ?? creds.node ?? "";
+  if (!defaultNode) return { ...empty, nodes };
+
+  // 2) Storage pools that can hold VM images/disks on the default node.
+  let datastores: string[] = [];
+  try {
+    const res = await proxmoxGet(creds.endpoint, `/api2/json/nodes/${encodeURIComponent(defaultNode)}/storage`, auth);
+    if (res.status >= 200 && res.status < 300) {
+      const j = JSON.parse(res.body) as { data?: Array<{ storage?: string; content?: string }> };
+      datastores = (j.data ?? [])
+        .filter((s) => !!s.storage && (!s.content || /images|rootdir/.test(s.content)))
+        .map((s) => s.storage as string);
+    }
+  } catch {
+    /* ignore — the box falls back to its static datastore list */
+  }
+
+  // 3) Linux bridges on the default node.
+  let bridges: string[] = [];
+  try {
+    const res = await proxmoxGet(creds.endpoint, `/api2/json/nodes/${encodeURIComponent(defaultNode)}/network?type=bridge`, auth);
+    if (res.status >= 200 && res.status < 300) {
+      const j = JSON.parse(res.body) as { data?: Array<{ iface?: string }> };
+      bridges = (j.data ?? []).map((b) => b.iface).filter((b): b is string => !!b);
+    }
+  } catch {
+    /* ignore — the box falls back to its static bridge list */
+  }
+
+  // 4) VM templates on the default node (clone sources).
+  let templates: ProxmoxTemplate[] = [];
+  try {
+    const res = await proxmoxGet(creds.endpoint, `/api2/json/nodes/${encodeURIComponent(defaultNode)}/qemu`, auth);
+    if (res.status >= 200 && res.status < 300) {
+      const j = JSON.parse(res.body) as { data?: Array<{ vmid?: number; name?: string; template?: number }> };
+      templates = (j.data ?? [])
+        .filter((v) => v.template === 1 && typeof v.vmid === "number")
+        .map((v) => ({ vmid: v.vmid as number, name: v.name ?? "" }))
+        .sort((a, b) => a.vmid - b.vmid);
+    }
+  } catch {
+    /* ignore — the box lets the user pick ISO instead */
+  }
+
+  return { nodes, defaultNode, datastores, bridges, templates };
 }

@@ -64,6 +64,13 @@ jobs:
 
       - name: Wait for rollout
         run: kubectl rollout status deployment/${app} -n ${ns} --timeout=180s
+
+      - name: Rollback on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of ${app} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/${app} -n ${ns}
+          kubectl rollout status deployment/${app} -n ${ns} --timeout=120s
 `;
   return { path: ".github/workflows/deploy.yml", content };
 }

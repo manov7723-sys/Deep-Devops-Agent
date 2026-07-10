@@ -84,6 +84,7 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
             <ChatMsg
               key={m.id}
               message={m}
+              slug={slug}
               interactive={i === messages.length - 1 && m.role === "agent" && !isThinking && !isStreaming}
               onOption={handleSend}
             />
@@ -99,6 +100,7 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
             <div className="dda-chat-streaming-wrap">
               <ChatMsg
                 message={{ id: "streaming", role: "agent", text: partial }}
+                slug={slug}
               />
               <span className="dda-chat-streaming-cursor" aria-hidden>
                 ▍

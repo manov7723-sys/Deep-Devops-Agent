@@ -55,8 +55,11 @@ function vmTf(spec: ProxmoxVmSpec): string {
     : "";
   const cdromBlock =
     !spec.templateVmId && spec.isoFile ? `\n  cdrom {\n    file_id = ${hcl(spec.isoFile)}\n  }\n` : "";
+  // Pin the cloud-init disk to the chosen datastore. Without this, the
+  // bpg/proxmox provider defaults it to "local-lvm", which fails on servers
+  // that don't have that pool (e.g. a plain "local"-only node).
   const initBlock = spec.ipv4
-    ? `\n  initialization {\n    ip_config {\n      ipv4 {\n        address = ${hcl(spec.ipv4)}${
+    ? `\n  initialization {\n    datastore_id = ${hcl(spec.datastore)}\n    ip_config {\n      ipv4 {\n        address = ${hcl(spec.ipv4)}${
         spec.gateway ? `\n        gateway = ${hcl(spec.gateway)}` : ""
       }\n      }\n    }\n  }\n`
     : "";

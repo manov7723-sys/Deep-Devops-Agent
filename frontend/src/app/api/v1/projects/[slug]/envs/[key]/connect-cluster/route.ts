@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { prisma } from "@/lib/db/prisma";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { envBySlugAndKey, updateEnv } from "@/lib/devops/envs";
-import { getDecryptedCloudCreds } from "@/lib/runner/creds";
+import { resolveAwsExecEnv } from "@/lib/cloud/aws-onboard";
 import { getAzureAccessToken } from "@/lib/cloud/azure";
 import { getAksKubeconfig, getSubscriptionTenant } from "@/lib/cloud/azure-arm";
 import { getGcpAccessToken } from "@/lib/cloud/gcp";
@@ -125,11 +125,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   }
   const { cloud, clusterName, region, resourceGroup, project } = parsed.data;
 
-  // AWS creds come from Vault (when a provider is linked); az/gcloud use host auth.
+  // AWS creds: Vault long-lived keys, or a proper STS AssumeRole exchange for
+  // role-based providers (resolveAwsExecEnv — NOT the raw getDecryptedCloudCreds,
+  // which returns only role METADATA for role-based providers and leaves the CLI
+  // with no usable credentials, causing "security token invalid" from EKS).
+  // Prefer the env's own provider; fall back to the project's AWS provider so a
+  // freshly-created env without cloudProviderId set still resolves correctly.
   let credEnv: Record<string, string> = {};
-  if (cloud === "aws" && env.cloudProviderId) {
-    const creds = await getDecryptedCloudCreds(env.cloudProviderId);
-    if (creds.ok) credEnv = creds.env;
+  if (cloud === "aws") {
+    const providerId =
+      env.cloudProviderId ??
+      (
+        await prisma.cloudProvider.findFirst({
+          where: { projectId: gate.access.project.id, kind: "aws" },
+          select: { id: true },
+        })
+      )?.id ??
+      null;
+    if (providerId) {
+      const creds = await resolveAwsExecEnv(providerId);
+      if (creds.ok) credEnv = creds.env;
+    }
   }
 
   const workdir = await mkdtemp(join(tmpdir(), "dda-kube-"));

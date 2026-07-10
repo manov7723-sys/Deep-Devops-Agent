@@ -51,9 +51,9 @@ export function CloudCredentialsModal({
   }, [open, providerId]);
 
   const vault = useQuery<VaultStatus>({
-    queryKey: ["vault", "status"],
-    queryFn: () => api.get<VaultStatus>(`/vault/status`),
-    enabled: open,
+    queryKey: ["vault", "status", slug],
+    queryFn: () => api.get<VaultStatus>(`/vault/status`, { slug }),
+    enabled: open && !!slug,
     staleTime: 30_000,
   });
 
