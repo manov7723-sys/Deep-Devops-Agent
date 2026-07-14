@@ -3133,6 +3133,225 @@ const SimplePage = (title, sub) => () => html`
   <//>`;
 
 // ═════════════════════════════════════════════════════════════════════
+// Topology — SVG service graph showing traffic flow through the cluster
+// ═════════════════════════════════════════════════════════════════════
+const TopologyPage = () => {
+  const proj = useProject();
+  const [ns, setNs] = useState("default");
+  // Node coordinates for the SVG graph. Left-to-right traffic flow.
+  const nodes = [
+    { id: "users", label: "Users", type: "external", x: 60, y: 260 },
+    { id: "ingress", label: "ingress-nginx", sub: "LoadBalancer", type: "ingress", x: 260, y: 260 },
+    { id: "svc-front", label: "app-frontend-svc", sub: "ClusterIP · :8080", type: "service", x: 500, y: 140 },
+    { id: "svc-api", label: "api-svc", sub: "ClusterIP · :4000", type: "service", x: 500, y: 260 },
+    { id: "svc-worker", label: "worker-svc", sub: "Headless", type: "service", x: 500, y: 380 },
+    { id: "dep-front", label: "app-frontend", sub: "Deployment · 3/3", type: "deployment", x: 760, y: 140 },
+    { id: "dep-api", label: "api", sub: "Deployment · 2/2", type: "deployment", x: 760, y: 260 },
+    { id: "dep-worker", label: "worker", sub: "Deployment · 2/2", type: "deployment", x: 760, y: 380 },
+    { id: "db", label: "postgres", sub: "Managed · " + proj.cloudLabel, type: "external", x: 1020, y: 260 },
+  ];
+  const edges = [
+    ["users", "ingress"],
+    ["ingress", "svc-front"], ["ingress", "svc-api"],
+    ["svc-front", "dep-front"], ["svc-api", "dep-api"], ["svc-worker", "dep-worker"],
+    ["dep-front", "svc-api"], ["dep-api", "db"], ["dep-worker", "db"],
+  ];
+  const colors = {
+    external: { bg: "var(--surface-3)", stroke: "var(--border)", fg: "var(--text)" },
+    ingress: { bg: "var(--info-soft)", stroke: "var(--info)", fg: "var(--info)" },
+    service: { bg: "var(--accent-soft)", stroke: "var(--accent-line)", fg: "var(--accent)" },
+    deployment: { bg: "var(--ok-soft)", stroke: "var(--ok)", fg: "var(--ok)" },
+  };
+  const findNode = (id) => nodes.find((n) => n.id === id);
+  return html`
+    <${PageHead} title="Topology" sub=${"Live service graph for " + proj.clusterName + " (" + proj.cloudLabel + " · " + proj.region + ") — traffic flow left → right."} />
+    <div class="row gap-3 wrap" style=${{alignItems: "center"}}>
+      <div style=${{minWidth: 220}}><${Field} label="Environment"><${Select} value="release" onChange=${() => {}} options=${proj.envs.map((e) => e.key)} /><//></div>
+      <div style=${{minWidth: 220}}><${Field} label="Namespace"><${Select} value=${ns} onChange=${setNs} options=${["default", "kube-system", "monitoring", "ingress-nginx"]} /><//></div>
+      <div class="row gap-2 wrap" style=${{marginLeft: "auto"}}>
+        <${Chip}><span style=${{width: 8, height: 8, background: "var(--info)", borderRadius: "50%", display: "inline-block", marginRight: 6}}></span>ingress<//>
+        <${Chip}><span style=${{width: 8, height: 8, background: "var(--accent)", borderRadius: "50%", display: "inline-block", marginRight: 6}}></span>service<//>
+        <${Chip}><span style=${{width: 8, height: 8, background: "var(--ok)", borderRadius: "50%", display: "inline-block", marginRight: 6}}></span>deployment<//>
+      </div>
+    </div>
+    <${Card} title=${proj.clusterName + " / " + ns} sub=${nodes.filter((n) => n.type !== "external").length + " workloads · " + edges.length + " edges"}>
+      <div style=${{background: "var(--surface-2)", borderRadius: 8, overflow: "hidden"}}>
+        <svg viewBox="0 0 1140 520" style=${{width: "100%", height: 520, display: "block"}} xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)" opacity="0.7" />
+            </marker>
+            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--border-soft)" stroke-width="0.5" opacity="0.4" />
+            </pattern>
+          </defs>
+          <rect width="1140" height="520" fill="url(#grid)" />
+          ${edges.map(([from, to]) => {
+            const a = findNode(from), b = findNode(to);
+            const mx = (a.x + b.x) / 2;
+            return html`<path d=${"M " + (a.x + 60) + " " + a.y + " C " + mx + " " + a.y + ", " + mx + " " + b.y + ", " + (b.x - 60) + " " + b.y} fill="none" stroke="var(--text-muted)" stroke-width="1.5" opacity="0.5" marker-end="url(#arrow)" />`;
+          })}
+          ${nodes.map((n) => {
+            const c = colors[n.type];
+            return html`
+              <g transform=${"translate(" + (n.x - 60) + "," + (n.y - 30) + ")"}>
+                <rect width="120" height="60" rx="10" fill=${c.bg} stroke=${c.stroke} stroke-width="1.5" />
+                <text x="60" y="26" text-anchor="middle" font-size="12" font-weight="700" fill=${c.fg} font-family="var(--font-ui)">${n.label}</text>
+                ${n.sub && html`<text x="60" y="44" text-anchor="middle" font-size="10" fill="var(--text-muted)" font-family="var(--font-ui)">${n.sub}</text>`}
+              </g>`;
+          })}
+        </svg>
+      </div>
+      <div class="row gap-4 wrap" style=${{marginTop: 14, fontSize: 12, color: "var(--text-muted)"}}>
+        <span><b>7</b> pods running</span>
+        <span><b>3</b> services</span>
+        <span><b>1</b> ingress</span>
+        <span><b>0</b> unhealthy</span>
+        <span style=${{marginLeft: "auto"}}>Auto-refreshed 12s ago</span>
+      </div>
+    <//>`;
+};
+
+// ═════════════════════════════════════════════════════════════════════
+// Cloud stats — Grafana-style monitoring dashboard
+// ═════════════════════════════════════════════════════════════════════
+// Generate believable-looking time-series data (60 points, deterministic).
+const genSeries = (seed, base, amp, spike) => {
+  const out = [];
+  let v = base;
+  for (let i = 0; i < 60; i++) {
+    v = base + Math.sin(i * 0.3 + seed) * amp + Math.cos(i * 0.15 + seed * 2) * amp * 0.4;
+    if (spike && i > 40 && i < 50) v += spike * (1 - Math.abs(i - 45) / 5);
+    out.push(Math.max(0, v));
+  }
+  return out;
+};
+
+// Draw an SVG line chart. Points are normalized into the viewBox.
+const LineChart = ({ series, max, color, w = 500, h = 140, showArea = true }) => {
+  const step = w / (series.length - 1);
+  const points = series.map((v, i) => [i * step, h - (v / max) * h]);
+  const path = points.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const area = path + " L " + w + " " + h + " L 0 " + h + " Z";
+  return html`
+    <svg viewBox=${"0 0 " + w + " " + h} preserveAspectRatio="none" style=${{width: "100%", height: h, display: "block"}}>
+      ${[0.25, 0.5, 0.75].map((y) => html`<line x1="0" x2=${w} y1=${h * y} y2=${h * y} stroke="var(--border-soft)" stroke-width="0.5" stroke-dasharray="4 4" />`)}
+      ${showArea && html`<path d=${area} fill=${color} opacity="0.15" />`}
+      <path d=${path} fill="none" stroke=${color} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+    </svg>`;
+};
+
+// Grafana-style panel wrapper — dark header, big value, chart below.
+const GrafanaPanel = ({ title, value, unit, color, series, max }) => html`
+  <div style=${{background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden"}}>
+    <div style=${{padding: "10px 14px", borderBottom: "1px solid var(--border-soft)", display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+      <span style=${{fontSize: 12.5, fontWeight: 700, color: "var(--text)"}}>${title}</span>
+      <span style=${{fontSize: 11, color: "var(--text-faint)"}}>last 60m</span>
+    </div>
+    <div style=${{padding: "12px 14px 6px", display: "flex", alignItems: "baseline", gap: 6}}>
+      <span style=${{fontSize: 26, fontWeight: 800, letterSpacing: "-.02em", color: color}}>${value}</span>
+      <span style=${{fontSize: 12, color: "var(--text-muted)", fontWeight: 600}}>${unit}</span>
+    </div>
+    <${LineChart} series=${series} max=${max} color=${color} h=${100} />
+  </div>`;
+
+const StatsPage = () => {
+  const proj = useProject();
+  const cpu = genSeries(1, 55, 12, 20);
+  const mem = genSeries(2, 62, 8, 0);
+  const req = genSeries(3, 340, 80, 100);
+  const err = genSeries(4, 0.3, 0.2, 1.5);
+  const pods = { running: 7, pending: 1, failed: 0, total: 8 };
+  const donutRadius = 60, donutInner = 40;
+  const donutSegs = [
+    { color: "var(--ok)", value: pods.running, label: "Running" },
+    { color: "var(--warn)", value: pods.pending, label: "Pending" },
+    { color: "var(--danger)", value: pods.failed, label: "Failed" },
+  ];
+  let cum = 0;
+  const donutPaths = donutSegs.map((s) => {
+    const start = (cum / pods.total) * Math.PI * 2 - Math.PI / 2;
+    cum += s.value;
+    const end = (cum / pods.total) * Math.PI * 2 - Math.PI / 2;
+    const x1 = 90 + donutRadius * Math.cos(start), y1 = 90 + donutRadius * Math.sin(start);
+    const x2 = 90 + donutRadius * Math.cos(end), y2 = 90 + donutRadius * Math.sin(end);
+    const x3 = 90 + donutInner * Math.cos(end), y3 = 90 + donutInner * Math.sin(end);
+    const x4 = 90 + donutInner * Math.cos(start), y4 = 90 + donutInner * Math.sin(start);
+    const large = end - start > Math.PI ? 1 : 0;
+    return { ...s, path: "M " + x1 + " " + y1 + " A " + donutRadius + " " + donutRadius + " 0 " + large + " 1 " + x2 + " " + y2 + " L " + x3 + " " + y3 + " A " + donutInner + " " + donutInner + " 0 " + large + " 0 " + x4 + " " + y4 + " Z" };
+  });
+  return html`
+    <${PageHead} title="Cloud stats" sub=${"Live cluster metrics for " + proj.clusterName + " (" + proj.cloudLabel + ") via in-cluster Prometheus + Grafana."} actions=${html`<${Btn} icon="↗">Open in Grafana<//><${Btn} variant="primary" icon="↻">Refresh<//>`} />
+    <div class="row gap-2 wrap"><${Chip} active=${true}>release<//><${Chip}>beta<//><${Chip}>alpha<//><span class="row gap-2" style=${{marginLeft: "auto", alignItems: "center", fontSize: 12, color: "var(--text-muted)"}}><${Dot} tone="ok" /> Prometheus scraping · 12s ago</span></div>
+    <div style=${{display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14}}>
+      <${Stat} label="CPU (cluster avg)" value=${Math.round(cpu[cpu.length-1]) + "%"} sub="node pool: system + app" icon="◍" />
+      <${Stat} label="Memory (cluster avg)" value=${Math.round(mem[mem.length-1]) + "%"} sub="8/12 nodes reporting" icon="▤" />
+      <${Stat} label="Pods running" value=${String(pods.running)} sub=${pods.pending + " pending · " + pods.failed + " failed"} icon="◆" />
+      <${Stat} label="Requests/min" value=${Math.round(req[req.length-1])} sub="p50 142ms · p95 812ms" icon="↔" />
+    </div>
+    <div style=${{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14}}>
+      <${GrafanaPanel} title="CPU usage · cluster" value=${Math.round(cpu[cpu.length-1])} unit="%" color="var(--accent)" series=${cpu} max=${100} />
+      <${GrafanaPanel} title="Memory usage · cluster" value=${Math.round(mem[mem.length-1])} unit="%" color="var(--info)" series=${mem} max=${100} />
+      <${GrafanaPanel} title="HTTP requests" value=${Math.round(req[req.length-1])} unit="req/min" color="var(--ok)" series=${req} max=${500} />
+      <${GrafanaPanel} title="5xx error rate" value=${err[err.length-1].toFixed(2)} unit="%" color="var(--danger)" series=${err} max=${3} />
+    </div>
+    <div style=${{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14}}>
+      <${Card} title="Pod status" sub=${pods.total + " pods across " + proj.clusterNodes + " nodes"}>
+        <div class="row gap-4" style=${{alignItems: "center"}}>
+          <svg viewBox="0 0 180 180" style=${{width: 180, height: 180, flex: "none"}}>
+            ${donutPaths.map((s) => html`<path d=${s.path} fill=${s.color} />`)}
+            <text x="90" y="86" text-anchor="middle" font-size="26" font-weight="800" fill="var(--text)" font-family="var(--font-ui)">${pods.running}</text>
+            <text x="90" y="104" text-anchor="middle" font-size="11" fill="var(--text-muted)" font-family="var(--font-ui)">of ${pods.total} running</text>
+          </svg>
+          <div class="col gap-2" style=${{flex: 1}}>
+            ${donutSegs.map((s) => html`
+              <div class="row gap-2" style=${{alignItems: "center", fontSize: 13}}>
+                <span style=${{width: 12, height: 12, background: s.color, borderRadius: 3, flex: "none"}}></span>
+                <span>${s.label}</span>
+                <span style=${{marginLeft: "auto", fontWeight: 700, fontFamily: "var(--font-mono)"}}>${s.value}</span>
+              </div>`)}
+          </div>
+        </div>
+      <//>
+      <${Card} title="Prometheus scrape targets" sub="8 targets · all up">
+        <ul style=${{listStyle: "none", padding: 0, margin: 0}}>
+          ${[
+            ["kube-state-metrics", "monitoring", "up", "8s"],
+            ["node-exporter (× 3)", "monitoring", "up", "9s"],
+            ["cadvisor", "kube-system", "up", "11s"],
+            ["app-frontend", "default", "up", "12s"],
+            ["worker", "default", "up", "13s"],
+            ["api", "default", "up", "12s"],
+          ].map(([target, ns, status, lastScrape]) => html`
+            <li style=${{padding: "8px 0", borderBottom: "1px solid var(--border-soft)", display: "flex", alignItems: "center", gap: 10, fontSize: 13}}>
+              <${Dot} tone="ok" />
+              <span class="mono" style=${{fontWeight: 600}}>${target}</span>
+              <span class="faint" style=${{fontSize: 11}}>${ns}</span>
+              <span style=${{marginLeft: "auto"}} class="faint">${lastScrape} ago</span>
+            </li>`)}
+        </ul>
+      <//>
+    </div>
+    <${Card} title="Grafana dashboards" sub="Linked from this project — click to open in Grafana">
+      <div style=${{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12}}>
+        ${[
+          { title: "Cluster overview", panels: 12, updated: "2m ago", tag: "kubernetes" },
+          { title: "Application SLOs", panels: 8, updated: "5m ago", tag: "slo" },
+          { title: "Node capacity", panels: 6, updated: "8m ago", tag: "capacity" },
+        ].map((d) => html`
+          <button style=${{textAlign: "left", padding: 14, background: "var(--surface)", border: "1px solid var(--border-soft)", borderRadius: 10, cursor: "pointer", color: "var(--text)", fontFamily: "inherit"}}>
+            <div class="row gap-2" style=${{alignItems: "center", marginBottom: 6}}>
+              <span style=${{width: 22, height: 22, borderRadius: 6, background: "oklch(0.72 0.19 45 / 0.2)", color: "oklch(0.72 0.19 45)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800}}>G</span>
+              <span style=${{fontWeight: 700, fontSize: 13.5}}>${d.title}</span>
+            </div>
+            <div class="faint" style=${{fontSize: 12}}>${d.panels} panels · updated ${d.updated}</div>
+            <div class="row gap-2" style=${{marginTop: 8}}><${Chip}>${d.tag}<//></div>
+          </button>`)}
+      </div>
+    <//>`;
+};
+
+// ═════════════════════════════════════════════════════════════════════
 // Nav
 // ═════════════════════════════════════════════════════════════════════
 const PAGES = {
@@ -3142,11 +3361,11 @@ const PAGES = {
   environments: { label: "Environments", icon: "◨", component: EnvironmentsPage },
   cloud: { label: "Cloud providers", icon: "☁", component: CloudPage },
   infra: { label: "Infrastructure", icon: "▤", component: InfraPage },
-  topology: { label: "Topology", icon: "⟿", component: SimplePage("Topology", "Live graph of clusters, workloads, and their edges.") },
+  topology: { label: "Topology", icon: "⟿", component: TopologyPage },
   promotions: { label: "Promotions", icon: "▲", component: SimplePage("Promotions", "Promote a deployed image between environments.") },
   github: { label: "Source control", icon: "◍", component: SimplePage("Source control", "GitHub App installations and connected repositories.") },
   connection: { label: "Clusters", icon: "⛁", component: ConnectionPage },
-  stats: { label: "Cloud stats", icon: "◉", component: SimplePage("Cloud stats", "Live cluster + observability KPIs.") },
+  stats: { label: "Cloud stats", icon: "◉", component: StatsPage },
   uptime: { label: "Uptime", icon: "↺", component: UptimePage },
   scheduler: { label: "Scheduler", icon: "⏰", component: SimplePage("Scheduler", "Deploy later — schedule an image + env for automatic rollout.") },
   cost: { label: "Cost", icon: "$", component: CostPage },
