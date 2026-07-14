@@ -4,10 +4,13 @@
  * cross-origin localStorage trickery), then sets data-theme + CSS vars
  * BEFORE the page paints. Prevents FOUC.
  *
- * Placed in <head> via app/layout.tsx.
+ * Placed in <head> via app/layout.tsx. Rendered as a raw <script> with
+ * dangerouslySetInnerHTML — NOT next/script, because Script's runtime
+ * defers execution and pre-hydration must run before first paint. Next
+ * 16 also warns "Encountered a script tag while rendering React component"
+ * on inline <Script strategy="beforeInteractive">, so the raw tag is now
+ * the canonical anti-FOUC pattern (matches next-themes, Tailwind, etc.).
  */
-import Script from "next/script";
-
 const SCRIPT = `
 (function () {
   try {
@@ -33,9 +36,5 @@ const SCRIPT = `
 `;
 
 export function ThemeScript() {
-  return (
-    <Script id="dda-theme" strategy="beforeInteractive">
-      {SCRIPT}
-    </Script>
-  );
+  return <script id="dda-theme" dangerouslySetInnerHTML={{ __html: SCRIPT }} />;
 }
