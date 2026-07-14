@@ -692,6 +692,164 @@ const SimplePage = (title, sub) => () => html`
   <//>`;
 
 // ═════════════════════════════════════════════════════════════════════
+// Source control — GitHub / GitLab OAuth accounts + project repo picker
+// (Mirrors src/app/(app)/p/[projectSlug]/github/GithubConnectionClient.tsx)
+// ═════════════════════════════════════════════════════════════════════
+const AVAILABLE_REPOS = [
+  { fullName: "manov7723-sys/deepagent", provider: "github", defaultBranch: "dev", visibility: "Private", stars: 12, updated: "2h ago" },
+  { fullName: "manov7723-sys/dynamic-react-app", provider: "github", defaultBranch: "main", visibility: "Public", stars: 3, updated: "1d ago" },
+  { fullName: "sriram-tecnso/deepagent", provider: "github", defaultBranch: "dev", visibility: "Private", stars: 5, updated: "3d ago" },
+  { fullName: "acme/app-frontend", provider: "github", defaultBranch: "main", visibility: "Private", stars: 42, updated: "5h ago" },
+  { fullName: "acme/worker", provider: "github", defaultBranch: "main", visibility: "Public", stars: 8, updated: "1w ago" },
+];
+
+const ChangeRepoModal = ({ onClose, currentFullName, onPick }) => {
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState(currentFullName);
+  const filtered = AVAILABLE_REPOS.filter((r) => !q || r.fullName.toLowerCase().includes(q.toLowerCase()));
+  return html`
+    <div style=${{position: "fixed", inset: 0, background: "var(--overlay)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20}} onClick=${onClose}>
+      <div style=${{background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, boxShadow: "var(--shadow-lg)", maxWidth: 640, width: "100%", maxHeight: "80vh", display: "flex", flexDirection: "column"}} onClick=${(e) => e.stopPropagation()}>
+        <div style=${{padding: "18px 20px", borderBottom: "1px solid var(--border-soft)"}}>
+          <div class="row between" style=${{marginBottom: 6}}>
+            <h2 style=${{fontSize: 17, margin: 0}}>Change project repository</h2>
+            <${Btn} variant="ghost" size="icon" onClick=${onClose}>✕<//>
+          </div>
+          <p class="faint" style=${{fontSize: 12.5, margin: 0, lineHeight: 1.5}}>Pick the repository this project uses for Automation, CI, and security scans. The switch applies across the whole project.</p>
+        </div>
+        <div style=${{padding: "12px 20px", borderBottom: "1px solid var(--border-soft)"}}>
+          <${Input} placeholder="Search repositories…" value=${q} onInput=${(e) => setQ(e.target.value)} />
+        </div>
+        <div style=${{flex: 1, overflowY: "auto"}}>
+          ${filtered.length === 0 ? html`
+            <div class="muted" style=${{padding: 40, textAlign: "center", fontSize: 13}}>No repositories match "${q}".</div>
+          ` : filtered.map((r) => html`
+            <button style=${{display: "flex", width: "100%", padding: "12px 20px", background: selected === r.fullName ? "var(--accent-soft)" : "transparent", border: "none", borderBottom: "1px solid var(--border-soft)", textAlign: "left", cursor: "pointer", color: "var(--text)", fontFamily: "inherit", alignItems: "center", gap: 12}} onClick=${() => setSelected(r.fullName)}>
+              <span style=${{width: 32, height: 32, borderRadius: 8, background: "var(--surface-3)", display: "flex", alignItems: "center", justifyContent: "center", flex: "none", fontSize: 14}}>◍</span>
+              <div class="col" style=${{gap: 3, minWidth: 0, flex: 1}}>
+                <div class="row gap-2" style=${{alignItems: "center"}}>
+                  <span style=${{fontWeight: 700, fontSize: 13.5}} class="mono">${r.fullName}</span>
+                  ${r.fullName === currentFullName && html`<${Badge} tone="ok">current<//>`}
+                  <${Badge} tone=${r.visibility === "Private" ? "warn" : "default"}>${r.visibility}<//>
+                </div>
+                <span class="faint" style=${{fontSize: 11.5}}>default: <span class="mono">${r.defaultBranch}</span> · ⋆ ${r.stars} · ${r.updated}</span>
+              </div>
+              ${selected === r.fullName && html`<span style=${{color: "var(--accent)", fontSize: 18}}>✓</span>`}
+            </button>`)}
+        </div>
+        <div style=${{padding: "14px 20px", borderTop: "1px solid var(--border-soft)"}} class="row between">
+          <span class="faint" style=${{fontSize: 12}}>${filtered.length} repositor${filtered.length === 1 ? "y" : "ies"} · switching consolidates to one</span>
+          <div class="row gap-2">
+            <${Btn} variant="ghost" onClick=${onClose}>Cancel<//>
+            <${Btn} variant="primary" icon="✓" disabled=${!selected || selected === currentFullName} onClick=${() => { onPick(selected); onClose(); }}>Use this repo<//>
+          </div>
+        </div>
+      </div>
+    </div>`;
+};
+
+const GithubProviderCard = ({ provider, connected, account, onConnect, onDisconnect }) => {
+  const label = provider === "github" ? "GitHub" : "GitLab";
+  const icon = provider === "github" ? "◍" : "▲";
+  const crNoun = provider === "gitlab" ? "merge" : "pull";
+  return html`
+    <${Card} title=${label} sub=${"Used for repo access, Dockerfile/workflow " + crNoun + " requests and CI setup"}>
+      ${!connected ? html`
+        <div class="col gap-3 center" style=${{padding: "36px 20px", textAlign: "center"}}>
+          <span style=${{width: 44, height: 44, borderRadius: 12, background: "var(--surface-3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "var(--text-muted)"}}>${icon}</span>
+          <div style=${{fontWeight: 700, fontSize: 14}}>No ${label} account connected</div>
+          <div class="muted" style=${{fontSize: 13, maxWidth: 380}}>Connect ${label} so the agent can read this project's repositories and open ${crNoun} requests.</div>
+          <${Btn} variant="primary" icon=${icon} onClick=${onConnect}>Connect ${label}<//>
+        </div>
+      ` : html`
+        <div class="col gap-3">
+          ${account.map((a) => html`
+            <div class="row gap-3 between" style=${{alignItems: "center", padding: "10px 12px", background: "var(--surface-2)", border: "1px solid var(--border-soft)", borderRadius: 10}}>
+              <div class="row gap-3" style=${{alignItems: "center", minWidth: 0}}>
+                <span style=${{width: 36, height: 36, borderRadius: 9, background: "var(--surface-3)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", flex: "none", fontSize: 14, fontWeight: 800}}>${a.username.slice(0,2).toUpperCase()}</span>
+                <div class="col" style=${{gap: 2, minWidth: 0}}>
+                  <div class="row gap-2" style=${{alignItems: "center"}}>
+                    <b style=${{fontSize: 13.5}}>${a.name}</b>
+                    <span class="faint mono" style=${{fontSize: 12}}>@${a.username}</span>
+                    <${Badge} tone="ok">connected<//>
+                  </div>
+                  <span class="faint" style=${{fontSize: 11.5}}>${a.email} · connected ${a.since}</span>
+                </div>
+              </div>
+              <div class="row gap-2">
+                <${Btn} size="sm" icon=${icon} onClick=${onConnect}>Reconnect<//>
+                <${Btn} size="sm" variant="outline" onClick=${() => onDisconnect(a.id)}>Disconnect<//>
+              </div>
+            </div>`)}
+          <div class="row gap-2 between" style=${{padding: "8px 4px 0"}}>
+            <span class="faint" style=${{fontSize: 12}}>${account.length} account${account.length !== 1 ? "s" : ""} · agent uses OAuth token to read repos + open PRs</span>
+            <${Btn} size="sm" variant="ghost" icon="+" onClick=${onConnect}>Add another ${label} account<//>
+          </div>
+        </div>
+      `}
+    <//>`;
+};
+
+const GithubPage = () => {
+  const [ghConnected, setGhConnected] = useState(true);
+  const [glConnected, setGlConnected] = useState(false);
+  const [note, setNote] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [activeRepo, setActiveRepo] = useState("manov7723-sys/deepagent");
+  const active = AVAILABLE_REPOS.find((r) => r.fullName === activeRepo);
+  const ghAccounts = ghConnected ? [
+    { id: "gh1", name: "manoi vv", username: "manov7723-sys", email: "manov7723@example.com", since: "Nov 4, 2025" },
+  ] : [];
+  const glAccounts = glConnected ? [
+    { id: "gl1", name: "sriram", username: "sriram-tecnso", email: "sriram@tecneural.com", since: "Jul 13, 2026" },
+  ] : [];
+  const connect = (p) => {
+    if (p === "github") setGhConnected(true);
+    else setGlConnected(true);
+    setNote(p === "github" ? "GitHub connected." : "GitLab connected.");
+    setTimeout(() => setNote(null), 3000);
+  };
+  const disconnect = (p) => {
+    if (p === "github") setGhConnected(false);
+    else setGlConnected(false);
+    setNote(p === "github" ? "GitHub disconnected." : "GitLab disconnected.");
+    setTimeout(() => setNote(null), 3000);
+  };
+  return html`
+    <${PageHead} title="Source control" sub="Manage the GitHub and GitLab accounts the agent uses to read your repositories and open pull / merge requests." />
+    ${note && html`
+      <div style=${{padding: "10px 14px", background: "var(--ok-soft)", color: "var(--ok)", borderRadius: 8, fontSize: 13, display: "flex", alignItems: "center", gap: 8}}>
+        <span>✓</span><span>${note}</span>
+      </div>`}
+    <${GithubProviderCard} provider="github" connected=${ghConnected} account=${ghAccounts} onConnect=${() => connect("github")} onDisconnect=${() => disconnect("github")} />
+    <${GithubProviderCard} provider="gitlab" connected=${glConnected} account=${glAccounts} onConnect=${() => connect("gitlab")} onDisconnect=${() => disconnect("gitlab")} />
+    ${(ghConnected || glConnected) && html`
+      <${Card} title="Project repository" sub="The repository this project uses everywhere — Automation, CI, and security scans. Changing it applies across the whole project.">
+        <div class="row between gap-3 wrap" style=${{alignItems: "center"}}>
+          ${active ? html`
+            <div class="row gap-3" style=${{alignItems: "center", minWidth: 0}}>
+              <span style=${{width: 42, height: 42, borderRadius: 10, background: "var(--surface-3)", display: "flex", alignItems: "center", justifyContent: "center", flex: "none", fontSize: 18}}>◍</span>
+              <div class="col" style=${{gap: 3, minWidth: 0}}>
+                <div class="row gap-2" style=${{alignItems: "center"}}>
+                  <strong style=${{fontSize: 14}} class="mono">${active.fullName}</strong>
+                  <${Badge} tone=${active.visibility === "Private" ? "warn" : "default"}>${active.visibility}<//>
+                </div>
+                <span class="faint" style=${{fontSize: 12}}>Default branch: <span class="mono">${active.defaultBranch}</span> · updated ${active.updated}</span>
+              </div>
+            </div>
+          ` : html`<span class="muted" style=${{fontSize: 13}}>No repository set for this project yet.</span>`}
+          <${Btn} variant="outline" icon="◍" onClick=${() => setModalOpen(true)}>${active ? "Change repo" : "Set repository"}<//>
+        </div>
+      <//>`}
+    <div class="row gap-2 faint" style=${{fontSize: 12, alignItems: "flex-start", padding: "8px 4px"}}>
+      <span>🔒</span>
+      <span>Disconnecting removes the agent's access to that provider's repositories. You can reconnect at any time — it's the same flow used when creating a project.</span>
+    </div>
+    ${modalOpen && html`<${ChangeRepoModal} onClose=${() => setModalOpen(false)} currentFullName=${activeRepo} onPick=${(r) => { setActiveRepo(r); setNote("Project repository changed to " + r + "."); setTimeout(() => setNote(null), 3000); }} />`}
+  `;
+};
+
+// ═════════════════════════════════════════════════════════════════════
 // Topology — SVG service graph showing traffic flow through the cluster
 // ═════════════════════════════════════════════════════════════════════
 const TopologyPage = () => {
@@ -922,7 +1080,7 @@ const PAGES = {
   infra: { label: "Infrastructure", icon: "▤", component: InfraPage },
   topology: { label: "Topology", icon: "⟿", component: TopologyPage },
   promotions: { label: "Promotions", icon: "▲", component: SimplePage("Promotions", "Promote a deployed image between environments.") },
-  github: { label: "Source control", icon: "◍", component: SimplePage("Source control", "GitHub App installations and connected repositories.") },
+  github: { label: "Source control", icon: "◍", component: GithubPage },
   connection: { label: "Clusters", icon: "⛁", component: ConnectionPage },
   stats: { label: "Cloud stats", icon: "◉", component: StatsPage },
   uptime: { label: "Uptime", icon: "↺", component: UptimePage },
