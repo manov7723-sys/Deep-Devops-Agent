@@ -48,7 +48,11 @@ export function ProjectCloudClient({ slug }: { slug: string }) {
     (projectInfo?.project?.cloud as "aws" | "gcp" | "azure" | "proxmox" | null) ?? null;
 
   return (
-    <div className="col gap-5">
+    // Cap page content to 960px so provider tiles, context sections, and vault
+    // form all share the same left column. Without this, each Block stretched
+    // to 1280px while its inner form (~520px) floated in the top-left, making
+    // the page read as a series of half-empty white banners.
+    <div className="col gap-5" style={{ maxWidth: 960, width: "100%" }}>
       <PageHead
         title="Cloud providers"
         sub="Connected accounts Deep Agent deploys to, per environment."
@@ -70,7 +74,7 @@ export function ProjectCloudClient({ slug }: { slug: string }) {
             />
           </Block>
         ) : (
-          <TileGrid minTile={320}>
+          <TileGrid minTile={320} maxTile="1fr">
             {providers.map((p) => (
               <CloudProviderCard
                 key={p.id}

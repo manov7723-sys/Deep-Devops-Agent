@@ -245,7 +245,10 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
   const connectedEnvs = (envs ?? []).filter((e) => e.hasKubeconfig);
 
   return (
-    <div className="col gap-5">
+    // Cap page to 960px so the connect-cluster form (max 520 inside a Block)
+    // and the terraform-state backend form (max 480 inside a Block) don't
+    // float in half-empty 1280px cards. Everything reads as one left column.
+    <div className="col gap-5" style={{ maxWidth: 960, width: "100%" }}>
       <PageHead
         title="Connection"
         sub="Connect a running Kubernetes cluster (EKS · AKS · GKE). The kubeconfig is stored encrypted on the environment so deploys and the agent can reach it."
