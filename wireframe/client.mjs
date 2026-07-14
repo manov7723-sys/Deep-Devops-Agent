@@ -1,72 +1,164 @@
 // DeepAgent — client bundle (Preact + htm SPA)
 // Read verbatim by index.js and embedded into index.html at build time.
 // All runtime: browser only. No server, no backend, no DB.
-import { h, render } from "https://esm.sh/preact@10.19.6";
-import { useState, useEffect, useRef } from "https://esm.sh/preact@10.19.6/hooks";
+import { h, render, createContext } from "https://esm.sh/preact@10.19.6";
+import { useState, useEffect, useRef, useContext } from "https://esm.sh/preact@10.19.6/hooks";
 import htm from "https://esm.sh/htm@3.1.1";
 
 const html = htm.bind(h);
 
+// Active project — the switcher in the topbar picks one of PROJECTS's keys.
+// Every cloud-dependent page reads via useProject() so switching rebrands
+// the whole app: cluster names, terraform backend, activity, chat threads.
+const ProjectContext = createContext(null);
+const useProject = () => useContext(ProjectContext);
+
 // ═════════════════════════════════════════════════════════════════════
-// Mock data — mirrors the shapes the real hooks return
+// Three demo projects — one per cloud. Each carries all cloud-specific
+// bits so pages can rebrand end-to-end when the user switches project.
+// Real app equivalent: Project.cloud + Env + CloudProvider rows.
 // ═════════════════════════════════════════════════════════════════════
+const PROJECTS = {
+  "agent-aws": {
+    slug: "agent-aws", name: "agent (AWS)", cloud: "aws", cloudLabel: "AWS",
+    clusterType: "EKS", region: "us-east-1",
+    clusterName: "eks-prod", clusterVersion: "1.33", clusterNodes: 6,
+    stateBackend: { kind: "s3", label: "S3 bucket", bucket: "agent-tfstate", region: "us-east-1", table: "terraform-locks" },
+    provider: { id: "p1", kind: "aws", name: "AWS (us-east-1)", env: "release", region: "us-east-1", services: 3, cost: 512 },
+    envs: [
+      { key: "release", name: "release", tier: "production", cluster: "eks-prod" },
+      { key: "beta", name: "beta", tier: "staging", cluster: "eks-beta" },
+      { key: "alpha", name: "alpha", tier: "dev", cluster: null },
+    ],
+    activity: [
+      { at: "2m ago", action: "eks.terraform_generated", target: "release/eks-prod", tone: "ok" },
+      { at: "18m ago", action: "cloud_provider.credentials_set", target: "aws · release", tone: "ok" },
+      { at: "35m ago", action: "chat.message_posted", target: "thread 'EKS access entries'", tone: "info" },
+      { at: "1h ago", action: "terraform.run_started", target: "eks-prod-apply", tone: "info" },
+      { at: "3h ago", action: "env.tf_backend_set", target: "s3 · agent-tfstate", tone: "ok" },
+    ],
+    chats: [
+      { id: "c1", title: "EKS access entries", when: "2:41 PM", msgs: 22, group: "Today" },
+      { id: "c2", title: "ECR OIDC setup", when: "1:22 PM", msgs: 8, group: "Today" },
+      { id: "c3", title: "VPC subnet routing", when: "Jul 13", msgs: 14, group: "Yesterday" },
+    ],
+    chatSeed: [
+      { role: "agent", text: "Ready to provision EKS. Region us-east-1, m5.large × 3 nodes ok?" },
+      { role: "user", text: "Yes, and add spot capacity for the app pool." },
+      { role: "agent", text: "Generated Terraform using terraform-aws-modules/eks/aws v20, VPC via terraform-aws-modules/vpc, S3 backend at agent-tfstate. Encryption at rest via KMS. Ready to apply?" },
+      { role: "user", text: "Apply." },
+      { role: "agent", text: "Applying… (regional EKS control-plane usually 10-15 min)" },
+    ],
+    pipeline: [
+      { id: "r1", name: "eks-prod-apply", action: "apply", env: "release", status: "running", elapsed: "8m 22s", stages: [
+        { name: "init", status: "succeeded", dur: "38s" },
+        { name: "plan", status: "succeeded", dur: "1m 45s" },
+        { name: "apply", status: "running", dur: "5m 59s" },
+      ]},
+      { id: "r2", name: "eks-beta-apply", action: "apply", env: "beta", status: "succeeded", elapsed: "14m 08s", stages: [
+        { name: "init", status: "succeeded", dur: "32s" },
+        { name: "plan", status: "succeeded", dur: "1m 12s" },
+        { name: "apply", status: "succeeded", dur: "12m 24s" },
+      ]},
+    ],
+  },
+  "agent-gcp": {
+    slug: "agent-gcp", name: "agent (GCP)", cloud: "gcp", cloudLabel: "GCP",
+    clusterType: "GKE", region: "us-central1",
+    clusterName: "gke-prod", clusterVersion: "1.33", clusterNodes: 3,
+    stateBackend: { kind: "gcs", label: "GCS bucket", bucket: "tfstate-agent-gcp" },
+    provider: { id: "p1", kind: "gcp", name: "GCP (us-central1)", env: "release", region: "us-central1", services: 2, cost: 267, project: "new-project-495604" },
+    envs: [
+      { key: "release", name: "release", tier: "production", cluster: "gke-prod" },
+      { key: "beta", name: "beta", tier: "staging", cluster: "gke-beta" },
+      { key: "alpha", name: "alpha", tier: "dev", cluster: null },
+    ],
+    activity: [
+      { at: "5m ago", action: "gke.terraform_generated", target: "release/gke-prod", tone: "ok" },
+      { at: "22m ago", action: "azure.tfstate_provisioned", target: "gcs · tfstate-agent-gcp", tone: "ok" },
+      { at: "1h ago", action: "chat.message_posted", target: "thread 'Enable GKE APIs'", tone: "info" },
+      { at: "2h ago", action: "terraform.run_started", target: "gke-prod-apply", tone: "info" },
+      { at: "3h ago", action: "cloud_provider.credentials_set", target: "gcp · release", tone: "ok" },
+    ],
+    chats: [
+      { id: "c1", title: "GKE APIs enablement", when: "2:41 PM", msgs: 12, group: "Today" },
+      { id: "c2", title: "Workload Identity setup", when: "1:22 PM", msgs: 7, group: "Today" },
+      { id: "c3", title: "Artifact Registry WIF", when: "Jul 13", msgs: 18, group: "Yesterday" },
+    ],
+    chatSeed: [
+      { role: "agent", text: "Provisioning GKE in us-central1. Regional or zonal?" },
+      { role: "user", text: "Regional, n2-standard-4 × 3, workload identity on." },
+      { role: "agent", text: "Generated main.tf, outputs.tf, versions.tf with google_project_service preconditions (container + compute), GCS backend at tfstate-agent-gcp. Ready to apply?" },
+      { role: "user", text: "Apply." },
+      { role: "agent", text: "Applying… (regional GKE usually 20-25 min for the control plane + node pools)" },
+    ],
+    pipeline: [
+      { id: "r1", name: "gke-prod-apply", action: "apply", env: "release", status: "running", elapsed: "12m 04s", stages: [
+        { name: "init", status: "succeeded", dur: "42s" },
+        { name: "plan", status: "succeeded", dur: "2m 18s" },
+        { name: "apply", status: "running", dur: "9m 04s" },
+      ]},
+      { id: "r2", name: "gke-beta-apply", action: "apply", env: "beta", status: "succeeded", elapsed: "18m 22s", stages: [
+        { name: "init", status: "succeeded", dur: "38s" },
+        { name: "plan", status: "succeeded", dur: "1m 51s" },
+        { name: "apply", status: "succeeded", dur: "15m 53s" },
+      ]},
+    ],
+  },
+  "agent-azure": {
+    slug: "agent-azure", name: "agent (Azure)", cloud: "azure", cloudLabel: "Azure",
+    clusterType: "AKS", region: "eastus",
+    clusterName: "aks-prod", clusterVersion: "1.33", clusterNodes: 4,
+    stateBackend: { kind: "azurerm", label: "Azure Storage container", resourceGroup: "rg-devops", storageAccount: "devclusteraccount", container: "tfstate" },
+    provider: { id: "p1", kind: "azure", name: "Azure (eastus)", env: "release", region: "eastus", services: 3, cost: 482, subscription: "799aab2a-460c-4b3b-bfea-c0d72d1ad6a7" },
+    envs: [
+      { key: "release", name: "release", tier: "production", cluster: "aks-prod" },
+      { key: "beta", name: "beta", tier: "staging", cluster: "aks-beta" },
+      { key: "alpha", name: "alpha", tier: "dev", cluster: null },
+    ],
+    activity: [
+      { at: "2m ago", action: "aks.terraform_generated", target: "release/aks-prod", tone: "ok" },
+      { at: "14m ago", action: "terraform.run_started", target: "aks-prod-apply", tone: "info" },
+      { at: "28m ago", action: "azure.tfstate_provisioned", target: "rg-devops/devclusteraccount/tfstate", tone: "ok" },
+      { at: "48m ago", action: "cloud_provider.credentials_set", target: "azure · release", tone: "ok" },
+      { at: "1h ago", action: "chat.message_posted", target: "thread 'AKS OIDC'", tone: "info" },
+    ],
+    chats: [
+      { id: "c1", title: "AKS OIDC setup", when: "2:41 PM", msgs: 14, group: "Today" },
+      { id: "c2", title: "ACR keyless auth", when: "1:22 PM", msgs: 9, group: "Today" },
+      { id: "c3", title: "Azure quota bump", when: "Jul 13", msgs: 6, group: "Yesterday" },
+    ],
+    chatSeed: [
+      { role: "agent", text: "Provisioning AKS in eastus. Standard_D4s_v3 × 3 nodes, private cluster?" },
+      { role: "user", text: "Public endpoint, workload identity on, monitoring on." },
+      { role: "agent", text: "Generated Terraform with Azure Log Analytics + Managed Prometheus + KEDA. azurerm backend at rg-devops/devclusteraccount/tfstate. Ready to apply?" },
+      { role: "user", text: "Apply." },
+      { role: "agent", text: "Applying… (regional AKS usually 15-25 min)" },
+    ],
+    pipeline: [
+      { id: "r1", name: "aks-prod-apply", action: "apply", env: "release", status: "running", elapsed: "12m 04s", stages: [
+        { name: "init", status: "succeeded", dur: "42s" },
+        { name: "plan", status: "succeeded", dur: "2m 18s" },
+        { name: "apply", status: "running", dur: "9m 04s" },
+      ]},
+      { id: "r2", name: "aks-beta-apply", action: "apply", env: "beta", status: "succeeded", elapsed: "18m 22s", stages: [
+        { name: "init", status: "succeeded", dur: "38s" },
+        { name: "plan", status: "succeeded", dur: "1m 51s" },
+        { name: "apply", status: "succeeded", dur: "15m 53s" },
+      ]},
+    ],
+  },
+};
+
+// Shared data that doesn't vary per project (repos, monitors, alerts...)
 const MOCK = {
-  project: { slug: "agent", name: "agent", cloud: "azure" },
-  envs: [
-    { key: "release", name: "release", tier: "production" },
-    { key: "beta", name: "beta", tier: "staging" },
-    { key: "alpha", name: "alpha", tier: "dev" },
-  ],
-  activity: [
-    { at: "2m ago", action: "kubernetes.deployment.applied", target: "release", tone: "ok" },
-    { at: "8m ago", action: "chat.message_posted", target: "thread 'GKE dev cluster'", tone: "info" },
-    { at: "14m ago", action: "terraform.run_started", target: "gke-dev-apply", tone: "info" },
-    { at: "26m ago", action: "cloud_provider.credentials_set", target: "azure", tone: "ok" },
-    { at: "41m ago", action: "eks.terraform_generated", target: "alpha/dev", tone: "ok" },
-  ],
-  providers: [
-    { id: "p1", kind: "aws", name: "AWS (us-east-1)", env: "alpha", region: "us-east-1", services: 0, cost: 0 },
-    { id: "p2", kind: "azure", name: "Azure (eastus)", env: "release", region: "eastus", services: 3, cost: 482 },
-    { id: "p3", kind: "gcp", name: "GCP (us-central1)", env: "beta", region: "us-central1", services: 2, cost: 267 },
-  ],
-  chats: [
-    { id: "c1", title: "GKE dev cluster", when: "2:41 PM", msgs: 14, group: "Today" },
-    { id: "c2", title: "Deploy app to VM", when: "1:22 PM", msgs: 6, group: "Today" },
-    { id: "c3", title: "EKS access entries", when: "Jul 13", msgs: 22, group: "Yesterday" },
-    { id: "c4", title: "Azure OAuth reconnect", when: "Jul 13", msgs: 9, group: "Yesterday" },
-    { id: "c5", title: "Cost tag audit", when: "Jul 10", msgs: 4, group: "Previous 7 days" },
-  ],
-  chatSeed: [
-    { role: "agent", text: "Provisioning GKE in us-central1. What size?" },
-    { role: "user", text: "n2-standard-4, 3 nodes" },
-    { role: "agent", text: "Generated main.tf, outputs.tf, versions.tf with google_project_service preconditions and GCS backend. Ready to apply?" },
-    { role: "user", text: "Apply." },
-    { role: "agent", text: "Provisioning cluster… init ok, plan ok, apply running (~15-20 min for regional GKE)." },
-  ],
-  pipeline: [
-    { id: "r1", name: "aks-dev-apply", action: "apply", env: "release", status: "running", elapsed: "12m 04s", stages: [
-      { name: "init", status: "succeeded", dur: "42s" },
-      { name: "plan", status: "succeeded", dur: "2m 18s" },
-      { name: "apply", status: "running", dur: "9m 04s" },
-    ]},
-    { id: "r2", name: "gke-beta-apply", action: "apply", env: "beta", status: "succeeded", elapsed: "18m 22s", stages: [
-      { name: "init", status: "succeeded", dur: "38s" },
-      { name: "plan", status: "succeeded", dur: "1m 51s" },
-      { name: "apply", status: "succeeded", dur: "15m 53s" },
-    ]},
-    { id: "r3", name: "eks-alpha-plan", action: "plan", env: "alpha", status: "failed", elapsed: "1m 02s", stages: [
-      { name: "init", status: "failed", dur: "1m 02s" },
-      { name: "plan", status: "skipped", dur: null },
-      { name: "apply", status: "skipped", dur: null },
-    ]},
-  ],
   pipelines: [
     { repo: "manov7723-sys/deepagent", workflow: "build-and-push", branch: "dev", status: "succeeded", dur: "3m 04s", actor: "manov" },
-    { repo: "manov7723-sys/deepagent", workflow: "deploy-aks", branch: "release", status: "running", dur: "12m 04s", actor: "manov" },
+    { repo: "manov7723-sys/deepagent", workflow: "deploy-cluster", branch: "release", status: "running", dur: "12m 04s", actor: "manov" },
     { repo: "acme/app", workflow: "trivy-scan", branch: "main", status: "failed", dur: "42s", actor: "sriram" },
   ],
   alerts: [
-    { name: "mem-usage high", target: "aks-prod / default / worker-abc123 · 92% for 12m", sev: "high", env: "release" },
+    { name: "mem-usage high", target: "worker-abc123 · 92% for 12m", sev: "high", env: "release" },
     { name: "p95-latency high", target: "app.example.com · 1.2s for 5m", sev: "warn", env: "release" },
   ],
   monitors: [
@@ -176,22 +268,24 @@ const Table = ({ headers, rows }) => html`
 // Pages
 // ═════════════════════════════════════════════════════════════════════
 
-const DashboardPage = () => html`
-  <${PageHead} title="agent" sub="Production deployment target for the DeepAgent DevOps platform." actions=${html`
+const DashboardPage = () => {
+  const proj = useProject();
+  return html`
+  <${PageHead} title=${proj.name} sub=${"Production deployment target on " + proj.cloudLabel + " (" + proj.clusterType + ")."} actions=${html`
     <${Btn} variant="primary" icon="◈">Open chat<//>
     <${Btn}>Deploy<//>
   `} />
   <div style=${{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14}}>
-    <${Stat} label="Environments" value="3" sub="alpha · beta · release" icon="◨" />
-    <${Stat} label="Repositories" value="5" sub="connected" icon="◱" />
-    <${Stat} label="Monthly cost" value="$1,412" sub="▲ 6.4%" icon="$" />
+    <${Stat} label="Environments" value=${String(proj.envs.length)} sub=${proj.envs.map((e) => e.name).join(" · ")} icon="◨" />
+    <${Stat} label="Cluster" value=${proj.clusterName} sub=${proj.clusterType + " · v" + proj.clusterVersion} icon="⛁" />
+    <${Stat} label="Monthly cost" value=${"$" + (proj.provider.cost + 900).toLocaleString()} sub="▲ 6.4%" icon="$" />
     <${Stat} label="Health" value="OK" sub="all clusters ready" icon="✓" />
   </div>
   <div class="row gap-4 wrap" style=${{alignItems: "flex-start"}}>
     <div style=${{flex: 1, minWidth: 420}}>
-      <${Card} title="Recent activity" sub="Latest 20 events">
+      <${Card} title="Recent activity" sub=${proj.cloudLabel + " project · latest 20 events"}>
         <ul style=${{listStyle: "none", padding: 0, margin: 0}}>
-          ${MOCK.activity.map((a) => html`
+          ${proj.activity.map((a) => html`
             <li style=${{padding: "10px 0", borderBottom: "1px solid var(--border-soft)", fontSize: 13}}>
               <div class="row gap-3" style=${{alignItems: "center"}}>
                 <${Badge} tone=${a.tone}>${a.tone === "ok" ? "succeeded" : "info"}<//>
@@ -214,19 +308,22 @@ const DashboardPage = () => html`
       <//>
     </div>
   </div>
-  <${Card} title="Spend trend" sub="30-day rolling · $1,412 MTD">
+  <${Card} title="Spend trend" sub="30-day rolling">
     <div style=${{height: 180, background: "linear-gradient(180deg, transparent, var(--surface-2))", borderRadius: 8, display: "flex", alignItems: "flex-end", padding: 14, gap: 4}}>
       ${Array.from({length: 30}).map((_, i) => html`<div style=${{flex: 1, background: "var(--accent)", opacity: 0.4 + (i / 30) * 0.6, borderRadius: "2px 2px 0 0", height: (20 + Math.sin(i * 0.4) * 40 + i * 2) + "%"}} />`)}
     </div>
   <//>
 `;
+};
 
 const ChatPage = () => {
-  const [messages, setMessages] = useState(MOCK.chatSeed);
+  const proj = useProject();
+  const [messages, setMessages] = useState(proj.chatSeed);
   const [text, setText] = useState("");
   const [railOpen, setRailOpen] = useState(true);
   const [activeChat, setActiveChat] = useState("c1");
   const scrollRef = useRef(null);
+  useEffect(() => { setMessages(proj.chatSeed); }, [proj.slug]);
   const send = () => {
     if (!text.trim()) return;
     const t = text.trim();
@@ -286,7 +383,7 @@ const ChatPage = () => {
           <div style=${{flex: 1, overflowY: "auto", padding: "0 8px 12px"}}>
             ${groups.map((g) => html`
               <div style=${{fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-faint)", padding: "10px 8px 4px"}}>${g}</div>
-              ${MOCK.chats.filter((c) => c.group === g).map((c) => html`
+              ${proj.chats.filter((c) => c.group === g).map((c) => html`
                 <button style=${{display: "flex", flexDirection: "column", gap: 3, padding: "8px 10px", margin: "2px 0", borderRadius: 8, border: "1px solid transparent", background: activeChat === c.id ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "transparent", width: "100%", textAlign: "left", color: "var(--text)", fontFamily: "inherit", cursor: "pointer"}} onClick=${() => setActiveChat(c.id)}>
                   <span style=${{fontSize: 13, fontWeight: 600}}>${c.title}</span>
                   <span style=${{fontSize: 11, color: "var(--text-faint)"}}>${c.when} · ${c.msgs} msgs</span>
@@ -298,10 +395,12 @@ const ChatPage = () => {
 };
 
 const CloudPage = () => {
+  const proj = useProject();
   const [envFilter, setEnvFilter] = useState("all");
   const [connectOpen, setConnectOpen] = useState(false);
-  const providers = envFilter === "all" ? MOCK.providers : MOCK.providers.filter((p) => p.env === envFilter);
-  const envs = ["all", ...MOCK.envs.map((e) => e.key)];
+  // Only this project's cloud shows up — the project is locked to it at creation.
+  const providers = [proj.provider];
+  const envs = ["all", ...proj.envs.map((e) => e.key)];
   const tint = { aws: "oklch(0.72 0.19 45 / 0.15)", azure: "oklch(0.7 0.17 235 / 0.18)", gcp: "oklch(0.74 0.17 158 / 0.18)" };
   const tintFg = { aws: "oklch(0.72 0.19 45)", azure: "oklch(0.7 0.17 235)", gcp: "oklch(0.74 0.17 158)" };
   return html`
@@ -325,23 +424,42 @@ const CloudPage = () => {
           <div class="row gap-2" style=${{marginTop: 14}}><${Btn} icon="▤">View stats<//><${Btn} variant="ghost" size="icon">⚙<//><${Btn} variant="ghost" size="icon">🗑<//></div>
         <//>`)}
     <//>
-    <${Card} title="Vault configuration" sub="Step 1 · connect Vault. Step 2 · store cloud keys.">
-      <div style=${{maxWidth: 520}}>
-        <div class="row between" style=${{marginBottom: 14}}><span style=${{fontWeight: 600, fontSize: 13}}>Connection</span><${Badge} tone="warn">not connected<//></div>
-        <div class="col gap-3">
-          <${Field} label="Vault URL" required><${Input} placeholder="https://127.0.0.1:8200" /><//>
-          <${Field} label="Vault token" required hint="Token with read/write on the KV mount (hvs.…)"><${Input} placeholder="hvs.•••••••••••" /><//>
-          <div class="row gap-2"><${Btn} variant="primary" icon="🔗">Save & test<//></div>
+    ${proj.cloud === "aws" && html`
+      <${Card} title="Vault configuration" sub="Store AWS access key + secret in Vault so the agent reads them at runtime.">
+        <div style=${{maxWidth: 520}}>
+          <div class="row between" style=${{marginBottom: 14}}><span style=${{fontWeight: 600, fontSize: 13}}>Connection</span><${Badge} tone="warn">not connected<//></div>
+          <div class="col gap-3">
+            <${Field} label="Vault URL" required><${Input} placeholder="https://127.0.0.1:8200" /><//>
+            <${Field} label="Vault token" required hint="Token with read/write on the KV mount (hvs.…)"><${Input} placeholder="hvs.•••••••••••" /><//>
+            <div class="row gap-2"><${Btn} variant="primary" icon="🔗">Save & test<//></div>
+          </div>
         </div>
-      </div>
-    <//>
-    ${connectOpen && html`<${ConnectCloudModal} onClose=${() => setConnectOpen(false)} />`}
+      <//>`}
+    ${proj.cloud === "azure" && html`
+      <${Card} title="Azure context" sub=${"Subscription: " + proj.provider.subscription}>
+        <div style=${{maxWidth: 520}} class="col gap-3">
+          <${Field} label="Subscription"><${Select} value=${proj.provider.subscription} onChange=${() => {}} options=${[proj.provider.subscription]} /><//>
+          <${Field} label="Resource group"><${Select} value="rg-devops" onChange=${() => {}} options=${["rg-devops"]} /><//>
+          <${Field} label="Region"><${Select} value=${proj.region} onChange=${() => {}} options=${[proj.region]} /><//>
+          <div class="row gap-2"><${Btn} variant="primary" icon="✓">Save context<//></div>
+        </div>
+      <//>`}
+    ${proj.cloud === "gcp" && html`
+      <${Card} title="GCP context" sub=${"Project: " + proj.provider.project}>
+        <div style=${{maxWidth: 520}} class="col gap-3">
+          <${Field} label="GCP project"><${Select} value=${proj.provider.project} onChange=${() => {}} options=${[proj.provider.project]} /><//>
+          <${Field} label="Region"><${Select} value=${proj.region} onChange=${() => {}} options=${[proj.region]} /><//>
+          <${Field} label="Service account"><${Input} value="dda-runtime@new-project-495604.iam.gserviceaccount.com" readonly=${true} /><//>
+          <div class="row gap-2"><${Btn} variant="primary" icon="✓">Save context<//></div>
+        </div>
+      <//>`}
+    ${connectOpen && html`<${ConnectCloudModal} lockedCloud=${proj.cloud} onClose=${() => setConnectOpen(false)} />`}
   `;
 };
 
-const ConnectCloudModal = ({ onClose }) => {
+const ConnectCloudModal = ({ onClose, lockedCloud }) => {
   const [step, setStep] = useState(1);
-  const [cloud, setCloud] = useState("azure");
+  const [cloud, setCloud] = useState(lockedCloud || "azure");
   return html`
     <div style=${{position: "fixed", inset: 0, background: "var(--overlay)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20}} onClick=${onClose}>
       <div style=${{background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, boxShadow: "var(--shadow-lg)", maxWidth: 560, width: "100%", padding: 24}} onClick=${(e) => e.stopPropagation()}>
@@ -377,27 +495,47 @@ const ConnectCloudModal = ({ onClose }) => {
 };
 
 const InfraPage = () => {
+  const proj = useProject();
   const [pipelineEnv, setPipelineEnv] = useState("release");
-  const runs = MOCK.pipeline.filter((r) => r.env === pipelineEnv);
+  const runs = proj.pipeline.filter((r) => r.env === pipelineEnv);
+  const sb = proj.stateBackend;
   return html`
-    <${PageHead} title="Infrastructure" sub="Cloud credentials, Terraform state, and managed-Kubernetes cluster provisioning (EKS · GKE · AKS)." />
+    <${PageHead} title="Infrastructure" sub=${"Cloud credentials, Terraform state, and " + proj.clusterType + " cluster provisioning."} />
     <${Card} title="Cloud credentials" sub="Provider used to authenticate Terraform runs">
-      <div class="row gap-2 wrap"><${Badge} tone="ok">Azure · release<//><${Btn} icon="+">Add credentials<//></div>
+      <div class="row gap-2 wrap"><${Badge} tone="ok">${proj.cloudLabel} · release<//><${Btn} icon="+">Add credentials<//></div>
     <//>
-    <${Card} title="Terraform state backend" sub="Cloud-aware: S3 / GCS / azurerm chosen from project cloud." maxWidth=${560}>
+    <${Card} title="Terraform state backend" sub=${"Uses " + proj.cloudLabel + " " + sb.label + " for this project."} maxWidth=${560}>
       <div class="col gap-3">
-        <${Field} label="Environment"><${Select} value="release" onChange=${() => {}} options=${MOCK.envs.map((e) => e.key)} /><//>
-        <${Field} label="Resource group"><${Input} value="rg-devops" /><//>
-        <${Field} label="Storage account" hint="Globally unique, 3-24 lowercase letters/digits."><${Input} value="devclusteraccount" /><//>
-        <${Field} label="Blob container"><${Input} value="tfstate" /><//>
-        <div class="row gap-2"><${Btn} variant="primary" icon="✓">Save<//><${Btn} icon="☁">Provision in Azure<//></div>
+        <${Field} label="Environment"><${Select} value="release" onChange=${() => {}} options=${proj.envs.map((e) => e.key)} /><//>
+        ${sb.kind === "s3" && html`
+          <${Field} label="S3 bucket"><${Input} value=${sb.bucket} /><//>
+          <${Field} label="Region"><${Input} value=${sb.region} /><//>
+          <${Field} label="DynamoDB lock table (optional)"><${Input} value=${sb.table} /><//>
+          <div class="row gap-2"><${Btn} variant="primary" icon="✓">Save<//></div>`}
+        ${sb.kind === "gcs" && html`
+          <${Field} label="GCS bucket" hint="GCS uses object generations for locking — no separate lock table."><${Input} value=${sb.bucket} /><//>
+          <div class="row gap-2"><${Btn} variant="primary" icon="✓">Save<//></div>`}
+        ${sb.kind === "azurerm" && html`
+          <${Field} label="Resource group"><${Input} value=${sb.resourceGroup} /><//>
+          <${Field} label="Storage account" hint="Globally unique, 3-24 lowercase letters/digits."><${Input} value=${sb.storageAccount} /><//>
+          <${Field} label="Blob container"><${Input} value=${sb.container} /><//>
+          <div class="row gap-2"><${Btn} variant="primary" icon="✓">Save<//><${Btn} icon="☁">Provision in Azure<//></div>`}
+      </div>
+    <//>
+    <${Card} title=${"Create " + proj.clusterType + " cluster"} sub=${"Interactive wizard for " + proj.cloudLabel} maxWidth=${560}>
+      <div class="col gap-3">
+        <${Field} label="Cluster name"><${Input} value=${proj.clusterName + "-new"} /><//>
+        <${Field} label="Region"><${Input} value=${proj.region} /><//>
+        <${Field} label="Kubernetes version"><${Select} value=${proj.clusterVersion} onChange=${() => {}} options=${["1.36","1.35","1.34","1.33","1.32","1.31","1.30"]} /><//>
+        <${Field} label="Node count"><${Input} value=${String(proj.clusterNodes)} /><//>
+        <div class="row gap-2"><${Btn} variant="primary" icon="⚡">Push & apply<//><${Btn}>Push only<//><${Btn}>Apply only<//></div>
       </div>
     <//>
     <${Card} title="Terraform pipeline" sub="init → plan → apply against the env's cloud creds + state backend.">
       <div class="col gap-3">
         <div class="row gap-2" style=${{alignItems: "center"}}>
           <span class="field-label" style=${{margin: 0, padding: 0}}>Environment</span>
-          <div style=${{maxWidth: 220}}><${Select} value=${pipelineEnv} onChange=${setPipelineEnv} options=${MOCK.envs.map((e) => e.key)} /></div>
+          <div style=${{maxWidth: 220}}><${Select} value=${pipelineEnv} onChange=${setPipelineEnv} options=${proj.envs.map((e) => e.key)} /></div>
         </div>
         ${runs.length === 0 ? html`<div class="muted" style=${{padding: 20, textAlign: "center", fontSize: 13}}>No runs for this environment.</div>` : runs.map((r) => html`
           <${Card} pad=${true}>
@@ -427,52 +565,60 @@ const InfraPage = () => {
 };
 
 const EnvironmentsPage = () => {
+  const proj = useProject();
   const [active, setActive] = useState("release");
+  const sb = proj.stateBackend;
+  const sbLabel = sb.kind === "s3" ? sb.kind + " · " + sb.bucket
+    : sb.kind === "gcs" ? sb.kind + " · " + sb.bucket
+    : sb.kind + " · " + sb.resourceGroup + "/" + sb.storageAccount;
   return html`
-    <${PageHead} title="Environments" sub="Deploy targets with per-env cloud, cluster, and remote-state configuration." actions=${html`<${Btn} variant="primary" icon="+">New environment<//>`} />
+    <${PageHead} title="Environments" sub=${"Deploy targets on " + proj.cloudLabel + ". Each env owns its own cluster + remote-state config."} actions=${html`<${Btn} variant="primary" icon="+">New environment<//>`} />
     <${Card} title="Active environment" sub="The env used by env-scoped pages by default.">
       <div class="row gap-2 wrap">
-        ${MOCK.envs.map((e) => html`
+        ${proj.envs.map((e) => html`
           <button class="dda-env-tile" data-active=${active === e.key} onClick=${() => setActive(e.key)}>
             <div style=${{fontWeight: 700}}>${e.name}</div><div class="muted" style=${{fontSize: 11}}>${e.tier}</div>
           </button>`)}
       </div>
     <//>
-    <${Card} title="All environments" sub=${MOCK.envs.length + " environments · 2 with cluster attached"}>
-      <${Table} headers=${["Env", "Cloud", "Cluster", "Repos", "State backend", "Members"]} rows=${MOCK.envs.map((e, i) => [
-        html`<b>${e.name}</b>`,
-        html`<${Badge} tone="info">${["azure","gcp","aws"][i]}<//>`,
-        i === 2 ? html`<span class="muted">—</span>` : html`<span class="mono">${["aks-prod","gke-beta","—"][i]}</span>`,
-        String([2,1,1][i]),
-        html`<span class="mono faint">${["azurerm · rg-devops","gcs · tfstate-agent","s3 · agent-tfstate"][i]}</span>`,
-        String([5,3,3][i]),
+    <${Card} title="All environments" sub=${proj.envs.length + " environments · " + proj.envs.filter((e) => e.cluster).length + " with cluster attached"}>
+      <${Table} headers=${["Env", "Cloud", "Cluster", "State backend", "Members"]} rows=${proj.envs.map((e) => [
+        html`<b>${e.name}</b> <${Badge} tone=${e.tier === "production" ? "danger" : e.tier === "staging" ? "warn" : "info"}>${e.tier}<//>`,
+        html`<${Badge} tone="info">${proj.cloud}<//>`,
+        e.cluster ? html`<span class="mono">${e.cluster}</span>` : html`<span class="muted">—</span>`,
+        html`<span class="mono faint">${sbLabel}</span>`,
+        String(e.tier === "production" ? 5 : 3),
       ])} />
     <//>`;
 };
 
 const ConnectionPage = () => {
-  const [cloud, setCloud] = useState("azure");
+  const proj = useProject();
+  const connected = proj.envs.filter((e) => e.cluster);
   return html`
-    <${PageHead} title="Connection" sub="Connect a running Kubernetes cluster (EKS · AKS · GKE). The kubeconfig is stored encrypted on the environment." />
+    <${PageHead} title="Connection" sub=${"Connect a running " + proj.clusterType + " cluster. The kubeconfig is stored encrypted on the environment."} />
     <div style=${{maxWidth: 960, width: "100%"}} class="col gap-5">
       <${Card} title="Connected clusters" sub="Persist on the environment; the AI chat queries these directly.">
-        <ul style=${{listStyle: "none", padding: 0, margin: 0}}>
-          <li style=${{padding: "10px 0", borderBottom: "1px solid var(--border-soft)", fontSize: 13}}><${Badge} tone="ok">connected<//> <b class="mono">aks-prod</b> · release · 6 nodes ready</li>
-          <li style=${{padding: "10px 0", fontSize: 13}}><${Badge} tone="ok">connected<//> <b class="mono">gke-beta</b> · beta · 3 nodes ready</li>
-        </ul>
+        ${connected.length === 0 ? html`<div class="muted" style=${{padding: 20, textAlign: "center", fontSize: 13}}>No clusters connected yet.</div>` : html`
+          <ul style=${{listStyle: "none", padding: 0, margin: 0}}>
+            ${connected.map((e) => html`
+              <li style=${{padding: "10px 0", borderBottom: "1px solid var(--border-soft)", fontSize: 13}}>
+                <${Badge} tone="ok">connected<//> <b class="mono">${e.cluster}</b> · ${e.name} · ${proj.clusterNodes} nodes ready
+              </li>`)}
+          </ul>`}
       <//>
-      <${Card} title="Connect Kubernetes cluster" sub="Pick a cloud, point at a running cluster, and connect.">
+      <${Card} title=${"Connect " + proj.clusterType + " cluster"} sub=${"Locked to " + proj.cloudLabel + " (project cloud)"}>
         <div style=${{maxWidth: 520}}><div class="col gap-3">
-          <${Field} label="Cloud provider">
+          <${Field} label="Cloud provider" hint="Set by this project — can't be changed from here.">
             <div class="row gap-2 wrap">
-              ${["aws","azure","gcp"].map((c) => html`<${Chip} active=${cloud === c} onClick=${() => setCloud(c)} icon="☁">${c.toUpperCase()}<//>`)}
+              <${Chip} active=${true} icon="☁">${proj.cloudLabel}<//>
             </div>
           <//>
-          <${Field} label="Environment" required><${Select} value="release · connected" onChange=${() => {}} options=${MOCK.envs.map((e) => e.key)} /><//>
-          ${cloud === "aws" && html`<${Field} label="Region" required><${Input} value="us-east-1" /><//>`}
-          ${cloud === "azure" && html`<${Field} label="Resource group" required><${Input} value="rg-devops" /><//>`}
-          ${cloud === "gcp" && html`<${Field} label="GCP project" required><${Input} value="new-project-495604" /><//>`}
-          <${Field} label="Cluster name" required><${Input} value="aks-prod" /><//>
+          <${Field} label="Environment" required><${Select} value="release" onChange=${() => {}} options=${proj.envs.map((e) => e.key)} /><//>
+          ${proj.cloud === "aws" && html`<${Field} label="Region" required><${Input} value=${proj.region} /><//>`}
+          ${proj.cloud === "azure" && html`<${Field} label="Resource group" required><${Input} value="rg-devops" /><//>`}
+          ${proj.cloud === "gcp" && html`<${Field} label="GCP project" required><${Input} value=${proj.provider.project} /><//>`}
+          <${Field} label="Cluster name" required><${Input} value=${proj.clusterName} /><//>
           <div class="row gap-2"><${Btn} variant="primary" icon="⚡">Connect<//><${Btn} variant="ghost">Paste kubeconfig instead<//></div>
         </div></div>
       <//>
@@ -581,7 +727,41 @@ const NAV_GROUPS = [
 // ═════════════════════════════════════════════════════════════════════
 // Shell
 // ═════════════════════════════════════════════════════════════════════
-const Sidebar = ({ active, onSelect }) => html`
+const ProjectSwitcher = ({ activeSlug, onSwitch }) => {
+  const [open, setOpen] = useState(false);
+  const active = PROJECTS[activeSlug];
+  const cloudTint = { aws: "oklch(0.72 0.19 45)", azure: "oklch(0.7 0.17 235)", gcp: "oklch(0.74 0.17 158)" };
+  return html`
+    <div style=${{position: "relative"}}>
+      <button class="btn outline block" style=${{width: "100%", justifyContent: "space-between"}} onClick=${() => setOpen(!open)}>
+        <span class="row gap-2" style=${{alignItems: "center"}}>
+          <span style=${{width: 22, height: 22, borderRadius: 6, background: cloudTint[active.cloud], color: "white", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800}}>${active.cloudLabel.slice(0,2).toUpperCase()}</span>
+          <span>${active.name}</span>
+        </span>
+        <span class="faint">▾</span>
+      </button>
+      ${open && html`
+        <div style=${{position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", zIndex: 100, overflow: "hidden"}}>
+          <div style=${{fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-faint)", padding: "8px 12px 4px", fontWeight: 700}}>Switch project</div>
+          ${Object.values(PROJECTS).map((p) => html`
+            <button style=${{display: "flex", width: "100%", padding: "10px 12px", background: p.slug === activeSlug ? "var(--surface-3)" : "transparent", border: "none", textAlign: "left", cursor: "pointer", color: "var(--text)", fontFamily: "inherit", fontSize: 13, alignItems: "center", gap: 10}} onClick=${() => { onSwitch(p.slug); setOpen(false); }}>
+              <span style=${{width: 22, height: 22, borderRadius: 6, background: cloudTint[p.cloud], color: "white", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, flex: "none"}}>${p.cloudLabel.slice(0,2).toUpperCase()}</span>
+              <span class="col">
+                <span style=${{fontWeight: 600}}>${p.name}</span>
+                <span class="faint" style=${{fontSize: 11}}>${p.cloudLabel} · ${p.clusterType} · ${p.region}</span>
+              </span>
+              ${p.slug === activeSlug && html`<span class="faint" style=${{marginLeft: "auto"}}>✓</span>`}
+            </button>`)}
+          <div style=${{borderTop: "1px solid var(--border-soft)"}}>
+            <button style=${{display: "flex", width: "100%", padding: "10px 12px", background: "transparent", border: "none", textAlign: "left", cursor: "pointer", color: "var(--accent)", fontFamily: "inherit", fontSize: 13, alignItems: "center", gap: 10, fontWeight: 600}}>
+              <span>+</span><span>Create new project</span>
+            </button>
+          </div>
+        </div>`}
+    </div>`;
+};
+
+const Sidebar = ({ active, onSelect, activeProject, onSwitchProject }) => html`
   <aside class="dda-sidebar col">
     <div class="dda-sidebar-head row between">
       <div class="row gap-2" style=${{alignItems: "center"}}>
@@ -593,9 +773,7 @@ const Sidebar = ({ active, onSelect }) => html`
       </div>
     </div>
     <div style=${{padding: "0 12px 8px"}}>
-      <${Btn} variant="outline" block>
-        <span class="row gap-2"><span style=${{width: 22, height: 22, borderRadius: 6, background: "var(--accent)", color: "var(--accent-fg)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800}}>A</span><span>agent</span></span>
-      <//>
+      <${ProjectSwitcher} activeSlug=${activeProject} onSwitch=${onSwitchProject} />
     </div>
     <nav class="col gap-1 dda-sidebar-nav">
       ${NAV_GROUPS.map((g) => html`
@@ -615,12 +793,13 @@ const Sidebar = ({ active, onSelect }) => html`
     </div>
   </aside>`;
 
-const Topbar = ({ theme, onToggleTheme }) => html`
+const Topbar = ({ theme, onToggleTheme, project }) => html`
   <header class="dda-topbar row between" style=${{display: "flex", alignItems: "center"}}>
     <div class="row gap-3" style=${{alignItems: "center"}}>
       <${Btn} variant="ghost" size="icon">≡<//>
       <div class="row gap-1" style=${{fontSize: 13, color: "var(--text-muted)"}}>
-        <span>Projects</span><span class="faint">/</span><span style=${{color: "var(--text)", fontWeight: 600}}>agent</span>
+        <span>Projects</span><span class="faint">/</span><span style=${{color: "var(--text)", fontWeight: 600}}>${project.name}</span>
+        <${Badge} tone="info">${project.cloudLabel}<//>
       </div>
     </div>
     <div style=${{flex: 1, maxWidth: 520, margin: "0 24px"}}>
@@ -641,7 +820,14 @@ const App = () => {
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem("dda-wf-theme") || "dark"; } catch (e) { return "dark"; }
   });
+  const [projectSlug, setProjectSlug] = useState(() => {
+    try {
+      const s = localStorage.getItem("dda-wf-project");
+      return s && s in PROJECTS ? s : "agent-aws";
+    } catch (e) { return "agent-aws"; }
+  });
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); try { localStorage.setItem("dda-wf-theme", theme); } catch (e) {} }, [theme]);
+  useEffect(() => { try { localStorage.setItem("dda-wf-project", projectSlug); } catch (e) {} }, [projectSlug]);
   useEffect(() => {
     const on = () => { const id = location.hash.slice(1); if (id in PAGES) setActive(id); };
     window.addEventListener("hashchange", on);
@@ -650,18 +836,21 @@ const App = () => {
   const select = (id) => { setActive(id); location.hash = id; };
   const Page = PAGES[active].component;
   const isChat = active === "chat";
+  const project = PROJECTS[projectSlug];
   return html`
-    <div class="dda-shell" style=${{display: "flex", height: "100vh", overflow: "hidden"}}>
-      <${Sidebar} active=${active} onSelect=${select} />
-      <div class="col grow" style=${{minWidth: 0, minHeight: 0}}>
-        <${Topbar} theme=${theme} onToggleTheme=${() => setTheme(theme === "dark" ? "light" : "dark")} />
-        <main class="dda-main grow">
-          <div class="dda-page-wrap col gap-5" style=${isChat ? {maxWidth: "none", padding: 0, height: "100%"} : null}>
-            <${Page} />
-          </div>
-        </main>
+    <${ProjectContext.Provider} value=${project}>
+      <div class="dda-shell" style=${{display: "flex", height: "100vh", overflow: "hidden"}}>
+        <${Sidebar} active=${active} onSelect=${select} activeProject=${projectSlug} onSwitchProject=${setProjectSlug} />
+        <div class="col grow" style=${{minWidth: 0, minHeight: 0}}>
+          <${Topbar} theme=${theme} onToggleTheme=${() => setTheme(theme === "dark" ? "light" : "dark")} project=${project} />
+          <main class="dda-main grow">
+            <div class="dda-page-wrap col gap-5" style=${isChat ? {maxWidth: "none", padding: 0, height: "100%"} : null}>
+              <${Page} />
+            </div>
+          </main>
+        </div>
       </div>
-    </div>`;
+    <//>`;
 };
 
 render(h(App, null), document.getElementById("root"));
