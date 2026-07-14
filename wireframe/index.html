@@ -1,0 +1,3545 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DeepAgent — UI Wireframe</title>
+  <style>
+/* ============================================================
+ * tokens.css — DeepAgent design tokens (ported verbatim from wireframe)
+ * Dark default, light supported, accent + density tweakable.
+ * Do not edit values without updating the wireframe parity log.
+ * ============================================================ */
+
+:root {
+  /* Accent (tweakable) — violet by default */
+  --accent-h: 285;
+  --accent-c: 0.17;
+  --accent: oklch(0.62 var(--accent-c) var(--accent-h));
+  --accent-strong: oklch(0.56 var(--accent-c) var(--accent-h));
+  --accent-soft: oklch(0.62 var(--accent-c) var(--accent-h) / 0.14);
+  --accent-line: oklch(0.62 var(--accent-c) var(--accent-h) / 0.34);
+  --accent-fg: oklch(0.99 0 0);
+
+  /* Status */
+  --ok: oklch(0.74 0.15 158);
+  --ok-soft: oklch(0.74 0.15 158 / 0.14);
+  --warn: oklch(0.8 0.14 78);
+  --warn-soft: oklch(0.8 0.14 78 / 0.15);
+  --danger: oklch(0.66 0.2 22);
+  --danger-soft: oklch(0.66 0.2 22 / 0.15);
+  --info: oklch(0.72 0.13 235);
+  --info-soft: oklch(0.72 0.13 235 / 0.15);
+
+  /* Density (tweakable): comfortable default */
+  --density: 1;
+  --u: calc(4px * var(--density));
+  --row-h: calc(40px * var(--density));
+  --pad-card: calc(20px * var(--density));
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  --font-ui: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3);
+  --shadow: 0 8px 24px -8px oklch(0 0 0 / 0.45);
+  --shadow-lg: 0 24px 60px -20px oklch(0 0 0 / 0.6);
+  --ring: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- DARK (default) ---------- */
+:root,
+[data-theme="dark"] {
+  --bg: oklch(0.17 0.012 274);
+  --bg-grad:
+    radial-gradient(1200px 700px at 80% -10%, oklch(0.62 0.1 285 / 0.1), transparent 60%), var(--bg);
+  --surface: oklch(0.205 0.013 274);
+  --surface-2: oklch(0.245 0.014 274);
+  --surface-3: oklch(0.285 0.015 274);
+  --border: oklch(0.32 0.013 274);
+  --border-soft: oklch(0.27 0.012 274);
+  --text: oklch(0.96 0.005 274);
+  --text-muted: oklch(0.72 0.012 274);
+  --text-faint: oklch(0.56 0.012 274);
+  --overlay: oklch(0.1 0.01 274 / 0.62);
+}
+
+/* ---------- LIGHT ---------- */
+[data-theme="light"] {
+  --bg: oklch(0.975 0.004 274);
+  --bg-grad:
+    radial-gradient(1200px 700px at 80% -10%, oklch(0.62 0.12 285 / 0.08), transparent 60%),
+    var(--bg);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.975 0.005 274);
+  --surface-3: oklch(0.945 0.006 274);
+  --border: oklch(0.9 0.006 274);
+  --border-soft: oklch(0.93 0.005 274);
+  --text: oklch(0.24 0.015 274);
+  --text-muted: oklch(0.48 0.014 274);
+  --text-faint: oklch(0.62 0.012 274);
+  --overlay: oklch(0.3 0.02 274 / 0.35);
+  --shadow-sm: 0 1px 2px oklch(0.3 0.02 274 / 0.08);
+  --shadow: 0 10px 30px -12px oklch(0.3 0.02 274 / 0.18);
+  --shadow-lg: 0 30px 70px -24px oklch(0.3 0.02 274 / 0.22);
+  --accent-fg: oklch(0.99 0 0);
+}
+
+/* ============================================================
+ * primitives.css — DeepAgent design system primitives.
+ * .card .btn .badge .dot .input .toggle .tabs .prog .skel and friends.
+ * Class names match the wireframe so React primitives stay minimal.
+ * ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-grad);
+  background-attachment: fixed;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--surface-3);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+p {
+  margin: 0;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button {
+  font-family: inherit;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "ss01";
+}
+
+/* ---------- utility ---------- */
+.muted {
+  color: var(--text-muted);
+}
+.faint {
+  color: var(--text-faint);
+}
+.row {
+  display: flex;
+  align-items: center;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+}
+.gap-1 {
+  gap: 4px;
+}
+.gap-2 {
+  gap: 8px;
+}
+.gap-3 {
+  gap: 12px;
+}
+.gap-4 {
+  gap: 16px;
+}
+.gap-5 {
+  gap: 20px;
+}
+.gap-6 {
+  gap: 24px;
+}
+.grow {
+  flex: 1;
+}
+.wrap {
+  flex-wrap: wrap;
+}
+.center {
+  align-items: center;
+  justify-content: center;
+}
+.between {
+  justify-content: space-between;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.tx-pretty {
+  text-wrap: pretty;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- card / block ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.card-pad {
+  padding: var(--pad-card);
+}
+.card-h {
+  padding: 16px var(--pad-card);
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.card-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.card-toolbar {
+  padding: 12px var(--pad-card);
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------- button ---------- */
+.btn {
+  --h: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: var(--h);
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.14s,
+    border-color 0.14s,
+    transform 0.06s,
+    box-shadow 0.14s,
+    color 0.14s;
+  user-select: none;
+}
+.btn:hover {
+  background: var(--surface-3);
+  border-color: var(--surface-3);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn svg {
+  width: 16px;
+  height: 16px;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.btn.primary:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn.ghost:hover {
+  background: var(--surface-2);
+}
+.btn.outline {
+  background: transparent;
+}
+.btn.outline:hover {
+  background: var(--surface-2);
+}
+.btn.danger {
+  background: var(--danger-soft);
+  border-color: transparent;
+  color: var(--danger);
+}
+.btn.danger:hover {
+  background: var(--danger);
+  color: white;
+}
+.btn.sm {
+  --h: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.btn.lg {
+  --h: 44px;
+  padding: 0 20px;
+  font-size: 14px;
+}
+.btn.icon {
+  padding: 0;
+  width: var(--h);
+}
+.btn.block {
+  width: 100%;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* ---------- input ---------- */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  transition:
+    border-color 0.14s,
+    box-shadow 0.14s,
+    background 0.14s;
+}
+.textarea {
+  height: auto;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-faint);
+}
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: var(--ring);
+}
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  display: block;
+}
+
+/* ---------- badge / pill ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.badge.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: transparent;
+}
+.badge.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: transparent;
+}
+.badge.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+.badge.info {
+  background: var(--info-soft);
+  color: var(--info);
+  border-color: transparent;
+}
+.badge.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+.badge.solid-ok {
+  background: var(--ok);
+  color: #04210f;
+  border-color: transparent;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--text-faint);
+  flex: none;
+}
+.dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+.dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+.dot.danger {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+.dot.info {
+  background: var(--info);
+  box-shadow: 0 0 0 3px var(--info-soft);
+}
+.dot.pulse {
+  animation: pulse 1.8s infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- table ---------- */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+.tbl th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 700;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.tbl td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+.tbl tbody tr {
+  transition: background 0.12s;
+}
+.tbl tbody tr:hover {
+  background: var(--surface-2);
+}
+.tbl tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---------- tabs ---------- */
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
+  background: transparent;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.active,
+.tab[data-state="active"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* ---------- toggle (visual) ---------- */
+.toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  position: relative;
+  cursor: pointer;
+  flex: none;
+  transition: background 0.16s;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 99px;
+  background: var(--text-muted);
+  transition:
+    transform 0.16s,
+    background 0.16s;
+}
+.toggle.on,
+.toggle[data-state="checked"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.toggle.on::after,
+.toggle[data-state="checked"]::after {
+  transform: translateX(16px);
+  background: white;
+}
+
+/* ---------- progress ---------- */
+.prog {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.prog > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width 0.4s;
+}
+.prog.ok > i {
+  background: var(--ok);
+}
+.prog.warn > i {
+  background: var(--warn);
+}
+.prog.danger > i {
+  background: var(--danger);
+}
+
+/* ---------- misc ---------- */
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.divider {
+  height: 1px;
+  background: var(--border-soft);
+}
+.vdivider {
+  width: 1px;
+  background: var(--border-soft);
+  align-self: stretch;
+}
+.avatar {
+  border-radius: 99px;
+  object-fit: cover;
+  background: var(--surface-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--accent-fg);
+  flex: none;
+  overflow: hidden;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.chip:hover {
+  color: var(--text);
+  border-color: var(--surface-3);
+}
+.chip.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+.skel {
+  background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2));
+  background-size: 200% 100%;
+  animation: skel 1.4s infinite;
+  border-radius: 6px;
+}
+@keyframes skel {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.32s ease;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pop-in {
+  animation: popIn 0.18s ease;
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- Modal entrance + exit (Radix Dialog content) ---------------- */
+.modal-content[data-state="open"] {
+  animation: modalIn 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-content[data-state="closed"] {
+  animation: modalOut 0.16s cubic-bezier(0.4, 0, 1, 1);
+}
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 12px)) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes modalOut {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 8px)) scale(0.98);
+  }
+}
+
+.modal-backdrop[data-state="open"] {
+  animation: backdropIn 0.22s ease-out;
+}
+.modal-backdrop[data-state="closed"] {
+  animation: backdropOut 0.16s ease-in;
+}
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes backdropOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-content[data-state="open"],
+  .modal-content[data-state="closed"],
+  .modal-backdrop[data-state="open"],
+  .modal-backdrop[data-state="closed"] {
+    animation: none;
+  }
+}
+.spin {
+  animation: spin 1.1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* placeholder image */
+.ph {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--surface-2),
+    var(--surface-2) 10px,
+    var(--surface-3) 10px,
+    var(--surface-3) 20px
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+/* ---------- Radix overlay (modal backdrop) ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  backdrop-filter: blur(3px);
+}
+
+.dda-proj-dash-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 1000px) {
+  .dda-proj-dash-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dda-approvals-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.3fr;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .dda-approvals-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Agent rows + envvar masks (Phase 9) ---------- */
+.dda-agent-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text-faint);
+  flex: none;
+}
+.dda-agent-tile[data-on="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dda-envvar-mask {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dda-brand-asset {
+  width: 64px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+
+.dda-email-ok-banner {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 13px;
+}
+
+/* ---------- MCP + admin tables (Phase 8) ---------- */
+.dda-mcp-row {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.dda-mcp-row:last-child {
+  border-bottom: none;
+}
+.dda-mcp-tile {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  flex: none;
+}
+
+.dda-row-expanded > td {
+  background: var(--surface-2);
+}
+.dda-admin-addon-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px 10px 30px;
+  border-top: 1px solid var(--border-soft);
+}
+.dda-admin-addon-row:first-child {
+  border-top: none;
+}
+.dda-admin-addon-tile {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+/* ---------- Knowledge + approvals + alerts + danger zone (Phase 7) ---------- */
+.dda-search-input {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  max-width: 100%;
+}
+.dda-search-input input {
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+  width: 100%;
+  font-family: inherit;
+}
+
+.dda-kb-card {
+  cursor: pointer;
+  transition:
+    border-color 0.14s,
+    box-shadow 0.14s;
+}
+.dda-kb-card:hover {
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow);
+}
+.dda-kb-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  flex: none;
+}
+.dda-kb-mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.dda-approval-row {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  background: transparent;
+  border-left: 2px solid transparent;
+  border-top: none;
+  border-right: none;
+  width: 100%;
+  color: inherit;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+.dda-approval-row:hover {
+  background: var(--surface-2);
+}
+.dda-approval-row[data-active="true"] {
+  background: var(--surface-2);
+  border-left-color: var(--accent);
+}
+.dda-approval-diff {
+  background: var(--surface-2);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+.dda-approval-diff-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.dda-approval-diff pre {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  overflow-x: auto;
+}
+
+.dda-alert-card {
+  transition: border-color 0.12s;
+}
+.dda-alert-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  flex: none;
+}
+
+.dda-danger-row {
+  padding: 16px 18px;
+  border-top: 1px solid var(--border-soft);
+}
+.dda-danger-row:first-child {
+  border-top: none;
+}
+.dda-danger-card {
+  border-color: var(--danger);
+  overflow: hidden;
+}
+
+.dda-virtual-scroll {
+  border-radius: var(--radius);
+}
+
+/* ---------- Cloud + tasks (Phase 6) ---------- */
+.dda-provider-tile {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  font-weight: 800;
+  font-size: 11px;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  flex: none;
+  letter-spacing: 0.05em;
+}
+
+.dda-cloud-stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  flex: none;
+}
+.dda-cloud-policy {
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 9px;
+  border: 1px solid var(--border-soft);
+}
+
+.dda-task-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  flex: none;
+}
+
+.dda-cost-trend {
+  position: relative;
+}
+.dda-cost-budget-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1.5px dashed var(--warn);
+  opacity: 0.7;
+}
+
+/* ---------- Pipeline + activity + chat (Phase 5) ---------- */
+.dda-pipeline-stage {
+  flex: 1 1 auto;
+  min-width: 100px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  align-items: center;
+}
+
+.dda-activity-row {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.dda-activity-row:last-child {
+  border-bottom: none;
+}
+
+.dda-config-row {
+  padding: 6px 0;
+}
+
+/* When a chat page is inside .dda-page-wrap, drop the wrap's padding entirely
+   so the chat can fill 100% of .dda-main without any viewport math. Modern
+   :has() gives us this per-route override without touching other pages.
+   Matches through the .dda-chat-shell wrapper the threaded layout adds. */
+.dda-main:has(.dda-chat-page) {
+  overflow: hidden;
+}
+.dda-page-wrap:has(.dda-chat-page) {
+  padding: 0;
+  height: 100%;
+  max-width: none;
+  overflow: hidden;
+}
+.dda-chat-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.dda-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  gap: 12px;
+}
+.dda-chat-head-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.dda-chat-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+.dda-chat-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 820px;
+  margin: 0 auto;
+}
+.dda-chat-row {
+  align-items: flex-start;
+}
+.dda-chat-user-bubble {
+  padding: 11px 15px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  max-width: 76%;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.dda-chat-agent-tile {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
+}
+.dda-chat-agent-bubble {
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.dda-chat-plan-row {
+  padding: 9px 10px;
+  border-radius: 8px;
+}
+.dda-chat-plan-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--accent);
+  flex: none;
+}
+.dda-chat-code {
+  overflow: hidden;
+  font-size: 12px;
+}
+.dda-chat-code-head {
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.dda-chat-code-body {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre;
+}
+.dda-chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.dda-chat-composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.dda-chat-composer-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+  font-family: inherit;
+  width: 100%;
+  min-height: 24px;
+  max-height: 200px;
+  resize: none;
+  overflow-y: hidden;
+  padding: 4px 6px;
+}
+.dda-chat-composer-input::placeholder {
+  color: var(--text-faint);
+}
+.dda-chat-composer-actions {
+  align-items: center;
+}
+
+/* Chat page layout: main pane + right-side history rail. The rail collapses
+   by animating grid-template-columns; the rail itself scales/fades so it
+   doesn't reflow its content mid-transition. */
+.dda-chat-shell {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  transition: grid-template-columns 0.22s ease;
+}
+.dda-chat-shell.is-rail-closed {
+  grid-template-columns: 1fr 0px;
+}
+.dda-chat-shell.is-rail-closed > .dda-chat-rail {
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+}
+.dda-chat-shell > .dda-chat-page {
+  min-width: 0;
+  min-height: 0;
+}
+.dda-chat-rail {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-soft);
+  background: var(--surface-2);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  transition:
+    opacity 0.18s ease,
+    transform 0.22s ease;
+}
+.dda-chat-rail-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.dda-chat-rail-heading {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  padding: 8px 8px 4px;
+  margin: 0;
+}
+.dda-chat-rail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+.dda-chat-rail-item:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--border-soft);
+}
+.dda-chat-rail-item.is-active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.dda-chat-rail-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dda-chat-rail-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dda-chat-rail-item-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.dda-chat-rail-skel {
+  height: 42px;
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--surface) 0%,
+    var(--surface-hover) 50%,
+    var(--surface) 100%
+  );
+  background-size: 200% 100%;
+  animation: dda-skel 1.4s ease-in-out infinite;
+}
+@keyframes dda-skel {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@media (max-width: 900px) {
+  .dda-chat-shell {
+    grid-template-columns: 1fr;
+  }
+  .dda-chat-rail {
+    display: none;
+  }
+}
+.dda-chat-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.dda-chat-thinking .dot {
+  background: var(--accent);
+  box-shadow: none;
+  animation: pulse 1s infinite;
+}
+.dda-chat-thinking .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dda-chat-thinking .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.dda-env-tile {
+  flex: 1 1 200px;
+  cursor: pointer;
+  padding: var(--pad-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+.dda-env-tile[data-active="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.dda-env-tile:hover {
+  border-color: var(--accent-line);
+}
+
+/* ---------- Plan + billing rows (Phase 4) ---------- */
+.dda-plan-card {
+  position: relative;
+}
+.dda-plan-pop {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+}
+.dda-card-brand {
+  width: 44px;
+  height: 30px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-weight: 800;
+  font-size: 11px;
+  flex: none;
+}
+
+.dda-toggle-row {
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--border-soft);
+  transition: background 0.12s;
+}
+.dda-toggle-row:last-child {
+  border-bottom: none;
+}
+.dda-toggle-row:hover {
+  background: var(--surface-2);
+}
+.dda-toggle-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex: none;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.dda-toggle-icon[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dda-security-row {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.dda-security-row:last-child {
+  border-bottom: none;
+}
+.dda-security-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  flex: none;
+}
+
+.dda-sub-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+.dda-sub-banner-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.dda-profile-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  padding: var(--pad-card);
+}
+.dda-profile-avatar-edit {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--surface);
+}
+
+.dda-backup-codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+.dda-backup-code {
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  font-size: 13px;
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+/* ---------- Project tile + wizard (Phase 3) ---------- */
+.dda-project-tile {
+  text-decoration: none;
+  transition:
+    border-color 0.14s,
+    box-shadow 0.14s,
+    transform 0.08s;
+  cursor: pointer;
+}
+.dda-project-tile:hover {
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow);
+}
+.dda-project-tile:active {
+  transform: translateY(1px);
+}
+.dda-project-create {
+  border-style: dashed;
+  min-height: 240px;
+  color: var(--text-faint);
+  background: var(--surface);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    border-color 0.14s,
+    background 0.14s;
+}
+.dda-project-create:hover {
+  border-color: var(--accent-line);
+  background: var(--surface-2);
+}
+.dda-project-create-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.dda-row-list-row {
+  transition: background 0.12s;
+}
+.dda-row-list-row:hover {
+  background: var(--surface-2);
+}
+
+.dda-dash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 900px) {
+  .dda-dash-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dda-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.dda-wizard-gh-card {
+  padding: 22px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  text-align: center;
+}
+.dda-wizard-gh-connected {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 13px;
+}
+.dda-wizard-repo-row {
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+.dda-wizard-repo-row[data-on="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.dda-wizard-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  flex: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent-fg);
+}
+.dda-wizard-check[data-on="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.dda-wizard-env-row {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.dda-wizard-env-row[data-on="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.dda-wizard-iam-note {
+  padding: 12px;
+  background: var(--info-soft);
+  border-radius: 10px;
+  color: var(--info);
+}
+.dda-wizard-summary {
+  padding: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  box-shadow: none;
+}
+
+/* ---------- Landing page (v1.0) ---------- */
+.dda-landing {
+  min-height: 100vh;
+  background: var(--bg-grad);
+  display: flex;
+  flex-direction: column;
+}
+
+.dda-landing-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px clamp(20px, 4vw, 56px);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(10px);
+  background: oklch(0 0 0 / 0);
+}
+[data-theme="light"] .dda-landing-nav {
+  background: oklch(1 0 0 / 0.5);
+}
+
+.dda-landing-hero {
+  position: relative;
+  padding: clamp(48px, 10vw, 120px) clamp(20px, 4vw, 56px) clamp(48px, 8vw, 80px);
+  text-align: center;
+  overflow: hidden;
+}
+.dda-landing-hero-glow {
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1100px, 100%);
+  height: 700px;
+  background: radial-gradient(
+    closest-side,
+    oklch(0.62 0.18 var(--accent-h) / 0.22),
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+.dda-landing-hero-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 840px;
+  margin: 0 auto;
+  align-items: center;
+}
+.dda-landing-hero h1 {
+  font-size: clamp(36px, 6vw, 64px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  margin-top: 6px;
+}
+.dda-landing-grad {
+  background: linear-gradient(
+    120deg,
+    oklch(0.72 0.18 var(--accent-h)),
+    oklch(0.62 0.16 calc(var(--accent-h) + 40))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.dda-landing-sub {
+  font-size: clamp(15px, 1.6vw, 18px);
+  line-height: 1.55;
+  max-width: 640px;
+  margin: 0 auto;
+}
+.dda-landing-cta {
+  justify-content: center;
+  margin-top: 8px;
+}
+.dda-landing-trust {
+  font-size: 12px;
+  margin-top: 6px;
+  justify-content: center;
+}
+
+.dda-landing-section {
+  padding: clamp(48px, 8vw, 96px) clamp(20px, 4vw, 56px);
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.dda-landing-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.dda-landing-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.dda-landing-feature h3 {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.dda-landing-feature p {
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin: 0;
+}
+.dda-landing-feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
+}
+
+.dda-landing-how h2 {
+  font-size: clamp(28px, 4vw, 40px);
+  letter-spacing: -0.02em;
+}
+.dda-landing-steps {
+  list-style: none;
+  padding: 0;
+  margin: 32px auto 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 880px;
+}
+@media (max-width: 720px) {
+  .dda-landing-steps {
+    grid-template-columns: 1fr;
+  }
+}
+.dda-landing-step {
+  display: flex;
+  gap: 14px;
+  padding: 20px 22px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  align-items: flex-start;
+}
+.dda-landing-step h4 {
+  font-size: 14.5px;
+  margin: 2px 0 2px;
+}
+.dda-landing-step p {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+.dda-landing-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 13px;
+  flex: none;
+  border: 1px solid var(--accent-line);
+}
+
+.dda-landing-final-card {
+  background: var(--surface);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg);
+  padding: clamp(36px, 6vw, 64px) clamp(24px, 5vw, 56px);
+  position: relative;
+  overflow: hidden;
+  background-image: radial-gradient(700px 220px at 50% 0%, var(--accent-soft), transparent 70%);
+}
+.dda-landing-final-card h2 {
+  font-size: clamp(24px, 3.5vw, 36px);
+  letter-spacing: -0.02em;
+}
+
+.dda-landing-foot {
+  border-top: 1px solid var(--border-soft);
+  margin-top: auto;
+  padding: 24px clamp(20px, 4vw, 56px);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.dda-landing-foot a:hover {
+  color: var(--accent);
+}
+
+/* ---------- Chaos banner (Phase 10) ---------- */
+.dda-chaos-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--warn);
+  color: var(--warn);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* ---------- Live alert banner ---------- */
+.dda-alert-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 20px;
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--warn);
+  color: var(--warn);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dda-alert-banner.high {
+  background: var(--danger-soft, color-mix(in srgb, var(--danger) 14%, transparent));
+  border-bottom-color: var(--danger);
+  color: var(--danger);
+  animation: ddaAlertFlash 2.4s ease-in-out infinite;
+}
+@keyframes ddaAlertFlash {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: inset 0 3px 0 0 var(--danger);
+  }
+}
+.dda-alert-pulse {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+  animation: ddaAlertPulse 1.3s ease-in-out infinite;
+}
+@keyframes ddaAlertPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70% {
+    opacity: 0.7;
+    transform: scale(1.15);
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+.dda-alert-text {
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dda-alert-where {
+  font-weight: 400;
+  opacity: 0.8;
+}
+.dda-alert-link {
+  flex: none;
+  color: inherit;
+  text-decoration: underline;
+  font-weight: 700;
+}
+.dda-alert-x {
+  flex: none;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  display: inline-flex;
+  padding: 2px;
+}
+.dda-alert-x:hover {
+  opacity: 1;
+}
+
+/* High-severity "alert mode" — pulsing red edge around the whole app surface. */
+.dda-shell.dda-alert-mode {
+  box-shadow: inset 0 0 0 2px var(--danger);
+  animation: ddaScreenAlert 2.4s ease-in-out infinite;
+}
+@keyframes ddaScreenAlert {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--danger) 55%, transparent);
+  }
+  50% {
+    box-shadow: inset 0 0 0 3px var(--danger);
+  }
+}
+
+/* ---------- App shell (Phase 2) ---------- */
+.dda-shell {
+  height: 100vh;
+  overflow: hidden;
+  align-items: stretch;
+}
+.dda-sidebar {
+  width: 248px;
+  flex: none;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  height: 100%;
+  overflow-y: auto;
+}
+.dda-sidebar-desktop {
+  height: 100%;
+}
+.dda-sidebar-head {
+  padding: 16px 16px 10px;
+}
+.dda-sidebar-nav {
+  padding: 6px 12px;
+  flex: 1;
+}
+.dda-sidebar-sep {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 14px 10px 6px;
+}
+.dda-sidebar-item {
+  padding: 9px 10px;
+  border-radius: 9px;
+  gap: 11px;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--text-muted);
+  transition:
+    background 0.12s,
+    color 0.12s;
+  text-decoration: none;
+}
+.dda-sidebar-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.dda-sidebar-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.dda-sidebar-foot {
+  padding: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.dda-sidebar-status {
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  box-shadow: none;
+}
+
+.dda-topbar {
+  height: 60px;
+  flex: none;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  gap: 12px;
+}
+.dda-main {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.dda-page-wrap {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px clamp(16px, 3vw, 32px) 64px;
+}
+
+.dda-search-box {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  width: 300px;
+  max-width: 42vw;
+  color: var(--text-faint);
+}
+
+.dda-mob-menu,
+.dda-mob-menu-floating {
+  display: none;
+}
+
+.dda-mobile-drawer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 160;
+  display: flex;
+  animation: ddaSlideIn 0.18s ease;
+}
+@keyframes ddaSlideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.dda-project-switcher {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text);
+}
+.dda-project-switcher:hover {
+  background: var(--surface-3);
+}
+
+.dda-notif-row {
+  padding: 9px 10px;
+  border-radius: 8px;
+}
+.dda-notif-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--accent);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dda-user-pill {
+  padding: 4px 8px 4px 4px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text);
+}
+.dda-user-pill:hover {
+  background: var(--surface-3);
+}
+
+.dda-tweaks-sheet {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  z-index: 210;
+  animation: ddaSlideInRight 0.18s ease;
+  overflow-y: auto;
+}
+@keyframes ddaSlideInRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.dda-tweak-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.dda-tweak-swatch[data-active="true"] {
+  border: 2px solid var(--text);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+@media (max-width: 900px) {
+  .dda-sidebar-desktop {
+    display: none;
+  }
+  .dda-mob-menu {
+    display: inline-flex;
+  }
+  .dda-page-wrap {
+    padding: 20px clamp(12px, 3vw, 20px) 48px;
+  }
+}
+@media (max-width: 560px) {
+  .dda-search-box {
+    display: none;
+  }
+  .hide-sm {
+    display: none;
+  }
+  .dda-topbar {
+    padding: 0 12px;
+  }
+}
+
+/* ---------- Auth shell (Phase 1) ---------- */
+.auth-frame {
+  display: flex;
+  flex-direction: row;
+  min-height: 100vh;
+  overflow: auto;
+}
+.auth-brand {
+  width: 44%;
+  max-width: 560px;
+  flex: none;
+  padding: 48px 56px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.auth-brand-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(700px 400px at 20% 10%, var(--accent-soft), transparent 60%);
+  pointer-events: none;
+}
+.auth-brand-inner {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.auth-brand-pitch {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  justify-content: center;
+  padding-right: 20px;
+}
+.auth-brand-pitch h1 {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+.auth-brand-pitch p {
+  font-size: 15.5px;
+  line-height: 1.55;
+}
+.auth-feat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
+}
+.auth-brand-foot {
+  font-size: 12px;
+}
+.auth-form-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  overflow: auto;
+}
+.auth-form-col {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.auth-logo-mobile {
+  display: none;
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.auth-divider .divider {
+  flex: 1;
+  height: 1px;
+  background: var(--border-soft);
+}
+.auth-divider span {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.auth-link {
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+.auth-link:hover {
+  text-decoration: underline;
+}
+.auth-pwd-checklist {
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.auth-pwd-req {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.auth-pwd-req.met {
+  color: var(--ok);
+}
+.auth-pwd-req.unmet {
+  color: var(--text-faint);
+}
+.auth-otp-row {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.auth-otp-input {
+  width: 50px;
+  height: 58px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  padding: 0;
+  font-family: var(--font-mono);
+}
+.auth-key-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.auth-qr {
+  width: 130px;
+  height: 130px;
+  flex: none;
+  border-radius: 12px;
+}
+.auth-key-code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 900px) {
+  .auth-frame {
+    flex-direction: column;
+  }
+  .auth-brand {
+    display: none;
+  }
+  .auth-logo-mobile {
+    display: block;
+  }
+  .auth-form-wrap {
+    padding: 32px 20px;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-key-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .auth-otp-input {
+    width: 44px;
+    height: 52px;
+    font-size: 19px;
+  }
+}
+
+/* ---------- Empty state ---------- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 20px;
+  gap: 12px;
+  color: var(--text-muted);
+}
+.empty-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+.empty-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.empty-sub {
+  font-size: 12.5px;
+  max-width: 320px;
+}
+
+/* Streaming chat cursor — sits next to the partial agent bubble while
+   Claude is still writing. Pulses to signal "still going". */
+.dda-chat-streaming-wrap {
+  position: relative;
+}
+.dda-chat-streaming-cursor {
+  display: inline-block;
+  color: var(--accent);
+  font-weight: 700;
+  margin-left: 4px;
+  animation: chatCursor 1s steps(2) infinite;
+}
+@keyframes chatCursor {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Markdown body — tighten Claude's response inside the agent bubble.
+   The bubble already has padding; reset the leading/trailing margins
+   on the first/last block-level child. */
+.dda-md > :first-child {
+  margin-top: 0;
+}
+.dda-md > :last-child {
+  margin-bottom: 0;
+}
+
+
+/* Wireframe-specific tweaks */
+.dda-shell { display: flex; height: 100vh; overflow: hidden; }
+.page { min-height: 100%; }
+.dda-page-wrap { max-width: 1180px !important; margin: 0 auto; padding: 24px clamp(16px, 3vw, 32px) 64px !important; }
+h1 { font-size: 22px !important; }
+h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+@media (max-width: 900px) {
+  .dda-shell { flex-direction: column; }
+  .dda-sidebar { width: 100% !important; height: auto; }
+}
+  </style>
+</head>
+<body>
+  <div class="dda-shell">
+    
+  <aside class="dda-sidebar col">
+    <div class="dda-sidebar-head row between">
+      <div class="row gap-2" style="align-items:center;">
+        <span style="width:34px;height:34px;border-radius:10px;background:var(--accent);color:var(--accent-fg);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">◐</span>
+        <div class="col">
+          <span style="font-weight:800;font-size:13.5px;letter-spacing:-.01em;">DeepAgent DevOps</span>
+          <span class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;">Autonomous infra</span>
+        </div>
+      </div>
+    </div>
+    <div style="padding:0 12px 8px;">
+      <button class="btn outline block" style="width:100%;justify-content:space-between;">
+        <span class="row gap-2"><span style="width:22px;height:22px;border-radius:6px;background:var(--accent);color:var(--accent-fg);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;">A</span><span>agent</span></span>
+        <span class="faint">▾</span>
+      </button>
+    </div>
+    <nav class="col gap-1 dda-sidebar-nav">
+      
+        
+        <a href="#dashboard" data-id="dashboard" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">▤</span>
+            <span>Dashboard</span>
+          </a><a href="#chat" data-id="chat" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">◈</span>
+            <span>Chat</span>
+          </a><a href="#cicd" data-id="cicd" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">◱</span>
+            <span>CI/CD & Repos</span>
+          </a><a href="#environments" data-id="environments" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">◨</span>
+            <span>Environments</span>
+          </a><a href="#cloud" data-id="cloud" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">☁</span>
+            <span>Cloud providers</span>
+          </a><a href="#infra" data-id="infra" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">▤</span>
+            <span>Infrastructure</span>
+          </a><a href="#topology" data-id="topology" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">⟿</span>
+            <span>Topology</span>
+          </a>
+      
+        <div class="dda-sidebar-sep">Deploy</div>
+        <a href="#promotions" data-id="promotions" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">▲</span>
+            <span>Promotions</span>
+          </a>
+      
+        <div class="dda-sidebar-sep">Connection</div>
+        <a href="#github" data-id="github" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">◍</span>
+            <span>Source control</span>
+          </a><a href="#connection" data-id="connection" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">⛁</span>
+            <span>Clusters</span>
+          </a><a href="#stats" data-id="stats" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">◉</span>
+            <span>Cloud stats</span>
+          </a><a href="#uptime" data-id="uptime" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">↺</span>
+            <span>Uptime</span>
+          </a><a href="#scheduler" data-id="scheduler" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">⏰</span>
+            <span>Scheduler</span>
+          </a>
+      
+        
+        <a href="#cost" data-id="cost" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">$</span>
+            <span>Cost</span>
+          </a><a href="#tasks" data-id="tasks" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">◇</span>
+            <span>Tasks</span>
+          </a><a href="#knowledge" data-id="knowledge" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">◉</span>
+            <span>Knowledge base</span>
+          </a><a href="#approvals" data-id="approvals" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">☑</span>
+            <span>Approvals</span>
+          </a><a href="#alerts" data-id="alerts" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">!</span>
+            <span>Alerts</span>
+          </a><a href="#activity" data-id="activity" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">≡</span>
+            <span>Activity</span>
+          </a><a href="#settings" data-id="settings" class="dda-sidebar-item row">
+            <span style="width:18px;text-align:center;">⚙</span>
+            <span>Settings</span>
+          </a>
+      
+    </nav>
+    <div class="dda-sidebar-foot">
+      <div class="dda-sidebar-status card card-pad">
+        <div class="row gap-2" style="align-items:center;"><span class="dot" style="background:var(--ok);"></span><span style="font-weight:600;font-size:12.5px;">All systems ok</span></div>
+        <div class="faint" style="font-size:11px;margin-top:4px;">Last check 2m ago</div>
+      </div>
+    </div>
+  </aside>
+    <div class="col grow" style="min-width: 0; min-height: 0;">
+      
+  <header class="dda-topbar row between" style="display:flex;align-items:center;">
+    <div class="row gap-3" style="align-items:center;">
+      <button class="btn ghost icon sm" aria-label="Menu">≡</button>
+      <div class="row gap-1" style="font-size:13px;color:var(--text-muted);">
+        <span>Projects</span><span class="faint">/</span><span style="color:var(--text);font-weight:600;">agent</span>
+      </div>
+    </div>
+    <div style="flex:1;max-width:520px;margin:0 24px;">
+      <div class="input row gap-2" style="cursor:default;color:var(--text-faint);">
+        <span>◎</span><span>Search resources, repos, agents…</span><span style="margin-left:auto;font-size:11px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;">⌘K</span>
+      </div>
+    </div>
+    <div class="row gap-2">
+      <button class="btn outline sm">📦 Project workspace <span class="faint">▾</span></button>
+      <button class="btn ghost icon sm" aria-label="Theme">☀</button>
+      <button class="btn ghost icon sm" aria-label="Notifications">🔔</button>
+      <button class="btn ghost icon sm" aria-label="User">MV</button>
+    </div>
+  </header>
+      <main class="dda-main grow">
+        
+    <section class="page" data-page="dashboard" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">agent</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Production deployment target for the DeepAgent DevOps platform.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary"><span aria-hidden>◈</span>Open chat</button><button class="btn outline">Deploy</button></div>
+      </div>
+    </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:14px;">
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Environments</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">3</span>
+        <span class="muted" style="font-size:12px;">alpha · beta · release</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">◨</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Repositories</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">5</span>
+        <span class="muted" style="font-size:12px;">connected</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">◱</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Monthly cost</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">$1,412</span>
+        <span class="muted" style="font-size:12px;">▲ 6.4%</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">$</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Health</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">OK</span>
+        <span class="muted" style="font-size:12px;">all clusters ready</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">✓</span>
+    </div>
+  </div>
+      </div>
+      <div class="row gap-4 wrap" style="align-items:flex-start;">
+        <div style="flex:1;min-width:420px;">
+          <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Recent activity</span><span class="faint" style="font-size:12px;">Latest 20 events across the project</span></div><div class="row gap-2" style="margin-left:auto;"><button class="btn outline">View all</button></div></div><div class="card-pad"><ul style="list-style:none;padding:0;margin:0;"><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge ok"><span class="dot" aria-hidden></span>succeeded</span> kubernetes.deployment.applied · <span class="mono muted">release</span> · <span class="faint">2m ago</span></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge info"><span class="dot" aria-hidden></span>info</span> chat.message_posted · <span class="muted">thread “gke dev cluster”</span> · <span class="faint">8m ago</span></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge info"><span class="dot" aria-hidden></span>running</span> terraform.run_started · <span class="mono muted">gke-dev-apply</span> · <span class="faint">14m ago</span></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge ok"><span class="dot" aria-hidden></span>ok</span> cloud_provider.credentials_set · <span class="muted">azure</span> · <span class="faint">26m ago</span></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge ok"><span class="dot" aria-hidden></span>ok</span> eks.terraform_generated · <span class="mono muted">alpha/dev</span> · <span class="faint">41m ago</span></li></ul></div></section>
+        </div>
+        <div style="width:340px;flex:none;">
+          <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Attention</span><span class="faint" style="font-size:12px;">Things that block deploys</span></div></div><div class="card-pad"><ul style="list-style:none;padding:0;margin:0;"><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge danger"><span class="dot" aria-hidden></span>high</span> 1 open alert · <span class="mono">mem-usage</span> on release</li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge info"><span class="dot" aria-hidden></span>pending</span> 2 approvals waiting</li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge warn"><span class="dot" aria-hidden></span>warn</span> State backend not set on <span class="mono">alpha</span> env</li></ul></div></section>
+        </div>
+      </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Spend trend</span><span class="faint" style="font-size:12px;">30-day rolling · $1,412 MTD</span></div></div><div class="card-pad"><div style="height:180px;background:linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 100%);border-radius:8px;display:flex;align-items:flex-end;padding:14px;gap:6px;">
+          <div style="flex:1;background:var(--accent);opacity:0.4;border-radius:2px 2px 0 0;height:20%;"></div><div style="flex:1;background:var(--accent);opacity:0.42000000000000004;border-radius:2px 2px 0 0;height:37.576733692346025%;"></div><div style="flex:1;background:var(--accent);opacity:0.44;border-radius:2px 2px 0 0;height:52.69424363598091%;"></div><div style="flex:1;background:var(--accent);opacity:0.46;border-radius:2px 2px 0 0;height:63.281563438689055%;"></div><div style="flex:1;background:var(--accent);opacity:0.48000000000000004;border-radius:2px 2px 0 0;height:67.98294412166021%;"></div><div style="flex:1;background:var(--accent);opacity:0.5;border-radius:2px 2px 0 0;height:66.37189707302727%;"></div><div style="flex:1;background:var(--accent);opacity:0.52;border-radius:2px 2px 0 0;height:59.018527222046025%;"></div><div style="flex:1;background:var(--accent);opacity:0.54;border-radius:2px 2px 0 0;height:47.39952600623619%;"></div><div style="flex:1;background:var(--accent);opacity:0.56;border-radius:2px 2px 0 0;height:33.665034262896796%;"></div><div style="flex:1;background:var(--accent);opacity:0.5800000000000001;border-radius:2px 2px 0 0;height:20.2991822682059%;"></div><div style="flex:1;background:var(--accent);opacity:0.6;border-radius:2px 2px 0 0;height:9.72790018768287%;"></div><div style="flex:1;background:var(--accent);opacity:0.62;border-radius:2px 2px 0 0;height:3.935917044419355%;"></div><div style="flex:1;background:var(--accent);opacity:0.64;border-radius:2px 2px 0 0;height:4.15341564656638%;"></div><div style="flex:1;background:var(--accent);opacity:0.66;border-radius:2px 2px 0 0;height:10.661813771193877%;"></div><div style="flex:1;background:var(--accent);opacity:0.6799999999999999;border-radius:2px 2px 0 0;height:22.749334485107166%;"></div><div style="flex:1;background:var(--accent);opacity:0.7;border-radius:2px 2px 0 0;height:38.823380072042966%;"></div><div style="flex:1;background:var(--accent);opacity:0.72;border-radius:2px 2px 0 0;height:56.66196819401975%;"></div><div style="flex:1;background:var(--accent);opacity:0.74;border-radius:2px 2px 0 0;height:73.76453404554437%;"></div><div style="flex:1;background:var(--accent);opacity:0.76;border-radius:2px 2px 0 0;height:87.74671455396613%;"></div><div style="flex:1;background:var(--accent);opacity:0.78;border-radius:2px 2px 0 0;height:96.71678688125945%;"></div><div style="flex:1;background:var(--accent);opacity:0.8;border-radius:2px 2px 0 0;height:99.57432986493527%;"></div><div style="flex:1;background:var(--accent);opacity:0.8200000000000001;border-radius:2px 2px 0 0;height:96.18395632353122%;"></div><div style="flex:1;background:var(--accent);opacity:0.84;border-radius:2px 2px 0 0;height:87.39668771567047%;"></div><div style="flex:1;background:var(--accent);opacity:0.8600000000000001;border-radius:2px 2px 0 0;height:74.91559656400983%;"></div><div style="flex:1;background:var(--accent);opacity:0.88;border-radius:2px 2px 0 0;height:61.026928751080746%;"></div><div style="flex:1;background:var(--accent);opacity:0.9;border-radius:2px 2px 0 0;height:48.23915556442521%;"></div><div style="flex:1;background:var(--accent);opacity:0.92;border-radius:2px 2px 0 0;height:38.886941236573854%;"></div><div style="flex:1;background:var(--accent);opacity:0.9400000000000001;border-radius:2px 2px 0 0;height:34.76255079734034%;"></div><div style="flex:1;background:var(--accent);opacity:0.96;border-radius:2px 2px 0 0;height:36.832890833947324%;"></div><div style="flex:1;background:var(--accent);opacity:0.98;border-radius:2px 2px 0 0;height:45.08685620125169%;"></div>
+        </div></div></section></div>
+    </section>
+    <section class="page" data-page="chat" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      <div class="dda-chat-shell" style="height:calc(100vh - 100px);display:grid;grid-template-columns:1fr 280px;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+        <div class="col" style="min-width:0;min-height:0;">
+          <header style="padding:14px 20px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;">
+            <div class="row gap-3" style="align-items:center;">
+              <span style="width:36px;height:36px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:18px;">◐</span>
+              <div class="col" style="line-height:1.3;">
+                <span class="row gap-2" style="font-weight:700;font-size:14px;">Deep Agent <span class="dot" style="background:var(--ok);"></span></span>
+                <span class="faint" style="font-size:11.5px;">Claude Sonnet 4.5 · sees all repos &amp; cloud state</span>
+              </div>
+            </div>
+            <div class="row gap-2"><span class="badge accent">agent</span><button class="btn outline sm"><span aria-hidden>🗑</span>Clear</button><button class="btn outline icon"><span aria-hidden>▶</span></button></div>
+          </header>
+          <div style="flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:16px;">
+            <div class="row gap-3" style="align-items:flex-start;">
+              <span style="width:32px;height:32px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex:none;">◐</span>
+              <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:12px;padding:12px 15px;max-width:640px;font-size:14px;line-height:1.6;">Provisioning GKE in <b>us-central1</b>. What size?</div>
+            </div>
+            <div class="row gap-3" style="justify-content:flex-end;align-items:flex-start;">
+              <div style="background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:12px;padding:12px 15px;max-width:640px;font-size:14px;line-height:1.6;">n2-standard-4, 3 nodes, us-central1</div>
+              <span style="width:32px;height:32px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex:none;">MV</span>
+            </div>
+            <div class="row gap-3" style="align-items:flex-start;">
+              <span style="width:32px;height:32px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex:none;">◐</span>
+              <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:12px;padding:12px 15px;max-width:640px;font-size:14px;line-height:1.6;">Generated 3 Terraform files (main.tf, outputs.tf, versions.tf) with <span class="mono">google_project_service</span> preconditions, 45m resource timeouts, and GCS backend from env. Ready to apply?
+                <div class="row gap-2" style="margin-top:10px;"><span class="badge info"><span class="dot" aria-hidden></span>plan · 3 to add</span><span class="badge ok"><span class="dot" aria-hidden></span>cost · $60/mo</span></div></div>
+            </div>
+            <div class="row gap-3" style="justify-content:flex-end;">
+              <div style="background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:12px;padding:12px 15px;font-size:14px;">Apply.</div>
+              <span style="width:32px;height:32px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex:none;">MV</span>
+            </div>
+            <div style="padding:10px 14px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:8px;font-size:12.5px;color:var(--text-muted);width:fit-content;margin-left:44px;"><span class="dot" style="background:var(--info);"></span> Provisioning GKE cluster… <span class="faint mono">provision_gke</span></div>
+          </div>
+          <div style="padding:16px 24px 20px;border-top:1px solid var(--border-soft);flex:none;">
+            <div style="max-width:820px;margin:0 auto;">
+              <div style="padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);">
+                <div style="min-height:26px;font-size:15px;color:var(--text-faint);padding:0 6px;">Describe what you want to build or change…</div>
+                <div class="row between" style="align-items:center;margin-top:8px;">
+                  <div class="row gap-2"><button class="btn ghost icon"><span aria-hidden>+</span></button><button class="btn ghost sm"><span aria-hidden>▤</span>infra</button></div>
+                  <button class="btn primary icon"><span aria-hidden>▸</span></button>
+                </div>
+              </div>
+              <p class="faint" style="font-size:11px;text-align:center;margin-top:8px;">Deep Agent can read and write to your repos. Changes require approval before they touch release.</p>
+            </div>
+          </div>
+        </div>
+        <aside style="background:var(--surface-2);border-left:1px solid var(--border-soft);display:flex;flex-direction:column;min-height:0;overflow:hidden;">
+          <div class="row between" style="padding:12px;align-items:center;">
+            <span style="font-weight:700;font-size:13px;">Recent chats</span>
+            <button class="btn primary sm"><span aria-hidden>+</span>New</button>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:0 8px 12px;">
+            <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);padding:10px 8px 4px;">Today</div>
+            <button style="display:flex;flex-direction:column;gap:3px;padding:8px 10px;margin:2px 0;border-radius:8px;border:1px solid transparent;background:color-mix(in srgb, var(--accent) 12%, transparent);width:100%;text-align:left;color:var(--text);font-family:inherit;">
+              <span style="font-size:13px;font-weight:600;">GKE dev cluster</span><span style="font-size:11px;color:var(--text-faint);">2:41 PM · 14 msgs</span>
+            </button>
+            <button style="display:flex;flex-direction:column;gap:3px;padding:8px 10px;margin:2px 0;border-radius:8px;border:1px solid transparent;background:transparent;width:100%;text-align:left;color:var(--text);font-family:inherit;">
+              <span style="font-size:13px;font-weight:600;">Deploy app to VM</span><span style="font-size:11px;color:var(--text-faint);">1:22 PM · 6 msgs</span>
+            </button>
+            <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);padding:10px 8px 4px;">Yesterday</div>
+            <button style="display:flex;flex-direction:column;gap:3px;padding:8px 10px;margin:2px 0;border-radius:8px;border:1px solid transparent;background:transparent;width:100%;text-align:left;color:var(--text);font-family:inherit;">
+              <span style="font-size:13px;font-weight:600;">EKS access entries</span><span style="font-size:11px;color:var(--text-faint);">Jul 13 · 22 msgs</span>
+            </button>
+            <button style="display:flex;flex-direction:column;gap:3px;padding:8px 10px;margin:2px 0;border-radius:8px;border:1px solid transparent;background:transparent;width:100%;text-align:left;color:var(--text);font-family:inherit;">
+              <span style="font-size:13px;font-weight:600;">Azure OAuth reconnect</span><span style="font-size:11px;color:var(--text-faint);">Jul 13 · 9 msgs</span>
+            </button>
+            <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);padding:10px 8px 4px;">Previous 7 days</div>
+            <button style="display:flex;flex-direction:column;gap:3px;padding:8px 10px;margin:2px 0;border-radius:8px;border:1px solid transparent;background:transparent;width:100%;text-align:left;color:var(--text);font-family:inherit;">
+              <span style="font-size:13px;font-weight:600;">Cost tag audit</span><span style="font-size:11px;color:var(--text-faint);">Jul 10 · 4 msgs</span>
+            </button>
+          </div>
+        </aside>
+      </div></div>
+    </section>
+    <section class="page" data-page="cicd" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">CI/CD & Repos</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Pipeline runs, workflow generators, and connected repositories.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary"><span aria-hidden>+</span>Attach repo</button></div>
+      </div>
+    </div>
+      <div class="row gap-2 wrap"><span class="chip active">Pipelines</span><span class="chip ">Repositories</span><span class="chip ">Workflow templates</span></div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Recent pipeline runs</span><span class="faint" style="font-size:12px;">Latest 20 across all repos</span></div><div class="row gap-2" style="margin-left:auto;"><button class="btn outline">View all</button></div></div><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Repo</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Workflow</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Branch</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Status</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Duration</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Actor</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">manov7723-sys/deepagent</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">build-and-push</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">dev</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>succeeded</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">3m 04s</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">manov7723-sys/deepagent</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">deploy-aks</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">release</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge info"><span class="dot" aria-hidden></span>running</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">12m 04s</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">acme/app</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">trivy-scan</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">main</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge danger"><span class="dot" aria-hidden></span>failed</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">42s</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">sriram</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">acme/app</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">build-and-push</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">feature/oauth</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge warn"><span class="dot" aria-hidden></span>queued</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">—</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">sriram</td></tr>
+      </tbody>
+    </table>
+  </div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Attached repositories</span><span class="faint" style="font-size:12px;">Repos this project can push to</span></div><div class="row gap-2" style="margin-left:auto;"><button class="btn outline">+ Attach repo</button></div></div><div class="card-pad"><div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 480px));justify-content:start;gap:14px;"><section class="card"><div class="card-pad"><div class="row between gap-2"><div><b class="mono">manov7723-sys/deepagent</b><div class="muted" style="font-size:12px;">default: dev · 3 workflows</div></div><span class="badge ok"><span class="dot" aria-hidden></span>attached</span></div></div></section><section class="card"><div class="card-pad"><div class="row between gap-2"><div><b class="mono">acme/app</b><div class="muted" style="font-size:12px;">default: main · 2 workflows</div></div><span class="badge ok"><span class="dot" aria-hidden></span>attached</span></div></div></section></div></div></section></div>
+    </section>
+    <section class="page" data-page="environments" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Environments</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Deploy targets with per-env cloud, cluster, and remote-state configuration.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ New environment</button></div>
+      </div>
+    </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Active environment</span><span class="faint" style="font-size:12px;">The env used by env-scoped pages by default.</span></div></div><div class="card-pad"><div class="row wrap gap-2"><button class="dda-env-tile" data-active="true"><div style="font-weight:700;">release</div><div class="muted" style="font-size:11px;">production</div></button><button class="dda-env-tile"><div style="font-weight:700;">beta</div><div class="muted" style="font-size:11px;">staging</div></button><button class="dda-env-tile"><div style="font-weight:700;">alpha</div><div class="muted" style="font-size:11px;">dev</div></button></div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">All environments</span><span class="faint" style="font-size:12px;">3 environments · 2 with cluster attached</span></div></div><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Env</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Cloud</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Cluster</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Repos</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">State backend</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Members</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>release</b></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge info"><span class="dot" aria-hidden></span>azure</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">aks-prod</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">2</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono faint">azurerm · rg-devops</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">5</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>beta</b></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge info"><span class="dot" aria-hidden></span>gcp</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">gke-beta</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">1</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono faint">gcs · tfstate-agent</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">3</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>alpha</b></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge info"><span class="dot" aria-hidden></span>aws</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="muted">—</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">1</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono faint">s3 · agent-tfstate</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">3</td></tr>
+      </tbody>
+    </table>
+  </div></div></section></div>
+    </section>
+    <section class="page" data-page="cloud" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Cloud providers</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Connected accounts Deep Agent deploys to, per environment.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ Connect provider</button></div>
+      </div>
+    </div>
+      <div class="row gap-2 wrap"><span class="chip active">all</span><span class="chip ">release</span><span class="chip ">beta</span><span class="chip ">alpha</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));justify-content:stretch;gap:14px;"><section class="card"><div class="card-pad"><div class="row between gap-3"><div class="row gap-3"><span style="width:44px;height:44px;border-radius:11px;background:oklch(0.72 0.19 45 / 0.15);color:oklch(0.72 0.19 45);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;">AWS</span><div class="col" style="gap:2px;"><div style="font-weight:700;font-size:14px;">AWS (us-east-1)</div><div class="muted" style="font-size:12px;">alpha · AWS</div></div></div><span class="dot" style="background:var(--ok);"></span></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px;">
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Region</div><div class="mono" style="font-size:13px;margin-top:2px;">us-east-1</div></div>
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Services</div><div style="font-size:15px;font-weight:700;margin-top:2px;">0</div></div>
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Monthly</div><div style="font-size:15px;font-weight:700;margin-top:2px;">$0</div></div>
+          </div><div class="row gap-2"><button class="btn outline"><span aria-hidden>▤</span>View stats</button><button class="btn ghost icon"><span aria-hidden>⚙</span></button><button class="btn ghost icon"><span aria-hidden>🗑</span></button></div></div></section><section class="card"><div class="card-pad"><div class="row between gap-3"><div class="row gap-3"><span style="width:44px;height:44px;border-radius:11px;background:oklch(0.7 0.17 235 / 0.18);color:oklch(0.7 0.17 235);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:9px;">Azure</span><div class="col" style="gap:2px;"><div style="font-weight:700;font-size:14px;">Azure (eastus)</div><div class="muted" style="font-size:12px;">release · Azure</div></div></div><span class="dot" style="background:var(--ok);"></span></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px;">
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Region</div><div class="mono" style="font-size:13px;margin-top:2px;">eastus</div></div>
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Services</div><div style="font-size:15px;font-weight:700;margin-top:2px;">3</div></div>
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Monthly</div><div style="font-size:15px;font-weight:700;margin-top:2px;">$482</div></div>
+          </div><div class="row gap-2"><button class="btn outline"><span aria-hidden>▤</span>View stats</button><button class="btn ghost icon"><span aria-hidden>⚙</span></button><button class="btn ghost icon"><span aria-hidden>🗑</span></button></div></div></section><section class="card"><div class="card-pad"><div class="row between gap-3"><div class="row gap-3"><span style="width:44px;height:44px;border-radius:11px;background:oklch(0.74 0.17 158 / 0.18);color:oklch(0.74 0.17 158);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;">GCP</span><div class="col" style="gap:2px;"><div style="font-weight:700;font-size:14px;">GCP (us-central1)</div><div class="muted" style="font-size:12px;">beta · GCP</div></div></div><span class="dot" style="background:var(--ok);"></span></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px;">
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Project</div><div class="mono" style="font-size:12px;margin-top:2px;">new-project-495604</div></div>
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Services</div><div style="font-size:15px;font-weight:700;margin-top:2px;">2</div></div>
+            <div><div class="faint" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Monthly</div><div style="font-size:15px;font-weight:700;margin-top:2px;">$267</div></div>
+          </div><div class="row gap-2"><button class="btn outline"><span aria-hidden>▤</span>View stats</button><button class="btn ghost icon"><span aria-hidden>⚙</span></button><button class="btn ghost icon"><span aria-hidden>🗑</span></button></div></div></section></div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Vault configuration</span><span class="faint" style="font-size:12px;">Step 1 · connect Vault. Step 2 · store AWS keys in it. Keys never touch the DB.</span></div></div><div class="card-pad"><div style="max-width:520px;">
+          <div class="row between" style="margin-bottom:14px;"><span style="font-weight:600;font-size:13px;">Connection</span><span class="badge warn"><span class="dot" aria-hidden></span>not connected</span></div>
+          <div class="col gap-3">
+  <label class="col gap-1">
+    <span class="field-label">Vault URL *</span>
+    <input class="input" type="text" placeholder="https://127.0.0.1:8200" value="" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Vault token *</span>
+    <input class="input" type="text" placeholder="hvs.•••••••••••" value="" >
+    <span class="faint" style="font-size:11.5px;margin-top:4px;">A token with read/write on the KV mount (hvs.…). Stored encrypted; never shown again.</span>
+  </label><div class="row gap-2"><button class="btn primary"><span aria-hidden>🔗</span>Save & test connection</button></div></div>
+        </div></div></section></div>
+    </section>
+    <section class="page" data-page="infra" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Infrastructure</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Cloud credentials (Vault), Terraform state, and managed-Kubernetes cluster provisioning (EKS · GKE · AKS).</p>
+        </div>
+        
+      </div>
+    </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Cloud credentials</span><span class="faint" style="font-size:12px;">Provider you use to authenticate Terraform runs</span></div></div><div class="card-pad"><div class="row wrap gap-2"><span class="badge ok"><span class="dot" aria-hidden></span>Azure · release</span><button class="btn outline">+ Add credentials</button></div></div></section>
+      <section class="card" style="max-width:520px;width:100%;"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Terraform state backend</span><span class="faint" style="font-size:12px;">Cloud-aware: S3 / GCS / azurerm chosen from project cloud. Set once per env.</span></div></div><div class="card-pad"><div class="col gap-3">
+  <label class="col gap-1">
+    <span class="field-label">Environment</span>
+    <div class="select" style="cursor:default;">release <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Resource group</span>
+    <input class="input" type="text" placeholder="" value="rg-devops" >
+    <span class="faint" style="font-size:11.5px;margin-top:4px;">The resource group that owns the storage account.</span>
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Storage account</span>
+    <input class="input" type="text" placeholder="" value="devclusteraccount" >
+    <span class="faint" style="font-size:11.5px;margin-top:4px;">Globally unique, 3-24 lowercase letters/digits.</span>
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Blob container</span>
+    <input class="input" type="text" placeholder="" value="tfstate" >
+    <span class="faint" style="font-size:11.5px;margin-top:4px;">Container inside the storage account. Required.</span>
+  </label><div class="row gap-2"><button class="btn primary"><span aria-hidden>✓</span>Save</button><button class="btn outline"><span aria-hidden>☁</span>Provision in Azure</button></div></div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Create AKS cluster</span><span class="faint" style="font-size:12px;">Interactive wizard (auto-picks EKS/GKE/AKS from project cloud)</span></div></div><div class="card-pad"><div style="height:280px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">AKS wizard — 5 pages: cluster basics → security → node pools → add-ons → networking + repo</div></div></section>
+      <section class="card" style="max-width:520px;width:100%;"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Delete orphaned GKE cluster</span><span class="faint" style="font-size:12px;">Uses stored env creds; no gcloud needed. Typical delete 3-6 min.</span></div></div><div class="card-pad"><div class="col gap-3">
+  <label class="col gap-1">
+    <span class="field-label">Environment</span>
+    <div class="select" style="cursor:default;">release <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">GCP project id</span>
+    <input class="input" type="text" placeholder="" value="new-project-495604" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Location</span>
+    <input class="input" type="text" placeholder="" value="us-central1" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Cluster name</span>
+    <input class="input" type="text" placeholder="" value="dev" >
+    
+  </label><div class="row gap-2"><button class="btn primary">🗑 Delete cluster</button></div></div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Terraform pipeline</span><span class="faint" style="font-size:12px;">init → plan → apply against the env's cloud creds + state backend.</span></div></div><div class="card-pad"><div class="col gap-3"><div class="row wrap gap-2"><span class="field-label" style="margin:0;padding:0;">Environment</span><div style="max-width:220px;"><div class="select" style="cursor:default;">release <span class="faint" style="margin-left:auto;">▾</span></div></div></div><section class="card"><div class="card-pad"><div class="row between gap-2"><div class="col"><div class="row gap-2" style="align-items:center;"><b>aks-dev-apply</b><span class="badge info"><span class="dot" aria-hidden></span>running</span><span class="muted" style="font-size:12.5px;">apply · release</span><span style="font-size:12px;color:var(--text-muted);"><span class="dot" style="background:var(--info);"></span> <span class="tnum">12m 04s elapsed</span></span></div><div class="faint" style="font-size:12px;margin-top:2px;">stack: aks-dev</div></div><div class="row gap-2"><button class="btn outline sm">↻ Rerun (apply)</button><button class="btn outline sm">🗑 Delete existing cluster</button></div></div><div style="margin-top:12px;display:flex;flex-direction:column;gap:6px;">
+              <div class="row gap-2" style="align-items:center;"><span class="badge ok"><span class="dot" style="background:var(--ok);"></span>init</span><span class="muted" style="font-size:12px;">succeeded · exit 0 · <span class="tnum">42s</span></span></div>
+              <div class="row gap-2" style="align-items:center;"><span class="badge ok"><span class="dot" style="background:var(--ok);"></span>plan</span><span class="muted" style="font-size:12px;">succeeded · exit 0 · <span class="tnum">2m 18s</span></span></div>
+              <div class="row gap-2" style="align-items:center;"><span class="badge info"><span class="dot" style="background:var(--info);"></span>apply</span><span class="muted" style="font-size:12px;">running · <span class="tnum">9m 04s</span></span></div>
+              <pre style="font-size:11.5px;overflow-x:auto;white-space:pre-wrap;margin:0;max-height:180px;background:var(--surface-2);padding:10px 12px;border-radius:6px;border:1px solid var(--border-soft);color:var(--text-muted);">google_container_cluster.primary: Creating... [9m00s elapsed]
+google_container_cluster.primary: Still creating... [9m10s elapsed]
+google_container_cluster.primary: Still creating... [9m20s elapsed]</pre></div></section></div></div></section></div>
+    </section>
+    <section class="page" data-page="topology" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Topology</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Live graph of clusters, workloads, and their traffic edges across envs.</p>
+        </div>
+        
+      </div>
+    </div>
+      <div class="row gap-3 wrap" style="align-items:center;">
+        <div style="min-width:220px;">
+  <label class="col gap-1">
+    <span class="field-label">Env</span>
+    <div class="select" style="cursor:default;">release <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label></div>
+        <div style="min-width:220px;">
+  <label class="col gap-1">
+    <span class="field-label">Namespace</span>
+    <div class="select" style="cursor:default;">default <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label></div>
+        <div class="row gap-2 wrap" style="margin-left:auto;"><span class="badge info"><span class="dot" aria-hidden></span>service</span><span class="badge ok"><span class="dot" aria-hidden></span>deployment</span><span class="badge accent">pod</span></div>
+      </div>
+      <section class="card"><div class="card-pad"><div style="height:620px;background:radial-gradient(circle at 30% 40%, oklch(0.62 0.17 285 / 0.08), transparent 50%),radial-gradient(circle at 70% 60%, oklch(0.74 0.15 158 / 0.06), transparent 50%),var(--surface-2);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">
+          <div style="text-align:center;">
+            <div style="font-size:24px;margin-bottom:8px;">⟿</div>
+            React Flow graph — aks-prod → default namespace → 3 deployments (app-frontend, worker, api) → 7 pods
+          </div>
+        </div></div></section></div>
+    </section>
+    <section class="page" data-page="promotions" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Promotions</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Promote a deployed image between environments (alpha → beta → release).</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ New promotion</button></div>
+      </div>
+    </div>
+      <div class="row gap-3 wrap"><div style="min-width:220px;">
+  <label class="col gap-1">
+    <span class="field-label">Namespace</span>
+    <div class="select" style="cursor:default;">default <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label></div></div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">app-frontend</span><span class="faint" style="font-size:12px;"><span class="mono">manov7723-sys/deepagent/app-frontend</span></span></div></div><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Env</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Image</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Rolled out</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Health</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Actions</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>alpha</b><span class="badge info"><span class="dot" aria-hidden></span>dev</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">ghcr.io/…/app-frontend:sha-a1b2</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">2m ago</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>healthy</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><div class="row gap-1"><button class="btn outline sm">→ beta</button><button class="btn outline sm">→ release</button></div></td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>beta</b><span class="badge warn"><span class="dot" aria-hidden></span>staging</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">ghcr.io/…/app-frontend:sha-a1b2</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">12m ago</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>healthy</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><div class="row gap-1"><button class="btn outline sm">→ release</button></div></td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>release</b><span class="badge danger"><span class="dot" aria-hidden></span>prod</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">ghcr.io/…/app-frontend:sha-7e2f</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">3d ago</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>current</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">—</span></td></tr>
+      </tbody>
+    </table>
+  </div></div></section></div>
+    </section>
+    <section class="page" data-page="scheduler" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Scheduler</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Deploy later — schedule an image + env for automatic rollout.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ Schedule deploy</button></div>
+      </div>
+    </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">New scheduled deploy</span></div></div><div class="card-pad"><div class="row wrap gap-3"><div style="min-width:260px;">
+  <label class="col gap-1">
+    <span class="field-label">Repo</span>
+    <div class="select" style="cursor:default;">manov7723-sys/deepagent <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label></div><div style="min-width:200px;">
+  <label class="col gap-1">
+    <span class="field-label">Image tag</span>
+    <input class="input" type="text" placeholder="" value="sha-a1b2" >
+    
+  </label></div><div style="min-width:180px;">
+  <label class="col gap-1">
+    <span class="field-label">Target env</span>
+    <div class="select" style="cursor:default;">release <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label></div><div style="min-width:240px;">
+  <label class="col gap-1">
+    <span class="field-label">When</span>
+    <input class="input" type="text" placeholder="" value="2026-07-14 22:00" >
+    
+  </label></div></div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Upcoming</span><span class="faint" style="font-size:12px;">Next 30 days · 3 scheduled</span></div></div><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">App</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Image</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Env</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">When</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Status</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;"></th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">app-frontend</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">sha-a1b2</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>release</b></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">Today · 10:00 PM</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge info"><span class="dot" aria-hidden></span>queued</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><button class="btn ghost sm">Cancel</button></td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">worker</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">sha-c3d4</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>beta</b></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">Tomorrow · 08:00 AM</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge info"><span class="dot" aria-hidden></span>queued</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><button class="btn ghost sm">Cancel</button></td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">docs</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">sha-e5f6</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><b>release</b></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">Jul 20 · 09:00 AM</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge info"><span class="dot" aria-hidden></span>queued</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><button class="btn ghost sm">Cancel</button></td></tr>
+      </tbody>
+    </table>
+  </div></div></section></div>
+    </section>
+    <section class="page" data-page="github" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Source control</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">GitHub App installations and connected repositories.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ Install app</button></div>
+      </div>
+    </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Installations</span><span class="faint" style="font-size:12px;">GitHub orgs the DeepAgent app is installed on</span></div></div><div class="card-pad"><ul style="list-style:none;padding:0;margin:0;"><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="dot" style="background:var(--ok);"></span> <b class="mono">manov7723-sys</b> · 5 repos · installed 2025-11-04</li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="dot" style="background:var(--ok);"></span> <b class="mono">sriram-tecnso</b> · 1 repo · installed 2026-07-13</li></ul></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Repositories</span><span class="faint" style="font-size:12px;">All repos across your installations</span></div></div><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Repo</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Default branch</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Installed</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">In project</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">manov7723-sys/deepagent</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">dev</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">2025-11-04</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>attached</span></td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">sriram-tecnso/deepagent</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">dev</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">2026-07-13</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><button class="btn outline sm">Attach</button></td></tr>
+      </tbody>
+    </table>
+  </div></div></section></div>
+    </section>
+    <section class="page" data-page="connection" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Connection</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Connect a running Kubernetes cluster (EKS · AKS · GKE). The kubeconfig is stored encrypted on the environment.</p>
+        </div>
+        
+      </div>
+    </div>
+      <div style="max-width:960px;width:100%;" class="col gap-5">
+        <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Connected clusters</span><span class="faint" style="font-size:12px;">Persist on the environment; the AI chat queries these directly.</span></div></div><div class="card-pad"><ul style="list-style:none;padding:0;margin:0;"><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge ok"><span class="dot" aria-hidden></span>connected</span> <b class="mono">aks-prod</b> · release · 6 nodes ready</li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="badge ok"><span class="dot" aria-hidden></span>connected</span> <b class="mono">gke-beta</b> · beta · 3 nodes ready</li></ul></div></section>
+        <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Terraform state backend</span><span class="faint" style="font-size:12px;">Cloud-aware: Azure blob container for AKS applies.</span></div></div><div class="card-pad"><div style="max-width:480px;"><div class="col gap-3">
+  <label class="col gap-1">
+    <span class="field-label">Environment</span>
+    <div class="select" style="cursor:default;">release <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Resource group</span>
+    <input class="input" type="text" placeholder="" value="rg-devops" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Storage account</span>
+    <input class="input" type="text" placeholder="" value="devclusteraccount" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Blob container</span>
+    <input class="input" type="text" placeholder="" value="tfstate" >
+    
+  </label><div class="row gap-2"><button class="btn primary"><span aria-hidden>✓</span>Save</button><button class="btn outline"><span aria-hidden>☁</span>Provision in Azure</button></div></div>
+          </div></div></section>
+        <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Connect Kubernetes cluster</span><span class="faint" style="font-size:12px;">Pick a cloud, point at a running cluster, and connect.</span></div></div><div class="card-pad"><div style="max-width:520px;"><div class="col gap-3">
+  <label class="col gap-1">
+    <span class="field-label">Cloud provider</span>
+    <div class="row wrap gap-2"><span class="chip active"><span>☁</span>AWS</span><span class="chip "><span>☁</span>Azure</span><span class="chip "><span>☁</span>GCP</span></div>
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Environment *</span>
+    <div class="row gap-2"><div style="flex:1;"><div class="select" style="cursor:default;">release · connected <span class="faint" style="margin-left:auto;">▾</span></div></div><span class="badge ok"><span class="dot" aria-hidden></span>connected</span></div>
+    <span class="faint" style="font-size:11.5px;margin-top:4px;">Where the kubeconfig (and AWS creds, for EKS) come from / are stored.</span>
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Region *</span>
+    <input class="input" type="text" placeholder="" value="us-east-1" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Cluster name *</span>
+    <input class="input" type="text" placeholder="" value="aks-prod" >
+    
+  </label><div class="row gap-2"><button class="btn primary"><span aria-hidden>⚡</span>Connect</button><button class="btn ghost">Paste kubeconfig instead</button></div></div>
+          </div></div></section>
+      </div></div>
+    </section>
+    <section class="page" data-page="stats" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Cloud stats</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Live cluster + observability KPIs and connected external observability stacks.</p>
+        </div>
+        
+      </div>
+    </div>
+      <div class="row gap-2 wrap"><span class="chip active">release</span><span class="chip ">beta</span><span class="chip ">alpha</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px;">
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">CPU (release)</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">62%</span>
+        <span class="muted" style="font-size:12px;">cluster average</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">◍</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Memory (release)</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">48%</span>
+        <span class="muted" style="font-size:12px;">cluster average</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">▤</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Pods running</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">42</span>
+        <span class="muted" style="font-size:12px;">3 pending</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">◆</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Nodes ready</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">6/6</span>
+        <span class="muted" style="font-size:12px;">all zones</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">✓</span>
+    </div>
+  </div>
+      </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Cluster monitoring</span><span class="faint" style="font-size:12px;">In-cluster Prometheus + Grafana scrape targets</span></div></div><div class="card-pad"><ul style="list-style:none;padding:0;margin:0;"><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="dot" style="background:var(--ok);"></span> kube-state-metrics · scraping</li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="dot" style="background:var(--ok);"></span> node-exporter · scraping</li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="dot" style="background:var(--ok);"></span> app-frontend · scraping</li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><span class="dot" style="background:var(--warn);"></span> worker · degraded (last scrape 47s ago)</li></ul></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Azure Monitor alarms</span><span class="faint" style="font-size:12px;">Alarms wired to this env's clusters</span></div></div><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Alarm</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Metric</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">State</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Threshold</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Last change</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">aks-prod-cpu-high</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">CPU %</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>OK</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">> 85% for 5m</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">2h ago</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">aks-prod-mem-high</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">Memory %</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge danger"><span class="dot" aria-hidden></span>Alarm</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">> 90% for 3m</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">12m ago</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">aks-prod-pod-restarts</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">Restart count</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>OK</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">> 5 in 10m</td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">1d ago</td></tr>
+      </tbody>
+    </table>
+  </div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">External Prometheus / Grafana</span><span class="faint" style="font-size:12px;">Optional — connect an existing stack for cross-cluster views</span></div></div><div class="card-pad"><div class="row wrap gap-2"><button class="btn outline"><span aria-hidden>🔗</span>Connect Prometheus</button><button class="btn outline"><span aria-hidden>🔗</span>Connect Grafana</button></div></div></section></div>
+    </section>
+    <section class="page" data-page="uptime" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Uptime</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">External HTTP monitors for the project's endpoints.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ New monitor</button></div>
+      </div>
+    </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">New monitor</span></div></div><div class="card-pad"><div class="row wrap gap-3"><div style="min-width:320px;">
+  <label class="col gap-1">
+    <span class="field-label">URL</span>
+    <input class="input" type="text" placeholder="https://app.example.com/health" value="" >
+    
+  </label></div><div style="min-width:160px;">
+  <label class="col gap-1">
+    <span class="field-label">Interval</span>
+    <div class="select" style="cursor:default;">60s <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label></div><div style="min-width:160px;">
+  <label class="col gap-1">
+    <span class="field-label">Region</span>
+    <div class="select" style="cursor:default;">us-east-1 <span class="faint" style="margin-left:auto;">▾</span></div>
+    
+  </label></div><div style="min-width:200px;">
+  <label class="col gap-1">
+    <span class="field-label">Notify email</span>
+    <input class="input" type="text" placeholder="alerts@example.com" value="" >
+    
+  </label></div></div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Monitors</span><span class="faint" style="font-size:12px;">3 active · 30d avg uptime 99.94%</span></div></div><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">URL</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Status</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Uptime 30d</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Response p50</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Last check</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">https://app.example.com/health</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>up</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">99.98%</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">142ms</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">12s ago</span></td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">https://api.example.com/live</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge ok"><span class="dot" aria-hidden></span>up</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">99.99%</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">89ms</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">10s ago</span></td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">https://docs.example.com</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="badge warn"><span class="dot" aria-hidden></span>degraded</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">99.72%</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="tnum">812ms</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">24s ago</span></td></tr>
+      </tbody>
+    </table>
+  </div></div></section></div>
+    </section>
+    <section class="page" data-page="cost" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Cost</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Multi-cloud spend rollup, budget tracking, and optimization findings.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn outline">Estimate infra</button><button class="btn primary"><span aria-hidden>⚡</span>Optimize</button></div>
+      </div>
+    </div>
+      <div class="row gap-2 wrap"><span class="chip active">all</span><span class="chip ">release</span><span class="chip ">beta</span><span class="chip ">alpha</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:14px;">
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Month to date</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">$1,412</span>
+        <span class="muted" style="font-size:12px;">68% of $2,100 budget</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">$</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Forecast</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">$2,043</span>
+        <span class="muted" style="font-size:12px;">within budget</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">◆</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Savings found</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">$187/mo</span>
+        <span class="muted" style="font-size:12px;">3 recommendations</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">▼</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Untagged spend</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">$96</span>
+        <span class="muted" style="font-size:12px;">3 resources need tags</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">!</span>
+    </div>
+  </div>
+      </div>
+      <div class="row gap-4 wrap" style="align-items:flex-start;">
+        <div style="flex:1;min-width:420px;">
+          <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">By service</span><span class="faint" style="font-size:12px;">Top 5 categories this month</span></div></div><div class="card-pad"><div style="height:220px;display:flex;align-items:flex-end;gap:10px;padding:14px;background:var(--surface-2);border-radius:8px;">
+              <div style="flex:1;background:var(--accent);border-radius:6px 6px 0 0;height:85%;position:relative;"><span style="position:absolute;top:-22px;left:0;right:0;text-align:center;font-size:11px;font-weight:700;">$482 Azure</span></div>
+              <div style="flex:1;background:var(--info);border-radius:6px 6px 0 0;height:52%;position:relative;"><span style="position:absolute;top:-22px;left:0;right:0;text-align:center;font-size:11px;font-weight:700;">$267 GCP</span></div>
+              <div style="flex:1;background:var(--ok);border-radius:6px 6px 0 0;height:38%;position:relative;"><span style="position:absolute;top:-22px;left:0;right:0;text-align:center;font-size:11px;font-weight:700;">$198 GHCR</span></div>
+              <div style="flex:1;background:var(--warn);border-radius:6px 6px 0 0;height:24%;position:relative;"><span style="position:absolute;top:-22px;left:0;right:0;text-align:center;font-size:11px;font-weight:700;">$124 Vault</span></div>
+              <div style="flex:1;background:var(--danger);border-radius:6px 6px 0 0;height:14%;position:relative;"><span style="position:absolute;top:-22px;left:0;right:0;text-align:center;font-size:11px;font-weight:700;">$72 Egress</span></div>
+            </div></div></section>
+        </div>
+        <div style="width:340px;flex:none;">
+          <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Optimization findings</span><span class="faint" style="font-size:12px;">Suggestions from analyze_cost_optimization</span></div></div><div class="card-pad"><ul style="list-style:none;padding:0;margin:0;"><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><b>Rightsize</b> aks-prod system pool<div class="faint" style="font-size:11.5px;margin-top:2px;">Standard_D8s_v3 → D4s_v3 · <span style="color:var(--ok);font-weight:700;">$84/mo</span></div></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><b>Delete</b> unused ELB in us-east-1<div class="faint" style="font-size:11.5px;margin-top:2px;">idle 45 days · <span style="color:var(--ok);font-weight:700;">$18/mo</span></div></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><b>Tier</b> object storage to Infrequent Access<div class="faint" style="font-size:11.5px;margin-top:2px;">7TB in Standard, low access · <span style="color:var(--ok);font-weight:700;">$85/mo</span></div></li></ul></div></section>
+        </div>
+      </div></div>
+    </section>
+    <section class="page" data-page="approvals" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Approvals</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Gated changes waiting on a human — terraform applies, deploys, promotions.</p>
+        </div>
+        
+      </div>
+    </div>
+      <div style="display:grid;grid-template-columns:380px 1fr;gap:20px;">
+        <div class="col gap-3">
+          <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Queue</span><span class="faint" style="font-size:12px;">3 pending</span></div></div><div class="card-pad"><div style="display:flex;flex-direction:column;">
+              
+                <button style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);background:var(--surface-2);border:none;cursor:pointer;color:var(--text);font-family:inherit;">
+                  <div class="row gap-2" style="align-items:center;"><span class="badge info"><span class="dot" aria-hidden></span>pending</span></div>
+                  <div style="font-weight:600;font-size:13px;margin-top:6px;">Apply terraform-aks-dev</div>
+                  <div class="faint" style="font-size:11.5px;margin-top:2px;">Requested by manov · 12m ago</div>
+                </button>
+                <button style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);background:transparent;border:none;cursor:pointer;color:var(--text);font-family:inherit;">
+                  <div class="row gap-2" style="align-items:center;"><span class="badge info"><span class="dot" aria-hidden></span>pending</span></div>
+                  <div style="font-weight:600;font-size:13px;margin-top:6px;">Promote app-frontend beta → release</div>
+                  <div class="faint" style="font-size:11.5px;margin-top:2px;">Requested by manov · 12m ago</div>
+                </button>
+                <button style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);background:transparent;border:none;cursor:pointer;color:var(--text);font-family:inherit;">
+                  <div class="row gap-2" style="align-items:center;"><span class="badge info"><span class="dot" aria-hidden></span>pending</span></div>
+                  <div style="font-weight:600;font-size:13px;margin-top:6px;">Deploy worker sha-c3d4</div>
+                  <div class="faint" style="font-size:11.5px;margin-top:2px;">Requested by manov · 12m ago</div>
+                </button>
+            </div></div></section>
+        </div>
+        <div class="col gap-3">
+          <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Apply terraform-aks-dev</span><span class="faint" style="font-size:12px;"><span class="mono">manov7723-sys/deepagent/terraform/aks/dev@master</span> · env release</span></div></div><div class="card-pad"><div class="col gap-3"><div class="row wrap gap-2"><span class="badge ok"><span class="dot" aria-hidden></span>low risk</span><span class="badge ok"><span class="dot" aria-hidden></span>policy · passed</span><span class="badge info"><span class="dot" aria-hidden></span>est. $60.74/mo</span></div><section class="card"><div class="card-pad"><div class="col gap-1" style="font-size:12.5px;font-family:var(--font-mono);">
+                  <div><span style="color:var(--ok);">+</span> resource "azurerm_kubernetes_cluster" "aks"</div>
+                  <div><span style="color:var(--ok);">+</span> resource "azurerm_kubernetes_cluster_node_pool" "app"</div>
+                  <div><span style="color:var(--ok);">+</span> resource "azurerm_log_analytics_workspace" "law"</div>
+                </div>
+                <div style="border-top:1px solid var(--border-soft);margin-top:10px;padding-top:10px;font-size:12px;color:var(--text-muted);">3 to add · 0 to change · 0 to destroy</div></div></section><div class="row gap-2"><button class="btn primary"><span aria-hidden>✓</span>Approve & apply</button><button class="btn outline"><span aria-hidden>✕</span>Reject</button></div></div></div></section>
+        </div>
+      </div></div>
+    </section>
+    <section class="page" data-page="alerts" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Alerts</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">CloudWatch, Azure Monitor, GCP Monitoring, and in-cluster Prometheus.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn outline">Test alert</button><button class="btn primary">Configure</button></div>
+      </div>
+    </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:14px;">
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Open alerts</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">3</span>
+        <span class="muted" style="font-size:12px;">5 total</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">!</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">High severity</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">1</span>
+        <span class="muted" style="font-size:12px;">needs action now</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">⚠</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Security findings</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">0</span>
+        <span class="muted" style="font-size:12px;">by Security Sentinel</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">🛡</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Mean time to ack</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">14m</span>
+        <span class="muted" style="font-size:12px;">last 30 days</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">◑</span>
+    </div>
+  </div>
+      </div>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Notification emails</span><span class="faint" style="font-size:12px;">Extra addresses that receive alerts</span></div></div><div class="card-pad"><div class="row wrap gap-2"><span class="chip ">alerts@example.com</span><span class="chip ">oncall@example.com</span><button class="btn ghost sm">+ Add email</button></div></div></section>
+      <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">ChatOps webhook</span><span class="faint" style="font-size:12px;">Post alerts into Slack / Discord / Teams</span></div></div><div class="card-pad"><div class="col gap-3" style="max-width:480px;width:100%;">
+  <label class="col gap-1">
+    <span class="field-label">Webhook URL</span>
+    <input class="input" type="text" placeholder="https://hooks.slack.com/services/..." value="" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Channel</span>
+    <input class="input" type="text" placeholder="" value="#alerts" >
+    
+  </label><div class="row gap-2"><button class="btn primary">Save & test</button></div></div></div></section>
+      <div class="row gap-2 wrap"><span class="chip active">all</span><span class="chip ">infra</span><span class="chip ">app</span><span class="chip ">security</span></div>
+      <div class="col gap-2"><section class="card"><div class="card-pad"><div class="row between gap-3"><div class="col gap-1"><div class="row gap-2" style="align-items:center;"><b>mem-usage high</b><span class="badge danger"><span class="dot" aria-hidden></span>high</span><span class="badge info"><span class="dot" aria-hidden></span>release</span></div><span class="muted" style="font-size:12.5px;">aks-prod / default / worker-abc123 · 92% for 12m</span></div><div class="row gap-2"><button class="btn outline sm">Investigate</button><button class="btn primary sm">Ack</button></div></div></div></section><section class="card"><div class="card-pad"><div class="row between gap-3"><div class="col gap-1"><div class="row gap-2" style="align-items:center;"><b>p95-latency high</b><span class="badge warn"><span class="dot" aria-hidden></span>warning</span><span class="badge info"><span class="dot" aria-hidden></span>release</span></div><span class="muted" style="font-size:12.5px;">app.example.com · 1.2s for 5m</span></div><div class="row gap-2"><button class="btn outline sm">Investigate</button><button class="btn primary sm">Ack</button></div></div></div></section></div></div>
+    </section>
+    <section class="page" data-page="activity" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Activity</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Every audit-worthy action in the project — deploys, secret changes, provider connects, approvals.</p>
+        </div>
+        
+      </div>
+    </div>
+      <div class="row gap-2 wrap" style="align-items:center;"><span class="chip active">all</span><span class="chip ">deploy</span><span class="chip ">infra</span><span class="chip ">auth</span><span class="chip ">chat</span>
+        <div style="margin-left:auto;"><input class="input" type="text" placeholder="search…" value="" ></div>
+      </div>
+      <section class="card"><div class="card-pad">
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">When</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Action</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Target</th><th style="text-align:left;padding:12px 14px;border-bottom:1px solid var(--border-soft);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:700;">Actor</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">Jul 13 8:42 PM</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">gke.cluster_deleted</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono muted">dev / us-central1</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">Jul 13 8:16 PM</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">azure.tfstate_provisioned</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono muted">rg-devops/devclusteraccount/tfstate</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">Jul 13 8:04 PM</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">terraform.run_started</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono muted">aks-dev-apply</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">Jul 13 7:53 PM</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">chat.thread_created</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono muted">GKE dev cluster</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">Jul 13 7:40 PM</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">cloud_provider.credentials_set</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono muted">azure · release</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">Jul 13 7:34 PM</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">env.tf_backend_set</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono muted">azure · release</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr><tr><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="faint">Jul 13 7:12 PM</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono">eks.terraform_generated</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);"><span class="mono muted">alpha/dev</span></td><td style="padding:12px 14px;border-bottom:1px solid var(--border-soft);">manov</td></tr>
+      </tbody>
+    </table>
+  </div></div></section></div>
+    </section>
+    <section class="page" data-page="knowledge" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Knowledge</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Runbooks, incident postmortems, and reference docs the agent reads.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ New doc</button></div>
+      </div>
+    </div>
+      <div class="row gap-2 wrap"><span class="chip active">all</span><span class="chip ">runbooks</span><span class="chip ">postmortems</span><span class="chip ">reference</span>
+        <div style="margin-left:auto;"><input class="input" type="text" placeholder="search knowledge…" value="" ></div>
+      </div>
+      <div>
+        <h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 12px;">Runbooks · 3</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));justify-content:stretch;gap:14px;"><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Rotate cloud creds</span><span class="faint" style="font-size:12px;">release · 5 min</span></div><div class="row gap-2" style="margin-left:auto;"><span class="badge info"><span class="dot" aria-hidden></span>runbook</span></div></div><div class="card-pad"><span class="muted" style="font-size:13px;">Step-by-step for cycling AWS/Azure/GCP keys without downtime.</span></div></section><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Recover orphaned GKE cluster</span><span class="faint" style="font-size:12px;">release · 8 min</span></div><div class="row gap-2" style="margin-left:auto;"><span class="badge info"><span class="dot" aria-hidden></span>runbook</span></div></div><div class="card-pad"><span class="muted" style="font-size:13px;">When terraform state loses track of a cluster that got created.</span></div></section><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Rebuild AKS after quota bump</span><span class="faint" style="font-size:12px;">beta · 12 min</span></div><div class="row gap-2" style="margin-left:auto;"><span class="badge info"><span class="dot" aria-hidden></span>runbook</span></div></div><div class="card-pad"><span class="muted" style="font-size:13px;">Delete → wait → recreate flow for regional AKS.</span></div></section></div>
+      </div>
+      <div>
+        <h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 12px;">Postmortems · 2</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));justify-content:stretch;gap:14px;"><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">2026-07-13 · GKE apply timeout</span><span class="faint" style="font-size:12px;">impact: 24 min lost</span></div><div class="row gap-2" style="margin-left:auto;"><span class="badge warn"><span class="dot" aria-hidden></span>postmortem</span></div></div><div class="card-pad"><span class="muted" style="font-size:13px;">Root cause: 25m runner cap. Fix: bumped to 60m, added resource-level timeouts.</span></div></section><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">2026-07-10 · S3 backend forced onto GCP</span><span class="faint" style="font-size:12px;">impact: 3 failed applies</span></div><div class="row gap-2" style="margin-left:auto;"><span class="badge warn"><span class="dot" aria-hidden></span>postmortem</span></div></div><div class="card-pad"><span class="muted" style="font-size:13px;">Root cause: runner blindly read tfBackendBucket. Fix: pickBackendForEnv() dispatches by cloud kind.</span></div></section></div>
+      </div></div>
+    </section>
+    <section class="page" data-page="tasks" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Tasks</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">Autonomous agent runs — scheduled or on-demand. Findings surface as alerts.</p>
+        </div>
+        <div class="row gap-2 wrap"><button class="btn primary">+ New task</button></div>
+      </div>
+    </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;">
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Active agents</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">5</span>
+        <span class="muted" style="font-size:12px;">across 7 environments</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">◐</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Runs today</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">148</span>
+        <span class="muted" style="font-size:12px;">2 currently running</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">↻</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Open findings</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">3</span>
+        <span class="muted" style="font-size:12px;">review on demand</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">!</span>
+    </div>
+  </div>
+        
+  <div class="card card-pad" style="min-width:0;">
+    <div class="row between" style="align-items:flex-start;">
+      <div class="col gap-1" style="min-width:0;">
+        <span class="faint" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;">Last full sweep</span>
+        <span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">12m ago</span>
+        <span class="muted" style="font-size:12px;">all envs scanned</span>
+      </div>
+      <span style="width:36px;height:36px;border-radius:9px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:16px;">✓</span>
+    </div>
+  </div>
+      </div>
+      <div class="col gap-2"><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Cost Sentinel</span><span class="faint" style="font-size:12px;">Weekly rollup + optimization scan · last run 3d ago</span></div><div class="row gap-2" style="margin-left:auto;"><div class="row gap-2"><button class="btn primary sm">Run now</button><button class="btn outline sm">View last run</button></div></div></div><div class="card-pad"><div class="row gap-2"><span class="badge info"><span class="dot" aria-hidden></span>weekly</span><span class="badge info"><span class="dot" aria-hidden></span>cost</span></div></div></section><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Security Sentinel</span><span class="faint" style="font-size:12px;">Scans images + IAM daily · last run 4h ago</span></div><div class="row gap-2" style="margin-left:auto;"><div class="row gap-2"><button class="btn primary sm">Run now</button><button class="btn outline sm">View last run</button></div></div></div><div class="card-pad"><div class="row gap-2"><span class="badge info"><span class="dot" aria-hidden></span>daily</span><span class="badge info"><span class="dot" aria-hidden></span>security</span></div></div></section><section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Cluster Sentinel</span><span class="faint" style="font-size:12px;">Hourly cluster health check · last run 22m ago</span></div><div class="row gap-2" style="margin-left:auto;"><div class="row gap-2"><button class="btn primary sm">Run now</button><button class="btn outline sm">View last run</button></div></div></div><div class="card-pad"><div class="row gap-2"><span class="badge info"><span class="dot" aria-hidden></span>hourly</span><span class="badge info"><span class="dot" aria-hidden></span>cluster</span></div></div></section></div></div>
+    </section>
+    <section class="page" data-page="settings" style="display:none;">
+      <div class="dda-page-wrap col gap-5">
+      
+    <div class="col gap-4" style="margin-bottom:4px;">
+      <div class="row between gap-3 wrap" style="align-items:flex-start;">
+        <div class="col" style="gap:4px;min-width:0;max-width:720px;">
+          <h1 style="font-size:22px;letter-spacing:-.02em;">Project settings</h1>
+          <p class="muted" style="font-size:13.5px;line-height:1.5;">General, integrations, members, and danger-zone controls for this project.</p>
+        </div>
+        
+      </div>
+    </div>
+      <div class="row gap-2 wrap"><span class="chip active">General</span><span class="chip ">Members</span><span class="chip ">Integrations</span><span class="chip ">Danger zone</span></div>
+      <div style="max-width:720px;" class="col gap-5">
+        <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Project identity</span><span class="faint" style="font-size:12px;">Name, description, and accent color</span></div></div><div class="card-pad"><div class="col gap-3"><div class="row gap-3"><div style="width:56px;height:56px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:var(--accent-fg);font-weight:800;font-size:20px;flex:none;">A</div><div class="col gap-3">
+  <label class="col gap-1">
+    <span class="field-label">Name</span>
+    <input class="input" type="text" placeholder="" value="agent" >
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Slug (immutable)</span>
+    <input class="input" type="text" placeholder="" value="agent" readonly>
+    
+  </label></div></div>
+  <label class="col gap-1">
+    <span class="field-label">Description</span>
+    <textarea class="textarea" style="min-height:80px;">Production deployment target for the DeepAgent DevOps platform.</textarea>
+    
+  </label>
+  <label class="col gap-1">
+    <span class="field-label">Accent color</span>
+    <div class="row gap-2"><button style="width:32px;height:32px;border-radius:9px;background:#7c3aed;border:2px solid var(--text);cursor:pointer;"></button><button style="width:32px;height:32px;border-radius:9px;background:#2563eb;border:2px solid transparent;cursor:pointer;"></button><button style="width:32px;height:32px;border-radius:9px;background:#16a34a;border:2px solid transparent;cursor:pointer;"></button><button style="width:32px;height:32px;border-radius:9px;background:#dc2626;border:2px solid transparent;cursor:pointer;"></button><button style="width:32px;height:32px;border-radius:9px;background:#ca8a04;border:2px solid transparent;cursor:pointer;"></button></div>
+    
+  </label></div></div></section>
+        <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Active environment</span><span class="faint" style="font-size:12px;">Determines which env env-scoped pages default to</span></div></div><div class="card-pad"><div style="max-width:280px;"><div class="select" style="cursor:default;">release <span class="faint" style="margin-left:auto;">▾</span></div></div></div></section>
+        <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Integrations</span><span class="faint" style="font-size:12px;">Third-party services the agent can call</span></div></div><div class="card-pad"><div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 420px));justify-content:start;gap:14px;"><div class="row between gap-2"><div class="row gap-2" style="align-items:center;"><span>💬</span><b>Slack</b></div><span class="badge ok"><span class="dot" aria-hidden></span>connected</span></div><div class="row between gap-2"><div class="row gap-2" style="align-items:center;"><span>📊</span><b>Linear</b></div><button class="btn outline sm">Connect</button></div><div class="row between gap-2"><div class="row gap-2" style="align-items:center;"><span>📟</span><b>PagerDuty</b></div><button class="btn outline sm">Connect</button></div><div class="row between gap-2"><div class="row gap-2" style="align-items:center;"><span>📈</span><b>Datadog</b></div><button class="btn outline sm">Connect</button></div></div></div></section>
+        <section class="card"><div class="card-h"><div class="col" style="gap:2px;"><span class="card-title">Members</span><span class="faint" style="font-size:12px;">5 · 2 admins</span></div><div class="row gap-2" style="margin-left:auto;"><button class="btn primary sm">+ Invite member</button></div></div><div class="card-pad"><ul style="list-style:none;padding:0;margin:0;"><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><div class="row gap-3" style="align-items:center;"><span style="width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;">MV</span><div><b>manoi vv</b><div class="faint" style="font-size:11.5px;">manov7723@example.com</div></div><span style="margin-left:auto;"><span class="badge accent">admin</span></span></div></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><div class="row gap-3" style="align-items:center;"><span style="width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;">SR</span><div><b>sriram</b><div class="faint" style="font-size:11.5px;">sriram@tecneural.com</div></div><span style="margin-left:auto;"><span class="badge accent">admin</span></span></div></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><div class="row gap-3" style="align-items:center;"><span style="width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;">D1</span><div><b>dev1</b><div class="faint" style="font-size:11.5px;">dev1@example.com</div></div><span style="margin-left:auto;"><span class="badge info"><span class="dot" aria-hidden></span>developer</span></span></div></li><li style="padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px;"><div class="row gap-3" style="align-items:center;"><span style="width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;">D2</span><div><b>dev2</b><div class="faint" style="font-size:11.5px;">dev2@example.com</div></div><span style="margin-left:auto;"><span class="badge ">viewer</span></span></div></li></ul></div></section>
+      </div></div>
+    </section>
+      </main>
+    </div>
+  </div>
+  <script>
+  const links = document.querySelectorAll('.dda-sidebar-item');
+  const pages = document.querySelectorAll('.page');
+  function show(id) {
+    pages.forEach(p => p.style.display = p.dataset.page === id ? 'block' : 'none');
+    links.forEach(l => l.classList.toggle('active', l.dataset.id === id));
+    if (location.hash.slice(1) !== id) history.replaceState(null, '', '#' + id);
+  }
+  links.forEach(l => l.addEventListener('click', (e) => { e.preventDefault(); show(l.dataset.id); }));
+  window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'dashboard'));
+  show(location.hash.slice(1) || 'dashboard');
+
+  // Theme toggle
+  const themeBtn = document.querySelector('[aria-label="Theme"]');
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    if (themeBtn) themeBtn.textContent = t === 'dark' ? '☀' : '☾';
+    try { localStorage.setItem('dda-wireframe-theme', t); } catch (e) {}
+  }
+  themeBtn?.addEventListener('click', () => {
+    setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+  try { const s = localStorage.getItem('dda-wireframe-theme'); if (s) setTheme(s); } catch (e) {}
+</script>
+</body>
+</html>
