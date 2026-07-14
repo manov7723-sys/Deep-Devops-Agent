@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Block, Btn, PageHead, Stat } from "@/components/ui";
+import { Block, Btn, PageHead, Stat, TileGrid } from "@/components/ui";
 import { EnvFilter, type EnvFilterValue } from "@/components/domain/EnvFilter";
 import { TaskRow } from "@/components/domain/TaskRow";
 import { useProjectTasks, useRunTask } from "@/hooks/queries/project";
@@ -33,13 +33,7 @@ export function ProjectTasksClient({ slug }: { slug: string }) {
       />
       <EnvFilter />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 14,
-        }}
-      >
+      <TileGrid minTile={180} maxTile="1fr">
         <Stat label="Active agents" value="5" icon="bot" sub="across 7 environments" />
         <Stat label="Runs today" value="148" icon="refresh" sub={`${running} currently running`} />
         <Stat
@@ -49,7 +43,7 @@ export function ProjectTasksClient({ slug }: { slug: string }) {
           sub={findings === 0 ? "all clear" : "review on demand"}
         />
         <Stat label="Last full sweep" value="12m ago" icon="check" sub="all envs scanned" />
-      </div>
+      </TileGrid>
 
       {tasks ? (
         tasks.length === 0 ? (

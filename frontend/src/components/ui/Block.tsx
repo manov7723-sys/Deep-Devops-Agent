@@ -27,10 +27,25 @@ import { Empty, type EmptyProps } from "./Empty";
 export interface BlockProps {
   children: ReactNode;
   className?: string;
+  /**
+   * Cap the card's max width. Pages used to wrap `<Block>` in ad-hoc
+   * `<div style={{maxWidth: N}}>` at five different widths — settings 720/760,
+   * connection 480/520, form panels 680 — producing visually inconsistent
+   * sections. Set `maxWidth` here for a single source of truth per page.
+   * Examples: 480 (compact form panel), 720 (settings form), unset (full width).
+   */
+  maxWidth?: number;
 }
 
-function BlockRoot({ children, className }: BlockProps) {
-  return <section className={cn("card", className)}>{children}</section>;
+function BlockRoot({ children, className, maxWidth }: BlockProps) {
+  return (
+    <section
+      className={cn("card", className)}
+      style={maxWidth ? { maxWidth, width: "100%" } : undefined}
+    >
+      {children}
+    </section>
+  );
 }
 
 function Header({ children }: { children: ReactNode }) {

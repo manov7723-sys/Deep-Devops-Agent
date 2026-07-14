@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
-import { Block, Btn, ChipGroup, PageHead, Stat } from "@/components/ui";
+import { Block, Btn, ChipGroup, PageHead, Stat, TileGrid } from "@/components/ui";
 import { AlertInvestigation } from "@/components/domain/AlertInvestigation";
 import { AlertThresholdsPanel } from "@/components/domain/AlertThresholdsPanel";
 import { ChatOpsPanel } from "@/components/domain/ChatOpsPanel";
@@ -57,18 +57,12 @@ export function ProjectAlertsClient({ slug }: { slug: string }) {
         }
       />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 14,
-        }}
-      >
+      <TileGrid minTile={200} maxTile="1fr">
         <Stat label="Open alerts" value={open} icon="alert" sub={`${totals.length} total`} />
         <Stat label="High severity" value={high} icon="shield" sub="needs action now" />
         <Stat label="Security findings" value={security} icon="lock" sub="by Security Sentinel" />
         <Stat label="Mean time to ack" value="14m" icon="clock" sub="last 30 days" />
-      </div>
+      </TileGrid>
 
       <NotificationEmailsPanel slug={slug} />
 

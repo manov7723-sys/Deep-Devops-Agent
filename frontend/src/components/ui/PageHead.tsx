@@ -18,10 +18,10 @@ export function PageHead({ title, sub, actions, tabs, tabValue, onTabChange }: P
   return (
     <div className="col gap-4" style={{ marginBottom: 4 }}>
       <div className="row between gap-3 wrap" style={{ alignItems: "flex-start" }}>
-        <div className="col" style={{ gap: 4, minWidth: 0 }}>
+        <div className="col" style={{ gap: 4, minWidth: 0, maxWidth: 720 }}>
           <h1 style={{ fontSize: 22, letterSpacing: "-0.02em" }}>{title}</h1>
           {sub && (
-            <p className="muted" style={{ fontSize: 13.5 }}>
+            <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
               {sub}
             </p>
           )}

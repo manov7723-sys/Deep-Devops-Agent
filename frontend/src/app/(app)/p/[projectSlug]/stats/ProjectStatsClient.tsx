@@ -150,17 +150,11 @@ function ObservabilityPanel({ slug, env }: { slug: string; env: EnvFilterValue }
   }
   return (
     <div className="col gap-4">
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 14,
-        }}
-      >
+      <TileGrid minTile={220} maxTile="1fr">
         {data.kpis.map((k) => (
           <ObservabilityKpi key={k.id} kpi={k} />
         ))}
-      </div>
+      </TileGrid>
       <ClusterMonitoringPanel slug={slug} env={env} />
       <CloudWatchAlarmsPanel slug={slug} env={env} />
       <AzureMonitorAlarmsPanel slug={slug} env={env} />

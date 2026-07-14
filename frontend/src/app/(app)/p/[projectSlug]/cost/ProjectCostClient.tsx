@@ -1,7 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Bars, Block, Btn, Donut, Icon, PageHead, Progress, Stat } from "@/components/ui";
+import {
+  Badge,
+  Bars,
+  Block,
+  Btn,
+  Donut,
+  Icon,
+  PageHead,
+  Progress,
+  Stat,
+  TileGrid,
+} from "@/components/ui";
 import { EnvFilter } from "@/components/domain/EnvFilter";
 import { CostBudgetPanel } from "@/components/domain/CostBudgetPanel";
 import { CostOptimizationPanel } from "@/components/domain/CostOptimizationPanel";
@@ -134,13 +145,7 @@ export function ProjectCostClient({ slug }: { slug: string }) {
 
       <EnvFilter />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 14,
-        }}
-      >
+      <TileGrid minTile={200} maxTile="1fr">
         <Stat
           label="Month to date"
           value={c?.monthTotal ?? "—"}
@@ -167,7 +172,7 @@ export function ProjectCostClient({ slug }: { slug: string }) {
           icon="alert"
           sub="3 resources need tags"
         />
-      </div>
+      </TileGrid>
 
       <div className="dda-proj-dash-grid">
         <Block>

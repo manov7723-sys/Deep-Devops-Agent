@@ -23,6 +23,7 @@ import {
   Select,
   StatusDot,
   Textarea,
+  TileGrid,
   Toggle,
 } from "@/components/ui";
 import { ProjectAvatar } from "@/components/domain/ProjectAvatar";
@@ -825,13 +826,7 @@ function IntegrationsTab({ slug }: { slug: string }) {
           <Block.Title sub="Quick-add any integration we offer.">Available providers</Block.Title>
         </Block.Header>
         <Block.Body>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: 10,
-            }}
-          >
+          <TileGrid minTile={220} gap={10}>
             {INTEGRATION_PROVIDERS.map((p) => {
               const isConnected = connectedProviders.has(p.kind);
               return (
@@ -870,7 +865,7 @@ function IntegrationsTab({ slug }: { slug: string }) {
                 </button>
               );
             })}
-          </div>
+          </TileGrid>
         </Block.Body>
       </Block>
 
