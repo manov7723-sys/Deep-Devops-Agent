@@ -1299,6 +1299,407 @@ const PromotionsPage = () => {
 };
 
 // ═════════════════════════════════════════════════════════════════════
+// My Account area pages — matches src/app/(app)/u/* + src/app/(app)/account/*
+// ═════════════════════════════════════════════════════════════════════
+const UserDashboardPage = () => html`
+  <${PageHead} title="Welcome back, manoi" sub="Your DeepAgent workspace at a glance." actions=${html`<${Btn} variant="primary" icon=${html`<${Icon} name="plus" size=${14} />`}>New project<//>`} />
+  <div style=${{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14}}>
+    <${Stat} label="Active projects" value="3" sub="9 environments total" icon=${html`<${Icon} name="projects" size=${16} />`} />
+    <${Stat} label="Deploys this month" value="312" sub="▲ 12% vs last month" icon=${html`<${Icon} name="cicd" size=${16} />`} />
+    <${Stat} label="Agent runs" value="1.4k" sub="of 5k included" icon=${html`<${Icon} name="bot" size=${16} />`} />
+    <${Stat} label="Cloud spend" value="$12.1k" sub="▲ 5% · across 3 projects" icon=${html`<${Icon} name="dollar" size=${16} />`} />
+  </div>
+  <${Card} title="Your projects" sub="3 active" actions=${html`<${Btn} variant="ghost" size="sm">All projects →<//>`}>
+    <div class="col" style=${{gap: 0}}>
+      ${Object.values(PROJECTS).map((p) => html`
+        <div class="row between" style=${{padding: "12px 0", borderBottom: "1px solid var(--border-soft)", alignItems: "center"}}>
+          <div class="row gap-3" style=${{alignItems: "center"}}>
+            <span style=${{width: 34, height: 34, borderRadius: 9, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800}}>${p.cloudLabel[0]}</span>
+            <div class="col" style=${{gap: 2}}>
+              <b style=${{fontSize: 13.5}}>${p.name}</b>
+              <span class="faint" style=${{fontSize: 12}}>${p.envs.length} envs · ${p.clusterType} · ${p.region}</span>
+            </div>
+          </div>
+          <div class="row gap-2">
+            <${Badge} tone="info">${p.cloudLabel}<//>
+            <${Btn} variant="ghost" size="sm">Open →<//>
+          </div>
+        </div>`)}
+    </div>
+  <//>
+  <div class="row gap-4 wrap" style=${{alignItems: "flex-start"}}>
+    <div style=${{flex: 1, minWidth: 380}}>
+      <${Card} title="Usage this cycle" sub="Resets on the 1st" actions=${html`<${Btn} variant="ghost" size="sm">Details →<//>`}>
+        ${[
+          { label: "Agent runs", used: 1420, limit: 5000, color: "var(--accent)" },
+          { label: "Deploys", used: 312, limit: 1000, color: "var(--ok)" },
+          { label: "Seats", used: 3, limit: 5, color: "var(--info)" },
+        ].map((u) => html`
+          <div class="col gap-1" style=${{marginBottom: 12}}>
+            <div class="row between" style=${{fontSize: 13}}><span style=${{fontWeight: 600}}>${u.label}</span><span class="mono muted">${u.used} / ${u.limit}</span></div>
+            <div style=${{height: 8, background: "var(--surface-3)", borderRadius: 999, overflow: "hidden"}}>
+              <div style=${{width: (u.used/u.limit*100) + "%", height: "100%", background: u.color, borderRadius: 999}}></div>
+            </div>
+          </div>`)}
+      <//>
+    </div>
+    <div style=${{flex: 1, minWidth: 320}}>
+      <${Card} title="Plan" sub="Pro" actions=${html`<${Badge} tone="accent">Pro<//>`}>
+        <div class="col gap-2">
+          <div style=${{fontSize: 28, fontWeight: 800, letterSpacing: "-.02em"}}>$99<span class="faint" style=${{fontSize: 14, fontWeight: 500}}>/mo</span></div>
+          <div class="faint" style=${{fontSize: 12.5}}>Renews Aug 14, 2026 · Visa ending 4242</div>
+          <div class="row gap-2" style=${{marginTop: 8}}>
+            <${Btn} variant="primary" size="sm">Manage plan<//>
+            <${Btn} size="sm">Upgrade<//>
+          </div>
+        </div>
+      <//>
+    </div>
+  </div>
+`;
+
+const UserProjectsPage = () => html`
+  <${PageHead} title="Projects" sub="Every product you're running on DeepAgent." actions=${html`<${Btn} variant="primary" icon=${html`<${Icon} name="plus" size=${14} />`}>New project<//>`} />
+  <${TileGrid} minTile=${300} maxTile=${420}>
+    ${Object.values(PROJECTS).map((p) => html`
+      <${Card}>
+        <div class="row gap-3" style=${{alignItems: "flex-start"}}>
+          <span style=${{width: 44, height: 44, borderRadius: 11, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 15, flex: "none"}}>${p.cloudLabel[0]}</span>
+          <div class="col" style=${{gap: 3, minWidth: 0, flex: 1}}>
+            <b style=${{fontSize: 14}}>${p.name}</b>
+            <span class="faint" style=${{fontSize: 12, lineHeight: 1.4}}>${p.clusterType} · ${p.region}</span>
+          </div>
+          <${Btn} variant="ghost" size="icon"><${Icon} name="more" size=${16} /><//>
+        </div>
+        <div style=${{marginTop: 14, padding: "10px 12px", background: "var(--surface-2)", borderRadius: 8, fontSize: 12}}>
+          <div class="row between"><span class="muted">Envs</span><span class="mono">${p.envs.length}</span></div>
+          <div class="row between" style=${{marginTop: 4}}><span class="muted">Cluster</span><span class="mono">${p.clusterName}</span></div>
+          <div class="row between" style=${{marginTop: 4}}><span class="muted">Monthly cost</span><span class="mono" style=${{fontWeight: 700}}>$${p.provider.cost + 900}</span></div>
+        </div>
+        <div class="row gap-2" style=${{marginTop: 12}}>
+          <${Badge} tone="info">${p.cloudLabel}<//>
+          <${Badge} tone="ok">healthy<//>
+        </div>
+      <//>`)}
+    <${Card}>
+      <div class="col center" style=${{padding: "36px 12px", textAlign: "center", gap: 10}}>
+        <span style=${{width: 44, height: 44, borderRadius: 11, background: "var(--surface-3)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center"}}><${Icon} name="plus" size=${20} /></span>
+        <div style=${{fontWeight: 700, fontSize: 14}}>New project</div>
+        <div class="muted" style=${{fontSize: 12.5}}>Wire up a repo → pick a cloud → ship.</div>
+        <${Btn} variant="outline" size="sm">Create project<//>
+      </div>
+    <//>
+  <//>
+`;
+
+const UserTeamsPage = () => html`
+  <${PageHead} title="Teams" sub="Members across all your DeepAgent projects." actions=${html`<${Btn} variant="primary" icon=${html`<${Icon} name="plus" size=${14} />`}>Invite member<//>`} />
+  <${Card} title="Pending invitations" sub="2 pending" actions=${html`<${Badge} tone="info">2<//>`}>
+    ${[
+      { email: "alice@acme.com", role: "developer", project: "agent (AWS)", inviter: "manoi", expires: "6 days" },
+      { email: "bob@acme.com", role: "viewer", project: "agent (Azure)", inviter: "manoi", expires: "3 days" },
+    ].map((i) => html`
+      <div class="row between" style=${{padding: "12px 0", borderBottom: "1px solid var(--border-soft)", alignItems: "center"}}>
+        <div class="row gap-3" style=${{alignItems: "center"}}>
+          <${Icon} name="mail" size=${18} />
+          <div class="col" style=${{gap: 3}}>
+            <b class="mono" style=${{fontSize: 13}}>${i.email}</b>
+            <span class="faint" style=${{fontSize: 12}}>${i.role} · ${i.project} · by ${i.inviter} · expires in ${i.expires}</span>
+          </div>
+        </div>
+        <div class="row gap-2">
+          <${Btn} size="sm">Resend<//>
+          <${Btn} size="sm" variant="ghost"><${Icon} name="x" size=${14} /> Revoke<//>
+        </div>
+      </div>`)}
+  <//>
+  <${Card} title="Members" sub="5 total" actions=${html`<${Badge} tone="ok">5<//>`}>
+    <${Table} headers=${["Member", "Role", "Shared projects", "Last active", ""]} rows=${[
+      ["manoi vv", "admin", ["agent (AWS)", "agent (GCP)", "agent (Azure)"], "just now", ""],
+      ["sriram", "admin", ["agent (AWS)", "agent (Azure)"], "2h ago", ""],
+      ["dev1", "developer", ["agent (AWS)"], "1d ago", ""],
+      ["dev2", "viewer", ["agent (GCP)"], "3d ago", ""],
+      ["alice", "developer", ["agent (Azure)"], "1w ago", ""],
+    ].map(([name, role, projects, active]) => [
+      html`<div class="row gap-2" style=${{alignItems: "center"}}><span style=${{width: 30, height: 30, borderRadius: "50%", background: "var(--surface-3)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 11}}>${name.split(" ").map((p) => p[0]).join("").toUpperCase()}</span><b>${name}</b></div>`,
+      html`<${Badge} tone=${role === "admin" ? "accent" : role === "developer" ? "info" : "default"}>${role}<//>`,
+      html`<div class="row gap-1 wrap">${projects.slice(0, 3).map((p) => html`<${Badge}>${p}<//>`)}</div>`,
+      html`<span class="faint">${active}</span>`,
+      html`<${Btn} variant="ghost" size="icon"><${Icon} name="more" size=${14} /><//>`,
+    ])} />
+  <//>
+`;
+
+const UserSubscriptionPage = () => html`
+  <${PageHead} title="Subscription" sub="Plan, invoices, and payment method." />
+  <${Card}>
+    <div class="row between wrap" style=${{gap: 20, alignItems: "center"}}>
+      <div class="row gap-4" style=${{alignItems: "center", minWidth: 0}}>
+        <span style=${{width: 56, height: 56, borderRadius: 14, background: "var(--accent-soft)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flex: "none"}}><${Icon} name="zap" size=${28} /></span>
+        <div class="col" style=${{gap: 4, minWidth: 0}}>
+          <div class="row gap-2" style=${{alignItems: "center"}}><b style=${{fontSize: 16}}>Pro</b><${Badge} tone="accent">current<//></div>
+          <div style=${{fontSize: 14}}>$99/month · Renews Aug 14, 2026 · Visa •••• 4242</div>
+        </div>
+      </div>
+      <${Btn} variant="outline">Change plan<//>
+    </div>
+  <//>
+  <${Card} title="All plans" sub="Change at any time — billing prorates">
+    <${TileGrid} minTile=${240} maxTile="1fr">
+      ${[
+        { name: "Starter", price: "$29", desc: "Solo builders & prototypes", features: ["3 projects", "1k agent runs/mo", "1 seat"], current: false, popular: false },
+        { name: "Pro", price: "$99", desc: "Teams shipping to production", features: ["Unlimited projects", "5k agent runs/mo", "5 seats", "24/7 alerts"], current: true, popular: true },
+        { name: "Enterprise", price: "Custom", desc: "SSO, audit, dedicated support", features: ["Everything in Pro", "SAML SSO", "Dedicated CSM", "SOC 2 reports"], current: false, popular: false },
+      ].map((p) => html`
+        <div style=${{padding: 20, background: p.current ? "var(--accent-soft)" : "var(--surface)", border: p.current ? "2px solid var(--accent)" : "1px solid var(--border-soft)", borderRadius: 12, position: "relative"}}>
+          ${p.popular && !p.current && html`<span style=${{position: "absolute", top: -10, right: 20, background: "var(--accent)", color: "var(--accent-fg)", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700}}>POPULAR</span>`}
+          ${p.current && html`<span style=${{position: "absolute", top: -10, right: 20, background: "var(--ok)", color: "white", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700}}>CURRENT</span>`}
+          <div style=${{fontWeight: 800, fontSize: 15, marginBottom: 4}}>${p.name}</div>
+          <div style=${{fontSize: 28, fontWeight: 800, letterSpacing: "-.02em"}}>${p.price}${p.price !== "Custom" && html`<span class="faint" style=${{fontSize: 13, fontWeight: 500}}>/mo</span>`}</div>
+          <div class="muted" style=${{fontSize: 12, marginBottom: 14}}>${p.desc}</div>
+          <ul style=${{listStyle: "none", padding: 0, margin: "0 0 16px", fontSize: 13}}>
+            ${p.features.map((f) => html`<li class="row gap-2" style=${{padding: "3px 0", alignItems: "center"}}><${Icon} name="check" size=${12} stroke=${2.5} /><span>${f}</span></li>`)}
+          </ul>
+          <${Btn} variant=${p.current ? "outline" : "primary"} block disabled=${p.current}>${p.current ? "Current plan" : p.price === "Custom" ? "Contact sales" : "Choose plan"}<//>
+        </div>`)}
+    <//>
+  <//>
+  <${Card} title="Top up agent tokens" sub="One-time purchases · never expire" actions=${html`<${Badge} tone="ok">3.6k tokens left<//>`}>
+    <${TileGrid} minTile=${220} maxTile="1fr">
+      ${[
+        { icon: "zap", name: "100K tokens", price: "$19", desc: "+100k agent tokens" },
+        { icon: "zap", name: "500K tokens", price: "$79", desc: "+500k agent tokens" },
+        { icon: "zap", name: "2M tokens", price: "$249", desc: "+2M agent tokens" },
+      ].map((t) => html`
+        <div style=${{padding: 16, background: "var(--surface-2)", border: "1px solid var(--border-soft)", borderRadius: 10}}>
+          <div class="row gap-2" style=${{alignItems: "center", marginBottom: 8}}>
+            <${Icon} name=${t.icon} size=${16} />
+            <b style=${{fontSize: 13.5}}>${t.name}</b>
+          </div>
+          <div style=${{fontSize: 20, fontWeight: 800}}>${t.price} <span class="faint" style=${{fontSize: 11}}>one-time</span></div>
+          <div class="muted" style=${{fontSize: 12, marginBottom: 10}}>${t.desc}</div>
+          <${Btn} variant="outline" block size="sm">Buy<//>
+        </div>`)}
+    <//>
+  <//>
+  <${Card} title="Invoices" sub="3 total">
+    <${Table} headers=${["Invoice", "Date", "Amount", "Status", ""]} rows=${[
+      ["INV-2026-07", "Jul 14, 2026", "$99.00", html`<${Badge} tone="ok">paid<//>`, html`<div class="row gap-1"><${Btn} size="sm" variant="ghost">View<//><${Btn} size="sm" variant="ghost">PDF<//></div>`],
+      ["INV-2026-06", "Jun 14, 2026", "$99.00", html`<${Badge} tone="ok">paid<//>`, html`<div class="row gap-1"><${Btn} size="sm" variant="ghost">View<//><${Btn} size="sm" variant="ghost">PDF<//></div>`],
+      ["INV-2026-05", "May 14, 2026", "$99.00", html`<${Badge} tone="ok">paid<//>`, html`<div class="row gap-1"><${Btn} size="sm" variant="ghost">View<//><${Btn} size="sm" variant="ghost">PDF<//></div>`],
+    ]} />
+  <//>
+  <${Card} title="Payment method">
+    <div class="row between" style=${{alignItems: "center"}}>
+      <div class="row gap-3" style=${{alignItems: "center"}}>
+        <span style=${{width: 44, height: 30, background: "linear-gradient(135deg, #1a1f71, #f7b600)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: 10, letterSpacing: 1}}>VISA</span>
+        <div class="col" style=${{gap: 2}}>
+          <b style=${{fontSize: 13.5}}>Visa ending in 4242</b>
+          <span class="faint" style=${{fontSize: 12}}>Expires 12/28</span>
+        </div>
+      </div>
+      <${Btn}>Open Stripe portal<//>
+    </div>
+  <//>
+`;
+
+const UserUsagePage = () => html`
+  <${PageHead} title="Usage" sub="Consumption this billing cycle." actions=${html`<${Btn}>Export CSV<//>`} />
+  <${TileGrid} minTile=${220} maxTile="1fr">
+    ${[
+      { label: "Agent runs", used: 1420, limit: 5000 },
+      { label: "Deploys", used: 312, limit: 1000 },
+      { label: "Seats", used: 3, limit: 5 },
+      { label: "Environments", used: 9, limit: null },
+    ].map((m) => {
+      const pct = m.limit ? (m.used / m.limit) * 100 : null;
+      const tone = pct == null ? "var(--info)" : pct >= 95 ? "var(--danger)" : pct >= 80 ? "var(--warn)" : "var(--accent)";
+      return html`
+        <div class="card card-pad">
+          <div class="faint" style=${{fontSize: 11.5, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700}}>${m.label}</div>
+          <div style=${{fontSize: 26, fontWeight: 800, letterSpacing: "-.02em", margin: "6px 0"}}>${m.used}<span class="faint" style=${{fontSize: 14, fontWeight: 500}}> / ${m.limit == null ? "∞" : m.limit}</span></div>
+          <div style=${{height: 8, background: "var(--surface-3)", borderRadius: 999, overflow: "hidden"}}>
+            <div style=${{width: (pct == null ? 100 : Math.min(100, pct)) + "%", height: "100%", background: tone, borderRadius: 999}}></div>
+          </div>
+        </div>`;
+    })}
+  <//>
+  <${Card} title="Agent token consumption" sub="Last 12 weeks" actions=${html`<${Badge}>12w<//>`}>
+    <div style=${{height: 200, display: "flex", alignItems: "flex-end", gap: 8, padding: 20, background: "var(--surface-2)", borderRadius: 8}}>
+      ${Array.from({length: 12}, (_, i) => 40 + Math.sin(i * 0.5) * 30 + i * 4).map((h, i) => html`
+        <div style=${{flex: 1, background: "var(--accent)", opacity: 0.6 + (i / 12) * 0.4, borderRadius: "4px 4px 0 0", height: h + "%", position: "relative"}}></div>`)}
+    </div>
+    <div class="row between" style=${{marginTop: 8, fontSize: 11, color: "var(--text-muted)"}}>
+      <span>12 weeks ago</span><span>Now</span>
+    </div>
+  <//>
+`;
+
+const AccountProfilePage = ({ onNav }) => {
+  const session = { name: "manoi vv", email: "manoi@example.com", role: "Super admin", title: "Platform Engineer", memberSince: "Jan 2025" };
+  return html`
+    <${PageHead} title="Profile" sub="Your DeepAgent identity + connected accounts." actions=${html`<${Btn} onClick=${() => onNav("account-edit-profile")}>Edit profile<//>`} />
+    <${Card}>
+      <div class="row gap-4" style=${{alignItems: "center"}}>
+        <div style=${{position: "relative"}}>
+          <span style=${{width: 84, height: 84, borderRadius: 20, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 30}}>MV</span>
+          <button class="btn ghost icon sm" style=${{position: "absolute", bottom: -4, right: -4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "50%"}} onClick=${() => onNav("account-edit-profile")}><${Icon} name="edit" size=${12} /></button>
+        </div>
+        <div class="col" style=${{gap: 6}}>
+          <div class="row gap-2" style=${{alignItems: "center"}}>
+            <h2 style=${{fontSize: 22, margin: 0, letterSpacing: "-.02em"}}>${session.name}</h2>
+            <${Badge} tone="accent">${session.role}<//>
+          </div>
+          <div class="muted" style=${{fontSize: 13}}>${session.email}</div>
+          <div class="faint" style=${{fontSize: 12.5}}>${session.title} · Member since ${session.memberSince}</div>
+        </div>
+      </div>
+    <//>
+    <${Card} title="My projects" sub="First 3 shown" actions=${html`<${Btn} variant="ghost" size="sm">All projects →<//>`}>
+      <${TileGrid} minTile=${240} maxTile=${360}>
+        ${Object.values(PROJECTS).map((p) => html`
+          <div style=${{padding: 14, background: "var(--surface-2)", border: "1px solid var(--border-soft)", borderRadius: 10}}>
+            <div class="row gap-3" style=${{alignItems: "center"}}>
+              <span style=${{width: 36, height: 36, borderRadius: 9, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flex: "none"}}>${p.cloudLabel[0]}</span>
+              <div class="col" style=${{gap: 2, minWidth: 0}}>
+                <b style=${{fontSize: 13.5}}>${p.name}</b>
+                <span class="faint" style=${{fontSize: 11.5}}>${p.clusterType} · ${p.region}</span>
+              </div>
+            </div>
+          </div>`)}
+      <//>
+    <//>
+    <${Card} title="Connected accounts" sub="OAuth sign-ins">
+      ${[
+        { provider: "github", label: "GitHub", handle: "manov7723-sys", connected: true },
+        { provider: "gitlab", label: "GitLab", handle: null, connected: false },
+      ].map((a) => html`
+        <div class="row between" style=${{padding: "12px 0", borderBottom: "1px solid var(--border-soft)", alignItems: "center"}}>
+          <div class="row gap-3" style=${{alignItems: "center"}}><${Icon} name=${a.provider} size=${20} /><div class="col" style=${{gap: 2}}><b style=${{fontSize: 13.5}}>${a.label}</b><span class="faint" style=${{fontSize: 12}}>${a.connected ? "@" + a.handle : "Not connected"}</span></div></div>
+          ${a.connected ? html`<${Btn} size="sm">Disconnect<//>` : html`<${Btn} size="sm" variant="primary">Connect ${a.label}<//>`}
+        </div>`)}
+    <//>
+    <${Card} title="Security">
+      ${[
+        { icon: "lock", title: "Password", desc: "Last changed 3 months ago", cta: "Change", nav: "account-change-password" },
+        { icon: "shield", title: "Two-factor authentication", desc: "Enabled via authenticator app", cta: "Manage", nav: "account-2fa-manage" },
+        { icon: "key", title: "Active sessions", desc: "2 devices signed in", cta: "Review", nav: null },
+      ].map((s) => html`
+        <div class="row between" style=${{padding: "14px 0", borderBottom: "1px solid var(--border-soft)", alignItems: "center"}}>
+          <div class="row gap-3" style=${{alignItems: "center"}}>
+            <span style=${{width: 36, height: 36, borderRadius: 9, background: "var(--surface-3)", color: "var(--text)", display: "flex", alignItems: "center", justifyContent: "center", flex: "none"}}><${Icon} name=${s.icon} size=${16} /></span>
+            <div class="col" style=${{gap: 2}}><b style=${{fontSize: 13.5}}>${s.title}</b><span class="faint" style=${{fontSize: 12}}>${s.desc}</span></div>
+          </div>
+          <${Btn} size="sm" disabled=${!s.nav} onClick=${() => s.nav && onNav(s.nav)}>${s.cta}<//>
+        </div>`)}
+    <//>
+  `;
+};
+
+const AccountEditProfilePage = ({ onNav }) => {
+  const [firstName, setFirstName] = useState("manoi");
+  const [lastName, setLastName] = useState("vv");
+  const [email, setEmail] = useState("manoi@example.com");
+  const [title, setTitle] = useState("Platform Engineer");
+  return html`
+    <div style=${{maxWidth: 680, width: "100%"}} class="col gap-5">
+      <${PageHead} title="Edit profile" sub="Update your personal information." />
+      <${Card}>
+        <div class="row gap-4" style=${{alignItems: "center", paddingBottom: 20, borderBottom: "1px solid var(--border-soft)", marginBottom: 20}}>
+          <span style=${{width: 68, height: 68, borderRadius: 18, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 22}}>MV</span>
+          <div class="row gap-2"><${Btn}>Upload photo<//><${Btn} variant="ghost">Remove<//></div>
+        </div>
+        <div class="col gap-4">
+          <div class="row gap-3" style=${{alignItems: "flex-start"}}>
+            <div style=${{flex: 1}}><${Field} label="First name" required><${Input} value=${firstName} onInput=${(e) => setFirstName(e.target.value)} /><//></div>
+            <div style=${{flex: 1}}><${Field} label="Last name"><${Input} value=${lastName} onInput=${(e) => setLastName(e.target.value)} /><//></div>
+          </div>
+          <${Field} label="Email" required><${Input} type="email" value=${email} onInput=${(e) => setEmail(e.target.value)} /><//>
+          <${Field} label="Job title"><${Input} value=${title} onInput=${(e) => setTitle(e.target.value)} /><//>
+          <${Field} label="Timezone"><${Select} value="America/Los_Angeles" onChange=${() => {}} options=${["America/Los_Angeles", "America/New_York", "Europe/London", "Europe/Berlin", "Asia/Tokyo"]} /><//>
+          <div class="row gap-2" style=${{marginTop: 8}}>
+            <${Btn} variant="ghost" onClick=${() => onNav("account-profile")}>Cancel<//>
+            <${Btn} variant="primary" icon=${html`<${Icon} name="check" size=${14} />`} onClick=${() => onNav("account-profile")}>Save changes<//>
+          </div>
+        </div>
+      <//>
+    </div>`;
+};
+
+const AccountChangePasswordPage = ({ onNav }) => {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [msg, setMsg] = useState(null);
+  const reqs = [
+    { met: next.length >= 8, label: "At least 8 characters" },
+    { met: /[A-Z]/.test(next), label: "One uppercase letter" },
+    { met: /[a-z]/.test(next), label: "One lowercase letter" },
+    { met: /[0-9]/.test(next), label: "One digit" },
+    { met: /[^A-Za-z0-9]/.test(next), label: "One special character" },
+    { met: next && next === confirm, label: "Passwords match" },
+  ];
+  const canSubmit = current && reqs.every((r) => r.met);
+  return html`
+    <div style=${{maxWidth: 560, width: "100%"}} class="col gap-5">
+      <${PageHead} title="Change password" sub="Use a strong password you don't reuse elsewhere." />
+      <${Card}>
+        <div class="col gap-4">
+          <${Field} label="Current password" required><${Input} type="password" value=${current} onInput=${(e) => setCurrent(e.target.value)} /><//>
+          <${Field} label="New password" required><${Input} type="password" value=${next} onInput=${(e) => setNext(e.target.value)} /><//>
+          <${Field} label="Confirm new password" required><${Input} type="password" value=${confirm} onInput=${(e) => setConfirm(e.target.value)} /><//>
+          <ul style=${{listStyle: "none", padding: 0, margin: 0}}>
+            ${reqs.map((r) => html`
+              <li style=${{display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: r.met ? "var(--ok)" : "var(--text-muted)", padding: "3px 0"}}>
+                <${Icon} name=${r.met ? "check" : "x"} size=${12} />
+                <span>${r.label}</span>
+              </li>`)}
+          </ul>
+          ${msg && html`<p style=${{fontSize: 13, color: "var(--ok)", margin: 0}}>${msg}</p>`}
+          <div class="row gap-2" style=${{marginTop: 8}}>
+            <${Btn} variant="ghost" onClick=${() => onNav("account-profile")}>Cancel<//>
+            <${Btn} variant="primary" disabled=${!canSubmit} onClick=${() => { setMsg("Password updated."); setCurrent(""); setNext(""); setConfirm(""); setTimeout(() => onNav("account-profile"), 800); }}>Update password<//>
+          </div>
+        </div>
+      <//>
+    </div>`;
+};
+
+const Account2faManagePage = ({ onNav }) => {
+  const [enabled, setEnabled] = useState(true);
+  const [codes, setCodes] = useState(["a4kf-jt91", "88nq-d2mp", "xz7g-1frl", "mvpc-e0h6", "9kdz-yq34", "r7bt-suoe"]);
+  const [regenNote, setRegenNote] = useState(null);
+  return html`
+    <div style=${{maxWidth: 680, width: "100%"}} class="col gap-5">
+      <${PageHead} title="Two-factor authentication" sub="Add a second layer of security to your account." />
+      <${Card}>
+        <div class="row between" style=${{alignItems: "center"}}>
+          <div class="row gap-3" style=${{alignItems: "center"}}>
+            <span style=${{width: 44, height: 44, borderRadius: 12, background: enabled ? "var(--ok-soft)" : "var(--surface-3)", color: enabled ? "var(--ok)" : "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center", flex: "none"}}><${Icon} name="shield" size=${22} /></span>
+            <div class="col" style=${{gap: 3}}>
+              <div class="row gap-2" style=${{alignItems: "center"}}><b style=${{fontSize: 14}}>Authenticator app</b>${enabled && html`<${Badge} tone="ok">Enabled<//>`}</div>
+              <span class="faint" style=${{fontSize: 12}}>${enabled ? "Google Authenticator · added Jan 2025" : "Not enabled"}</span>
+            </div>
+          </div>
+          <label class="row gap-2" style=${{cursor: "pointer", alignItems: "center"}} onClick=${() => setEnabled(!enabled)}>
+            <span style=${{width: 36, height: 20, borderRadius: 999, background: enabled ? "var(--accent)" : "var(--surface-3)", padding: 2, transition: "background .15s"}}>
+              <span style=${{width: 16, height: 16, borderRadius: "50%", background: "white", display: "block", transform: enabled ? "translateX(16px)" : "translateX(0)", transition: "transform .15s"}}></span>
+            </span>
+          </label>
+        </div>
+      <//>
+      ${enabled && html`
+        <${Card} title="Backup codes" sub=${codes.length + " of 10 codes remaining"} actions=${html`<${Btn} onClick=${() => { setCodes(["new1-a4k7", "new2-88nq", "new3-xz71", "new4-mvpr", "new5-9kdz", "new6-r7bt", "new7-4fjt", "new8-mn8x", "new9-e2ph", "new10-yhb"]); setRegenNote("Copy these now — they won't be shown again."); }}>Regenerate<//>`}>
+          ${regenNote && html`<div style=${{padding: "10px 14px", background: "var(--warn-soft)", color: "var(--warn)", borderRadius: 8, fontSize: 12.5, marginBottom: 14}}>${regenNote}</div>`}
+          <div style=${{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8}}>
+            ${codes.map((c) => html`<span class="mono" style=${{padding: "8px 12px", background: "var(--surface-2)", border: "1px solid var(--border-soft)", borderRadius: 8, fontSize: 13, textAlign: "center"}}>${c}</span>`)}
+          </div>
+        <//>`}
+      <${Btn} variant="ghost" onClick=${() => onNav("account-profile")}>← Back to profile<//>
+    </div>`;
+};
+
+// ═════════════════════════════════════════════════════════════════════
 // Nav
 // ═════════════════════════════════════════════════════════════════════
 // Icon names come from src/components/ui/Icon.tsx — same registry the real
@@ -1324,14 +1725,37 @@ const PAGES = {
   alerts: { label: "Alerts", icon: "alert", component: AlertsPage },
   activity: { label: "Activity", icon: "activity", component: SimplePage("Activity", "Every audit-worthy action in the project.") },
   settings: { label: "Settings", icon: "settings", component: SimplePage("Project settings", "General, integrations, members, danger zone.") },
+  // My Account area
+  "u-dashboard": { label: "Dashboard", icon: "dashboard", component: UserDashboardPage },
+  "u-projects": { label: "Projects", icon: "projects", component: UserProjectsPage },
+  "u-teams": { label: "Teams", icon: "teams", component: UserTeamsPage },
+  "u-subscription": { label: "Subscription", icon: "card", component: UserSubscriptionPage },
+  "u-usage": { label: "Usage", icon: "gauge", component: UserUsagePage },
+  "u-settings": { label: "Settings", icon: "settings", component: (props) => html`<${AccountProfilePage} ...${props} />` },
+  // Account sub-pages (reached from Profile page + user menu)
+  "account-profile": { label: "Profile", icon: "user", component: AccountProfilePage },
+  "account-edit-profile": { label: "Edit profile", icon: "edit", component: AccountEditProfilePage },
+  "account-change-password": { label: "Change password", icon: "lock", component: AccountChangePasswordPage },
+  "account-2fa-manage": { label: "Two-factor", icon: "shield", component: Account2faManagePage },
 };
 
-const NAV_GROUPS = [
+const NAV_GROUPS_PROJECT = [
   { label: null, items: ["dashboard","chat","cicd","environments","cloud","infra","topology"] },
   { label: "Deploy", items: ["promotions"] },
   { label: "Connection", items: ["github","connection","stats","uptime","scheduler"] },
   { label: null, items: ["cost","tasks","knowledge","approvals","alerts","activity","settings"] },
 ];
+
+// User (My Account) area nav — matches nav-registry.ts user area lines 18-37.
+const NAV_GROUPS_USER = [
+  { label: null, items: ["u-dashboard","u-projects","u-teams","u-subscription","u-usage","u-settings"] },
+];
+
+// Which area does a given page belong to?
+const areaOfPage = (id) => {
+  if (id.startsWith("u-") || id.startsWith("account-")) return "user";
+  return "project";
+};
 
 // ═════════════════════════════════════════════════════════════════════
 // Shell
@@ -1370,57 +1794,74 @@ const ProjectSwitcher = ({ activeSlug, onSwitch }) => {
     </div>`;
 };
 
-const Sidebar = ({ active, onSelect, activeProject, onSwitchProject }) => html`
-  <aside class="dda-sidebar col">
-    <div class="dda-sidebar-head row between">
-      <div class="row gap-2" style=${{alignItems: "center"}}>
-        <span style=${{width: 34, height: 34, borderRadius: 10, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14}}>◐</span>
-        <div class="col">
-          <span style=${{fontWeight: 800, fontSize: 13.5, letterSpacing: "-.01em"}}>DeepAgent DevOps</span>
-          <span class="faint" style=${{fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700}}>Autonomous infra</span>
+const Sidebar = ({ active, onSelect, activeProject, onSwitchProject, area }) => {
+  const groups = area === "user" ? NAV_GROUPS_USER : NAV_GROUPS_PROJECT;
+  return html`
+    <aside class="dda-sidebar col">
+      <div class="dda-sidebar-head row between">
+        <div class="row gap-2" style=${{alignItems: "center"}}>
+          <span style=${{width: 34, height: 34, borderRadius: 10, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14}}>◐</span>
+          <div class="col">
+            <span style=${{fontWeight: 800, fontSize: 13.5, letterSpacing: "-.01em"}}>DeepAgent DevOps</span>
+            <span class="faint" style=${{fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700}}>${area === "user" ? "My Account" : "Autonomous infra"}</span>
+          </div>
         </div>
       </div>
-    </div>
-    <div style=${{padding: "0 12px 8px"}}>
-      <${ProjectSwitcher} activeSlug=${activeProject} onSwitch=${onSwitchProject} />
-    </div>
-    <nav class="col gap-1 dda-sidebar-nav">
-      ${NAV_GROUPS.map((g) => html`
-        ${g.label && html`<div class="dda-sidebar-sep">${g.label}</div>`}
-        ${g.items.map((id) => html`
-          <a href=${"#" + id} class=${"dda-sidebar-item row" + (active === id ? " active" : "")} onClick=${(e) => { e.preventDefault(); onSelect(id); }}>
-            <${Icon} name=${PAGES[id].icon} size=${16} />
-            <span>${PAGES[id].label}</span>
-          </a>`)}
-      `)}
-    </nav>
-    <div class="dda-sidebar-foot">
-      <div class="dda-sidebar-status card card-pad">
-        <div class="row gap-2" style=${{alignItems: "center"}}><${Dot} tone="ok" /><span style=${{fontWeight: 600, fontSize: 12.5}}>All systems ok</span></div>
-        <div class="faint" style=${{fontSize: 11, marginTop: 4}}>Last check 2m ago</div>
+      ${area === "project" ? html`
+        <div style=${{padding: "0 12px 8px"}}>
+          <${ProjectSwitcher} activeSlug=${activeProject} onSwitch=${onSwitchProject} />
+        </div>` : html`
+        <div style=${{padding: "0 12px 8px"}}>
+          <div style=${{padding: "10px 12px", background: "var(--accent-soft)", borderRadius: 10, display: "flex", gap: 10, alignItems: "center"}}>
+            <${Icon} name="user" size=${18} />
+            <div class="col" style=${{gap: 1}}>
+              <b style=${{fontSize: 12.5}}>My Account</b>
+              <span class="faint" style=${{fontSize: 11}}>User-level settings</span>
+            </div>
+          </div>
+        </div>`}
+      <nav class="col gap-1 dda-sidebar-nav">
+        ${groups.map((g) => html`
+          ${g.label && html`<div class="dda-sidebar-sep">${g.label}</div>`}
+          ${g.items.map((id) => html`
+            <a href=${"#" + id} class=${"dda-sidebar-item row" + (active === id ? " active" : "")} onClick=${(e) => { e.preventDefault(); onSelect(id); }}>
+              <${Icon} name=${PAGES[id].icon} size=${16} />
+              <span>${PAGES[id].label}</span>
+            </a>`)}
+        `)}
+      </nav>
+      <div class="dda-sidebar-foot">
+        <div class="dda-sidebar-status card card-pad">
+          <div class="row gap-2" style=${{alignItems: "center"}}><${Dot} tone="ok" /><span style=${{fontWeight: 600, fontSize: 12.5}}>All systems ok</span></div>
+          <div class="faint" style=${{fontSize: 11, marginTop: 4}}>Last check 2m ago</div>
+        </div>
       </div>
-    </div>
-  </aside>`;
+    </aside>`;
+};
 
-const UserMenu = ({ session, onLogout }) => {
+const UserMenu = ({ session, onLogout, onNav }) => {
   const [open, setOpen] = useState(false);
   const initials = (session.name || session.email || "?").split(/\s+|@/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const items = [
+    { icon: "user", label: "Profile", nav: "account-profile" },
+    { icon: "edit", label: "Edit profile", nav: "account-edit-profile" },
+    { icon: "lock", label: "Change password", nav: "account-change-password" },
+    { icon: "shield", label: "Two-factor auth", nav: "account-2fa-manage" },
+    { icon: "card", label: "Subscription", nav: "u-subscription" },
+    { icon: "gauge", label: "Usage", nav: "u-usage" },
+  ];
   return html`
     <div style=${{position: "relative"}}>
       <button class="btn ghost icon sm" style=${{fontSize: 11, fontWeight: 700}} onClick=${() => setOpen(!open)}>${initials}</button>
       ${open && html`
-        <div style=${{position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 240, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "var(--shadow-lg)", zIndex: 150, overflow: "hidden"}}>
+        <div style=${{position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 260, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "var(--shadow-lg)", zIndex: 150, overflow: "hidden"}}>
           <div style=${{padding: "12px 14px", borderBottom: "1px solid var(--border-soft)"}}>
             <div style=${{fontWeight: 700, fontSize: 13.5}}>${session.name || session.email}</div>
             <div class="faint" style=${{fontSize: 12}}>${session.email}${session.via ? " · via " + session.via : ""}</div>
           </div>
           <div style=${{padding: 6}}>
-            ${[
-              { icon: "user", label: "Account settings" },
-              { icon: "settings", label: "Preferences" },
-              { icon: "key", label: "API keys" },
-            ].map((i) => html`
-              <button style=${{display: "flex", width: "100%", padding: "8px 10px", background: "transparent", border: "none", textAlign: "left", cursor: "pointer", color: "var(--text)", fontFamily: "inherit", fontSize: 13, alignItems: "center", gap: 10, borderRadius: 6}} onMouseOver=${(e) => e.currentTarget.style.background = "var(--surface-3)"} onMouseOut=${(e) => e.currentTarget.style.background = "transparent"}>
+            ${items.map((i) => html`
+              <button style=${{display: "flex", width: "100%", padding: "8px 10px", background: "transparent", border: "none", textAlign: "left", cursor: "pointer", color: "var(--text)", fontFamily: "inherit", fontSize: 13, alignItems: "center", gap: 10, borderRadius: 6}} onClick=${() => { setOpen(false); onNav(i.nav); }} onMouseOver=${(e) => e.currentTarget.style.background = "var(--surface-3)"} onMouseOut=${(e) => e.currentTarget.style.background = "transparent"}>
                 <${Icon} name=${i.icon} size=${15} />
                 <span>${i.label}</span>
               </button>`)}
@@ -1435,13 +1876,44 @@ const UserMenu = ({ session, onLogout }) => {
     </div>`;
 };
 
-const Topbar = ({ theme, onToggleTheme, project, session, onLogout }) => html`
+const AreaSwitcher = ({ area, onSwitch }) => {
+  const [open, setOpen] = useState(false);
+  const areas = [
+    { key: "project", label: "Project workspace", icon: "box", sub: "Deploy + infra + agents" },
+    { key: "user", label: "My Account", icon: "user", sub: "Profile · subscription · usage" },
+  ];
+  const active = areas.find((a) => a.key === area);
+  return html`
+    <div style=${{position: "relative"}}>
+      <button class="btn sm" onClick=${() => setOpen(!open)}>
+        <${Icon} name=${active.icon} size=${14} />
+        <span>${active.label}</span>
+        <${Icon} name="chevD" size=${12} />
+      </button>
+      ${open && html`
+        <div style=${{position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 260, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "var(--shadow-lg)", zIndex: 150, overflow: "hidden"}}>
+          <div style=${{fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-faint)", padding: "10px 14px 6px", fontWeight: 700}}>Switch workspace</div>
+          ${areas.map((a) => html`
+            <button style=${{display: "flex", width: "100%", padding: "10px 14px", background: a.key === area ? "var(--surface-3)" : "transparent", border: "none", textAlign: "left", cursor: "pointer", color: "var(--text)", fontFamily: "inherit", fontSize: 13, alignItems: "center", gap: 12}} onClick=${() => { setOpen(false); onSwitch(a.key); }}>
+              <span style=${{width: 32, height: 32, borderRadius: 8, background: "var(--accent-soft)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flex: "none"}}><${Icon} name=${a.icon} size=${16} /></span>
+              <div class="col" style=${{gap: 2}}><b style=${{fontSize: 13}}>${a.label}</b><span class="faint" style=${{fontSize: 11.5}}>${a.sub}</span></div>
+              ${a.key === area && html`<span class="faint" style=${{marginLeft: "auto"}}>✓</span>`}
+            </button>`)}
+        </div>`}
+    </div>`;
+};
+
+const Topbar = ({ theme, onToggleTheme, project, session, onLogout, area, onSwitchArea, onNav }) => html`
   <header class="dda-topbar row between" style=${{display: "flex", alignItems: "center"}}>
     <div class="row gap-3" style=${{alignItems: "center"}}>
       <${Btn} variant="ghost" size="icon"><${Icon} name="menu" size=${18} /><//>
       <div class="row gap-2" style=${{fontSize: 13, color: "var(--text-muted)", alignItems: "center"}}>
-        <span>Projects</span><span class="faint">/</span><span style=${{color: "var(--text)", fontWeight: 600}}>${project.name}</span>
-        <${Badge} tone="info">${project.cloudLabel}<//>
+        ${area === "user" ? html`
+          <span>My Account</span>
+        ` : html`
+          <span>Projects</span><span class="faint">/</span><span style=${{color: "var(--text)", fontWeight: 600}}>${project.name}</span>
+          <${Badge} tone="info">${project.cloudLabel}<//>
+        `}
       </div>
     </div>
     <div style=${{flex: 1, maxWidth: 520, margin: "0 24px"}}>
@@ -1450,10 +1922,10 @@ const Topbar = ({ theme, onToggleTheme, project, session, onLogout }) => html`
       </div>
     </div>
     <div class="row gap-2">
-      <${Btn} size="sm"><${Icon} name="box" size=${14} /> Project workspace <${Icon} name="chevD" size=${12} /><//>
+      <${AreaSwitcher} area=${area} onSwitch=${onSwitchArea} />
       <${Btn} variant="ghost" size="icon" onClick=${onToggleTheme}><${Icon} name=${theme === "dark" ? "sun" : "moon"} size=${16} /><//>
       <${Btn} variant="ghost" size="icon"><${Icon} name="bell" size=${16} /><//>
-      <${UserMenu} session=${session} onLogout=${onLogout} />
+      <${UserMenu} session=${session} onLogout=${onLogout} onNav=${onNav} />
     </div>
   </header>`;
 
@@ -1693,19 +2165,30 @@ const App = () => {
       : html`<${SignupPage} onLogin=${login} onGoLogin=${() => setAuthScreen("login")} />`;
   }
 
-  const select = (id) => { setActive(id); location.hash = id; };
+  const select = (id) => {
+    // If the target page belongs to a different area, entering it switches
+    // the sidebar to that area automatically (matches real app URL routing).
+    if (!(id in PAGES)) return;
+    setActive(id);
+    location.hash = id;
+  };
+  const switchArea = (nextArea) => {
+    // Land on the first page in the new area's nav.
+    select(nextArea === "user" ? "u-dashboard" : "dashboard");
+  };
   const Page = PAGES[active].component;
   const isChat = active === "chat";
   const project = PROJECTS[projectSlug];
+  const area = areaOfPage(active);
   return html`
     <${ProjectContext.Provider} value=${project}>
       <div class="dda-shell" style=${{display: "flex", height: "100vh", overflow: "hidden"}}>
-        <${Sidebar} active=${active} onSelect=${select} activeProject=${projectSlug} onSwitchProject=${setProjectSlug} />
+        <${Sidebar} active=${active} onSelect=${select} activeProject=${projectSlug} onSwitchProject=${setProjectSlug} area=${area} />
         <div class="col grow" style=${{minWidth: 0, minHeight: 0}}>
-          <${Topbar} theme=${theme} onToggleTheme=${() => setTheme(theme === "dark" ? "light" : "dark")} project=${project} session=${session} onLogout=${logout} />
+          <${Topbar} theme=${theme} onToggleTheme=${() => setTheme(theme === "dark" ? "light" : "dark")} project=${project} session=${session} onLogout=${logout} area=${area} onSwitchArea=${switchArea} onNav=${select} />
           <main class="dda-main grow">
             <div class="dda-page-wrap col gap-5" style=${isChat ? {maxWidth: "none", padding: 0, height: "100%"} : null}>
-              <${Page} />
+              <${Page} onNav=${select} />
             </div>
           </main>
         </div>
