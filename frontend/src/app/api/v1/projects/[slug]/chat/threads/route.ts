@@ -41,5 +41,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
   });
-  return NextResponse.json({ ok: true, threadId: res.threadId, firstMessageId: res.firstMessageId });
+  return NextResponse.json({
+    ok: true,
+    threadId: res.threadId,
+    firstMessageId: res.firstMessageId,
+  });
 }

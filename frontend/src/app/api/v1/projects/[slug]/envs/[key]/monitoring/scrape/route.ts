@@ -31,17 +31,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.errors[0]?.message }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.errors[0]?.message },
+      { status: 400 },
+    );
   }
   const d = parsed.data;
 
-  const matchLabels = d.matchLabels && Object.keys(d.matchLabels).length
-    ? d.matchLabels
-    : d.selectorKey && d.selectorValue
-      ? { [d.selectorKey]: d.selectorValue }
-      : null;
+  const matchLabels =
+    d.matchLabels && Object.keys(d.matchLabels).length
+      ? d.matchLabels
+      : d.selectorKey && d.selectorValue
+        ? { [d.selectorKey]: d.selectorValue }
+        : null;
   if (!matchLabels) {
-    return NextResponse.json({ ok: false, code: "no_selector", message: "Provide a label selector (e.g. app=vote)." }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "no_selector", message: "Provide a label selector (e.g. app=vote)." },
+      { status: 400 },
+    );
   }
 
   const env = await envBySlugAndKey(gate.access.project.id, key);

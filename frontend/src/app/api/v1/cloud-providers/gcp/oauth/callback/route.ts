@@ -60,7 +60,11 @@ export async function GET(req: Request) {
   const ex = await exchangeGcpCode(code, verifier);
   if (!ex.ok) return done(popup, false, ex.error);
   if (!ex.tokens.refreshToken) {
-    return done(popup, false, "Google returned no refresh token — revoke prior access at myaccount.google.com/permissions and retry.");
+    return done(
+      popup,
+      false,
+      "Google returned no refresh token — revoke prior access at myaccount.google.com/permissions and retry.",
+    );
   }
 
   // 2 — validate + resolve the GCP project.
@@ -77,20 +81,35 @@ export async function GET(req: Request) {
     const encRefresh = encryptSecret(ex.tokens.refreshToken);
     let projectId: string | undefined;
     if (projSlug) {
-      const p = await prisma.project.findFirst({ where: { slug: projSlug }, select: { id: true, ownerId: true } });
-      const allowed = p && (p.ownerId === sess.userId || (await prisma.membership.count({ where: { projectId: p.id, userId: sess.userId } })) > 0);
+      const p = await prisma.project.findFirst({
+        where: { slug: projSlug },
+        select: { id: true, ownerId: true },
+      });
+      const allowed =
+        p &&
+        (p.ownerId === sess.userId ||
+          (await prisma.membership.count({ where: { projectId: p.id, userId: sess.userId } })) > 0);
       if (p && allowed) projectId = p.id;
     }
 
     const existing = await prisma.cloudProvider.findFirst({
-      where: { userId: sess.userId, kind: "gcp", accountRef: proj.projectId, projectId: projectId ?? null },
+      where: {
+        userId: sess.userId,
+        kind: "gcp",
+        accountRef: proj.projectId,
+        projectId: projectId ?? null,
+      },
       select: { id: true },
     });
     let providerId: string;
     if (existing) {
       await prisma.cloudProvider.update({
         where: { id: existing.id },
-        data: { externalId: encRefresh, status: "ok", name: `GCP · ${proj.name || proj.projectId}`.slice(0, 80) },
+        data: {
+          externalId: encRefresh,
+          status: "ok",
+          name: `GCP · ${proj.name || proj.projectId}`.slice(0, 80),
+        },
       });
       providerId = existing.id;
     } else {
@@ -107,7 +126,10 @@ export async function GET(req: Request) {
       providerId = created.id;
     }
     if (projectId) {
-      await prisma.env.updateMany({ where: { projectId, cloudProviderId: null }, data: { cloudProviderId: providerId } });
+      await prisma.env.updateMany({
+        where: { projectId, cloudProviderId: null },
+        data: { cloudProviderId: providerId },
+      });
     }
     await audit({
       userId: sess.userId,

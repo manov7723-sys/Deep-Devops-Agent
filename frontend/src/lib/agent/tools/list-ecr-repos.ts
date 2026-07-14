@@ -44,7 +44,10 @@ export const listEcrReposTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      region: { type: "string", description: "AWS region (e.g. us-east-1). Defaults to the connected account's region." },
+      region: {
+        type: "string",
+        description: "AWS region (e.g. us-east-1). Defaults to the connected account's region.",
+      },
     },
     required: [],
     additionalProperties: false,
@@ -52,7 +55,11 @@ export const listEcrReposTool: Tool<Input, Output> = {
   async execute(input, ctx) {
     const providerId = await resolveAwsProviderId(ctx.projectId);
     if (!providerId) {
-      return { ok: false, error: "No AWS account is connected to this project. Connect one on the Cloud providers tab first." };
+      return {
+        ok: false,
+        error:
+          "No AWS account is connected to this project. Connect one on the Cloud providers tab first.",
+      };
     }
     const resolved = await resolveAwsExecEnv(providerId);
     if (!resolved.ok) return { ok: false, error: resolved.message };

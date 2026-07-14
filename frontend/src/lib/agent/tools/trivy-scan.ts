@@ -6,7 +6,15 @@ type Output = {
   artifact: string;
   total: number;
   counts: Record<string, number>;
-  findings: Array<{ class: string; target: string; pkgName: string; vulnerabilityId: string; severity: string; fixedVersion: string; title: string }>;
+  findings: Array<{
+    class: string;
+    target: string;
+    pkgName: string;
+    vulnerabilityId: string;
+    severity: string;
+    fixedVersion: string;
+    title: string;
+  }>;
 };
 
 /**
@@ -22,7 +30,12 @@ export const trivyScanTool: Tool<Input, Output> = {
     "Use when the user asks to scan, audit security, or check a repo. Summarise the top findings and offer to fix them.",
   inputSchema: {
     type: "object",
-    properties: { repoFullName: { type: "string", description: 'The repo as "owner/name", attached to this project.' } },
+    properties: {
+      repoFullName: {
+        type: "string",
+        description: 'The repo as "owner/name", attached to this project.',
+      },
+    },
     required: ["repoFullName"],
     additionalProperties: false,
   },

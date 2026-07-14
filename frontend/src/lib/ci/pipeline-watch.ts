@@ -23,8 +23,14 @@ export async function runPipelineWatchdog(): Promise<number> {
   const pipelines = await prisma.ciPipeline.findMany({
     where: { status: { in: ["running", "committing"] } },
     select: {
-      id: true, repoId: true, runId: true, commitSha: true, branch: true,
-      workflowPath: true, agentReview: true, healAttempts: true,
+      id: true,
+      repoId: true,
+      runId: true,
+      commitSha: true,
+      branch: true,
+      workflowPath: true,
+      agentReview: true,
+      healAttempts: true,
     },
     take: 50,
   });
@@ -33,7 +39,10 @@ export async function runPipelineWatchdog(): Promise<number> {
   for (const p of pipelines) {
     try {
       if (!p.runId && !p.commitSha) continue;
-      const repo = await prisma.repo.findUnique({ where: { id: p.repoId }, select: { fullName: true } });
+      const repo = await prisma.repo.findUnique({
+        where: { id: p.repoId },
+        select: { fullName: true },
+      });
       if (!repo) continue;
       const tok = await resolveTokenForRepo(p.repoId);
       if (!tok.ok) continue;
@@ -56,7 +65,8 @@ export async function runPipelineWatchdog(): Promise<number> {
       const done = live.status === "completed";
       const failed = done && live.conclusion !== "success";
       const failedStep = failed
-        ? live.stages.flatMap((s) => s.steps).find((s) => s.conclusion === "failure")?.name ?? null
+        ? (live.stages.flatMap((s) => s.steps).find((s) => s.conclusion === "failure")?.name ??
+          null)
         : null;
 
       await prisma.ciPipeline.update({

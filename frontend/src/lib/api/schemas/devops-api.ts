@@ -34,7 +34,10 @@ export const CreateEnvRequest = z.object({
   url: z.string().url().optional(),
   promotionRank: z.number().int().min(0).max(99).default(0),
   /** Optional raw kubeconfig YAML. Encrypted at rest. */
-  kubeconfig: z.string().max(64 * 1024).optional(),
+  kubeconfig: z
+    .string()
+    .max(64 * 1024)
+    .optional(),
   /** Defaults to "default" if omitted. */
   namespace: z.string().trim().min(1).max(120).optional(),
 });
@@ -52,7 +55,10 @@ export const UpdateEnvRequest = z
     promotionRank: z.number().int().min(0).max(99).optional(),
     /** Pass the raw kubeconfig YAML — the server encrypts before storing.
      *  Pass `""` to clear an existing kubeconfig. */
-    kubeconfig: z.string().max(64 * 1024).optional(),
+    kubeconfig: z
+      .string()
+      .max(64 * 1024)
+      .optional(),
     namespace: z.string().trim().min(1).max(120).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: "At least one field is required" });
@@ -107,10 +113,7 @@ export const TriggerDeploymentRequest = z.object({
     .min(1, "At least one repo SHA is required"),
   note: z.string().trim().max(280).optional(),
   // The default pipeline stages — runners override via PATCH later.
-  stages: z
-    .array(z.string().trim().min(1).max(40))
-    .optional()
-    .default(["build", "test", "deploy"]),
+  stages: z.array(z.string().trim().min(1).max(40)).optional().default(["build", "test", "deploy"]),
 });
 export type TriggerDeploymentRequest = z.infer<typeof TriggerDeploymentRequest>;
 

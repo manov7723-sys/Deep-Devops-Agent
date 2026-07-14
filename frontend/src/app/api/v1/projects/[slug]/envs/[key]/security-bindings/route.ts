@@ -6,10 +6,7 @@ import { bindScopeToEnv } from "@/lib/insights/security-scopes";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
-export async function POST(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; key: string }> },
-) {
+export async function POST(req: Request, ctx: { params: Promise<{ slug: string; key: string }> }) {
   const { slug, key } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });

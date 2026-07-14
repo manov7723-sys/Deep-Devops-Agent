@@ -49,11 +49,20 @@ export function ProjectStatsClient({ slug }: { slug: string }) {
 
   // Pull live compute inventory from the connected cloud into the dashboard.
   const sync = useMutation({
-    mutationFn: () => api.post<{ ok: boolean; count: number; byEnv: Record<string, number>; errors: string[] }>(`/projects/${slug}/cloud/sync`, {}),
-    onMutate: () => { setSyncMsg(null); setSyncErr(null); },
+    mutationFn: () =>
+      api.post<{ ok: boolean; count: number; byEnv: Record<string, number>; errors: string[] }>(
+        `/projects/${slug}/cloud/sync`,
+        {},
+      ),
+    onMutate: () => {
+      setSyncMsg(null);
+      setSyncErr(null);
+    },
     onSuccess: (r) => {
       const parts = Object.entries(r.byEnv).map(([k, v]) => `${v} in ${k}`);
-      setSyncMsg(`Synced ${r.count} cluster node${r.count === 1 ? "" : "s"}${parts.length ? ` (${parts.join(", ")})` : ""}.${r.errors.length ? ` Issues: ${r.errors.join("; ")}` : ""}`);
+      setSyncMsg(
+        `Synced ${r.count} cluster node${r.count === 1 ? "" : "s"}${parts.length ? ` (${parts.join(", ")})` : ""}.${r.errors.length ? ` Issues: ${r.errors.join("; ")}` : ""}`,
+      );
       qc.invalidateQueries({ queryKey: ["p", slug, "cloud"] });
     },
     onError: (e) => setSyncErr(apiErrorMessage(e)),
@@ -65,7 +74,12 @@ export function ProjectStatsClient({ slug }: { slug: string }) {
         title="Cloud stats"
         sub="Live nodes from your connected clusters — click “Refresh from cloud” to pull them. Open a node for metrics, pods, cordon/drain."
         actions={
-          <Btn variant="outline" icon="refresh" loading={sync.isPending} onClick={() => sync.mutate()}>
+          <Btn
+            variant="outline"
+            icon="refresh"
+            loading={sync.isPending}
+            onClick={() => sync.mutate()}
+          >
             {sync.isPending ? "Syncing…" : "Refresh from cloud"}
           </Btn>
         }
@@ -73,8 +87,16 @@ export function ProjectStatsClient({ slug }: { slug: string }) {
         tabValue={tab}
         onTabChange={(v) => setTab(v as Tab)}
       />
-      {syncMsg && <Badge tone="ok" icon="check">{syncMsg}</Badge>}
-      {syncErr && <Badge tone="danger" icon="alert">{syncErr}</Badge>}
+      {syncMsg && (
+        <Badge tone="ok" icon="check">
+          {syncMsg}
+        </Badge>
+      )}
+      {syncErr && (
+        <Badge tone="danger" icon="alert">
+          {syncErr}
+        </Badge>
+      )}
       <EnvFilter />
 
       {tab === "observability" ? (
@@ -128,7 +150,13 @@ function ObservabilityPanel({ slug, env }: { slug: string; env: EnvFilterValue }
   }
   return (
     <div className="col gap-4">
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
         {data.kpis.map((k) => (
           <ObservabilityKpi key={k.id} kpi={k} />
         ))}
@@ -137,129 +165,130 @@ function ObservabilityPanel({ slug, env }: { slug: string; env: EnvFilterValue }
       <CloudWatchAlarmsPanel slug={slug} env={env} />
       <AzureMonitorAlarmsPanel slug={slug} env={env} />
       <GcpMonitorAlarmsPanel slug={slug} env={env} />
-      {data.integrations?.prometheus?.connected && (
-        <PrometheusMetricsPanel slug={slug} connected />
-      )}
+      {data.integrations?.prometheus?.connected && <PrometheusMetricsPanel slug={slug} connected />}
       {/* Model A: external Prometheus/Grafana integration cards. Hidden unless one
           is actually connected — otherwise they read as a broken connection even
           though the in-cluster stack above is what's really in use. */}
       {(data.integrations?.prometheus?.connected || data.integrations?.grafana?.connected) && (
-      <div className="dda-proj-dash-grid">
-        <Block>
-          <Block.Header>
-            <Block.Title>
-              Prometheus —{" "}
-              {data.integrations?.prometheus?.connected
-                ? data.integrations.prometheus.reachable
-                  ? "scraping"
-                  : "unreachable"
-                : "not connected"}
-            </Block.Title>
-            <Block.Actions>
-              <StatusDot
-                tone={
-                  data.integrations?.prometheus?.connected
-                    ? data.integrations.prometheus.reachable
-                      ? "ok"
-                      : "warn"
-                    : "danger"
-                }
-                label={
-                  data.integrations?.prometheus?.connected
-                    ? data.integrations.prometheus.reachable
-                      ? "live"
-                      : data.integrations.prometheus.error ?? "unreachable"
-                    : "not connected"
-                }
-              />
-            </Block.Actions>
-          </Block.Header>
-          <Block.Body>
-            {!data.integrations?.prometheus?.connected ? (
-              <ConnectIntegrationCta slug={slug} provider="Prometheus" />
-            ) : data.prometheus.length === 0 ? (
-              <span className="muted" style={{ fontSize: 13 }}>
-                No scrape targets recorded yet. They'll appear here once Prometheus reports them.
-              </span>
-            ) : (
-              <div className="col gap-3">
-                {(data.prometheus as Array<{ name: string; series?: number }>).map((t) => (
-                  <div key={t.name} className="row between">
-                    <span className="row gap-2">
-                      <span className="dot ok" />
-                      {t.name}
-                    </span>
-                    <span className="mono faint" style={{ fontSize: 12 }}>{t.series ?? 0} series</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Block.Body>
-        </Block>
-        <Block>
-          <Block.Header>
-            <Block.Title>Grafana dashboards</Block.Title>
-            <Block.Actions>
-              {data.integrations?.grafana?.baseUrl ? (
-                <a
-                  className="btn ghost sm"
-                  style={{ textDecoration: "none" }}
-                  href={data.integrations.grafana.baseUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Icon name="ext" size={14} /> Open Grafana
-                </a>
+        <div className="dda-proj-dash-grid">
+          <Block>
+            <Block.Header>
+              <Block.Title>
+                Prometheus —{" "}
+                {data.integrations?.prometheus?.connected
+                  ? data.integrations.prometheus.reachable
+                    ? "scraping"
+                    : "unreachable"
+                  : "not connected"}
+              </Block.Title>
+              <Block.Actions>
+                <StatusDot
+                  tone={
+                    data.integrations?.prometheus?.connected
+                      ? data.integrations.prometheus.reachable
+                        ? "ok"
+                        : "warn"
+                      : "danger"
+                  }
+                  label={
+                    data.integrations?.prometheus?.connected
+                      ? data.integrations.prometheus.reachable
+                        ? "live"
+                        : (data.integrations.prometheus.error ?? "unreachable")
+                      : "not connected"
+                  }
+                />
+              </Block.Actions>
+            </Block.Header>
+            <Block.Body>
+              {!data.integrations?.prometheus?.connected ? (
+                <ConnectIntegrationCta slug={slug} provider="Prometheus" />
+              ) : data.prometheus.length === 0 ? (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  No scrape targets recorded yet. They'll appear here once Prometheus reports them.
+                </span>
               ) : (
-                <StatusDot tone="danger" label="not connected" />
-              )}
-            </Block.Actions>
-          </Block.Header>
-          <Block.Body>
-            {!data.integrations?.grafana?.connected ? (
-              <ConnectIntegrationCta slug={slug} provider="Grafana" />
-            ) : data.grafana.length === 0 ? (
-              <span className="muted" style={{ fontSize: 13 }}>
-                No dashboards saved yet. Add via the Grafana API — they'll appear here.
-              </span>
-            ) : (
-              <div className="col gap-2">
-                {(data.grafana as Array<unknown>).map((g: unknown, i: number) => {
-                  const dashUrl =
-                    (g as { url?: string }).url ?? data.integrations?.grafana?.baseUrl;
-                  const title = typeof g === "string" ? g : (g as { title?: string }).title ?? "Dashboard";
-                  return (
-                    <a
-                      key={i}
-                      href={dashUrl ?? "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="row between dda-grafana-row"
-                      style={{
-                        padding: "10px 12px",
-                        background: "var(--surface-2)",
-                        borderRadius: 9,
-                        cursor: "pointer",
-                        border: "none",
-                        color: "inherit",
-                        fontFamily: "inherit",
-                        width: "100%",
-                        textDecoration: "none",
-                      }}
-                    >
-                      <span className="row gap-2" style={{ fontSize: 13, fontWeight: 600 }}>
-                        <Icon name="grafana" size={15} style={{ color: "var(--warn)" }} />
-                        {title}
+                <div className="col gap-3">
+                  {(data.prometheus as Array<{ name: string; series?: number }>).map((t) => (
+                    <div key={t.name} className="row between">
+                      <span className="row gap-2">
+                        <span className="dot ok" />
+                        {t.name}
                       </span>
-                      <Icon name="chevR" size={15} style={{ color: "var(--text-faint)" }} />
-                    </a>
-                  );
-                })}
-              </div>
-            )}
-          </Block.Body>
-        </Block>
-      </div>
+                      <span className="mono faint" style={{ fontSize: 12 }}>
+                        {t.series ?? 0} series
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Block.Body>
+          </Block>
+          <Block>
+            <Block.Header>
+              <Block.Title>Grafana dashboards</Block.Title>
+              <Block.Actions>
+                {data.integrations?.grafana?.baseUrl ? (
+                  <a
+                    className="btn ghost sm"
+                    style={{ textDecoration: "none" }}
+                    href={data.integrations.grafana.baseUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Icon name="ext" size={14} /> Open Grafana
+                  </a>
+                ) : (
+                  <StatusDot tone="danger" label="not connected" />
+                )}
+              </Block.Actions>
+            </Block.Header>
+            <Block.Body>
+              {!data.integrations?.grafana?.connected ? (
+                <ConnectIntegrationCta slug={slug} provider="Grafana" />
+              ) : data.grafana.length === 0 ? (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  No dashboards saved yet. Add via the Grafana API — they'll appear here.
+                </span>
+              ) : (
+                <div className="col gap-2">
+                  {(data.grafana as Array<unknown>).map((g: unknown, i: number) => {
+                    const dashUrl =
+                      (g as { url?: string }).url ?? data.integrations?.grafana?.baseUrl;
+                    const title =
+                      typeof g === "string" ? g : ((g as { title?: string }).title ?? "Dashboard");
+                    return (
+                      <a
+                        key={i}
+                        href={dashUrl ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="row between dda-grafana-row"
+                        style={{
+                          padding: "10px 12px",
+                          background: "var(--surface-2)",
+                          borderRadius: 9,
+                          cursor: "pointer",
+                          border: "none",
+                          color: "inherit",
+                          fontFamily: "inherit",
+                          width: "100%",
+                          textDecoration: "none",
+                        }}
+                      >
+                        <span className="row gap-2" style={{ fontSize: 13, fontWeight: 600 }}>
+                          <Icon name="grafana" size={15} style={{ color: "var(--warn)" }} />
+                          {title}
+                        </span>
+                        <Icon name="chevR" size={15} style={{ color: "var(--text-faint)" }} />
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+            </Block.Body>
+          </Block>
+        </div>
       )}
     </div>
   );

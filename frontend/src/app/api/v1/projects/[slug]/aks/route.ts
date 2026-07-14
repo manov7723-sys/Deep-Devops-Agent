@@ -44,7 +44,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   const a = parsed.data;
   if (a.maxNodes < a.minNodes || a.desiredNodes < a.minNodes || a.desiredNodes > a.maxNodes) {
     return NextResponse.json(
-      { ok: false, code: "invalid_request", message: "Node counts must satisfy min ≤ desired ≤ max." },
+      {
+        ok: false,
+        code: "invalid_request",
+        message: "Node counts must satisfy min ≤ desired ≤ max.",
+      },
       { status: 400 },
     );
   }
@@ -113,7 +117,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     targetId: `${slug}/${a.name}`,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
-    metadata: { resourceGroup: a.resourceGroup, location: a.location, version: a.kubernetesVersion, vmSize: a.vmSize },
+    metadata: {
+      resourceGroup: a.resourceGroup,
+      location: a.location,
+      version: a.kubernetesVersion,
+      vmSize: a.vmSize,
+    },
   });
 
   return NextResponse.json({

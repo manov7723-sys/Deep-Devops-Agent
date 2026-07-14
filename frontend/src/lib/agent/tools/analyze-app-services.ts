@@ -36,7 +36,10 @@ export const analyzeAppServicesTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: "owner/repo, must be attached to the current project." },
+      repoFullName: {
+        type: "string",
+        description: "owner/repo, must be attached to the current project.",
+      },
     },
     required: ["repoFullName"],
     additionalProperties: false,

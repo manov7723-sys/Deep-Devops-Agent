@@ -25,7 +25,10 @@ export function useSaveGcpContext(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (body: { gcpProjectId?: string; region?: string }) => {
-      const res = await api.patch<{ ok: boolean; code?: string }>(`/projects/${slug}/gcp/context`, body);
+      const res = await api.patch<{ ok: boolean; code?: string }>(
+        `/projects/${slug}/gcp/context`,
+        body,
+      );
       if (!res.ok) throw new Error(res.code ?? "Could not save GCP context.");
       return res;
     },

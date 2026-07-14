@@ -18,15 +18,38 @@ export type LiveDeployment = {
 
 type RawDeployment = {
   metadata?: { name?: string; namespace?: string };
-  spec?: { replicas?: number; template?: { spec?: { containers?: Array<{ image?: string; ports?: Array<{ containerPort?: number }>; env?: Array<{ name?: string; value?: unknown }> }> } } };
+  spec?: {
+    replicas?: number;
+    template?: {
+      spec?: {
+        containers?: Array<{
+          image?: string;
+          ports?: Array<{ containerPort?: number }>;
+          env?: Array<{ name?: string; value?: unknown }>;
+        }>;
+      };
+    };
+  };
   status?: { readyReplicas?: number };
 };
 
 // Cluster-managed namespaces we hide from the app-focused views.
 const SYSTEM_NS = new Set([
-  "kube-system", "kube-public", "kube-node-lease", "local-path-storage", "kubernetes-dashboard",
-  "gmp-system", "gke-managed-system", "gke-gmp-system", "gke-managed-cim", "calico-system", "calico-apiserver",
-  "tigera-operator", "amazon-cloudwatch", "aws-observability", "kube-flannel",
+  "kube-system",
+  "kube-public",
+  "kube-node-lease",
+  "local-path-storage",
+  "kubernetes-dashboard",
+  "gmp-system",
+  "gke-managed-system",
+  "gke-gmp-system",
+  "gke-managed-cim",
+  "calico-system",
+  "calico-apiserver",
+  "tigera-operator",
+  "amazon-cloudwatch",
+  "aws-observability",
+  "kube-flannel",
 ]);
 
 // Cluster infrastructure / managed add-ons that run as Deployments but are NOT
@@ -39,14 +62,29 @@ const SYSTEM_NS = new Set([
 // apps (e.g. dockersamples/*, your ECR app repos) never match, whether you
 // deployed them through DeepAgent or straight from the terminal with kubectl.
 const INFRA_NAMES = new Set([
-  "external-dns", "coredns", "kube-dns", "metrics-server", "cluster-autoscaler",
-  "aws-load-balancer-controller", "aws-node", "kube-proxy", "aws-node-termination-handler",
-  "ebs-csi-controller", "efs-csi-controller", "aws-for-fluent-bit", "cloudwatch-agent",
-  "karpenter", "cluster-proportional-autoscaler", "nvidia-device-plugin",
-  "konnectivity-agent", "secrets-store-csi-driver", "snapshot-controller",
+  "external-dns",
+  "coredns",
+  "kube-dns",
+  "metrics-server",
+  "cluster-autoscaler",
+  "aws-load-balancer-controller",
+  "aws-node",
+  "kube-proxy",
+  "aws-node-termination-handler",
+  "ebs-csi-controller",
+  "efs-csi-controller",
+  "aws-for-fluent-bit",
+  "cloudwatch-agent",
+  "karpenter",
+  "cluster-proportional-autoscaler",
+  "nvidia-device-plugin",
+  "konnectivity-agent",
+  "secrets-store-csi-driver",
+  "snapshot-controller",
 ]);
 
-const INFRA_IMAGE_RE = /(?:registry\.k8s\.io|k8s\.gcr\.io|gke\.gcr\.io|gcr\.io\/gke-release)\/|\.amazonaws\.com\/eks\//;
+const INFRA_IMAGE_RE =
+  /(?:registry\.k8s\.io|k8s\.gcr\.io|gke\.gcr\.io|gcr\.io\/gke-release)\/|\.amazonaws\.com\/eks\//;
 
 /** True for cluster add-ons / managed infra, so the promotion views show only real apps. */
 function isInfraWorkload(name: string, image: string): boolean {
@@ -64,9 +102,14 @@ export async function getLiveDeployments(
 ): Promise<{ ok: true; deployments: LiveDeployment[] } | { ok: false; error: string }> {
   const all = !namespace || namespace === "all";
   const wrapped = await withKubectl(projectId, envKey, async (run, defaultNs) => {
-    const args = all ? ["get", "deployments", "-A", "-o", "json"] : ["get", "deployments", "-n", (namespace || defaultNs).trim(), "-o", "json"];
+    const args = all
+      ? ["get", "deployments", "-A", "-o", "json"]
+      : ["get", "deployments", "-n", (namespace || defaultNs).trim(), "-o", "json"];
     const res = await run(args);
-    if (res.exitCode !== 0) throw new Error(res.stderr.slice(-400) || res.stdout.slice(-400) || "kubectl get deployments failed");
+    if (res.exitCode !== 0)
+      throw new Error(
+        res.stderr.slice(-400) || res.stdout.slice(-400) || "kubectl get deployments failed",
+      );
 
     const items: RawDeployment[] = (() => {
       try {
@@ -87,11 +130,19 @@ export async function getLiveDeployments(
           ready: d.status?.readyReplicas ?? 0,
           containerPort: c.ports?.[0]?.containerPort ?? 8080,
           env: Array.isArray(c.env)
-            ? c.env.filter((e) => typeof e.value === "string").map((e) => ({ key: e.name ?? "", value: String(e.value) }))
+            ? c.env
+                .filter((e) => typeof e.value === "string")
+                .map((e) => ({ key: e.name ?? "", value: String(e.value) }))
             : [],
         };
       })
-      .filter((d) => d.name && d.image && !isInfraWorkload(d.name, d.image) && (all ? !SYSTEM_NS.has(d.namespace) : true));
+      .filter(
+        (d) =>
+          d.name &&
+          d.image &&
+          !isInfraWorkload(d.name, d.image) &&
+          (all ? !SYSTEM_NS.has(d.namespace) : true),
+      );
   });
 
   if (!wrapped.ok) return wrapped;

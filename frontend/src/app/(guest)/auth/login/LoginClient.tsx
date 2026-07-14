@@ -29,7 +29,8 @@ function safeNext(raw: string | null): string {
  */
 const OAUTH_ERROR_COPY: Record<string, string> = {
   provider_error: "The provider rejected the sign-in. Please try again.",
-  provider_unavailable: "Social sign-in isn't configured. Ask an admin to set the OAuth client ID and secret.",
+  provider_unavailable:
+    "Social sign-in isn't configured. Ask an admin to set the OAuth client ID and secret.",
   missing_params: "Sign-in didn't complete — the callback was missing data.",
   missing_nonce: "Your sign-in session expired before we could complete it. Try again.",
   provider_mismatch: "The sign-in state didn't match the provider. Start over.",
@@ -53,7 +54,9 @@ const OAUTH_ERROR_COPY: Record<string, string> = {
 
 function describeOauthError(code: string | null | undefined): string | null {
   if (!code) return null;
-  return OAUTH_ERROR_COPY[code] ?? "Sign-in with that provider failed. Please try again or use email.";
+  return (
+    OAUTH_ERROR_COPY[code] ?? "Sign-in with that provider failed. Please try again or use email."
+  );
 }
 
 export function LoginClient() {
@@ -181,7 +184,11 @@ export function LoginClient() {
           name="password"
           validators={{
             onChange: ({ value }) =>
-              !value ? "Password is required" : value.length < 8 ? "At least 8 characters" : undefined,
+              !value
+                ? "Password is required"
+                : value.length < 8
+                  ? "At least 8 characters"
+                  : undefined,
           }}
         >
           {(field) => (

@@ -35,7 +35,10 @@ export function useSaveAzureContext(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (body: SaveAzureContext) => {
-      const res = await api.patch<{ ok: boolean; code?: string }>(`/projects/${slug}/azure/context`, body);
+      const res = await api.patch<{ ok: boolean; code?: string }>(
+        `/projects/${slug}/azure/context`,
+        body,
+      );
       if (!res.ok) throw new Error(res.code ?? "Could not save Azure context.");
       return res;
     },

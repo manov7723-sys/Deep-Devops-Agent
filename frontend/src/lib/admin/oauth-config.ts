@@ -96,14 +96,16 @@ export async function upsertOAuthConfig(args: UpsertOAuthConfigArgs): Promise<OA
       enabled,
     },
   });
-  return (await listOneRowAsRow(row)) ?? {
-    provider: row.provider,
-    clientId: row.clientId,
-    hasSecret: true,
-    secretMask: "",
-    enabled: row.enabled,
-    updatedAt: row.updatedAt.toISOString(),
-  };
+  return (
+    (await listOneRowAsRow(row)) ?? {
+      provider: row.provider,
+      clientId: row.clientId,
+      hasSecret: true,
+      secretMask: "",
+      enabled: row.enabled,
+      updatedAt: row.updatedAt.toISOString(),
+    }
+  );
 }
 
 export async function setOAuthEnabled(provider: OAuthProvider, enabled: boolean): Promise<void> {

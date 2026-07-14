@@ -29,11 +29,19 @@ const PRESETS: Record<Provider, { value: string; label: string; ctx?: number; no
   Groq: [
     { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (versatile)", ctx: 128_000 },
     { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B (instant)", ctx: 128_000 },
-    { value: "llama-3.2-90b-vision-preview", label: "Llama 3.2 90B Vision (preview)", ctx: 128_000 },
+    {
+      value: "llama-3.2-90b-vision-preview",
+      label: "Llama 3.2 90B Vision (preview)",
+      ctx: 128_000,
+    },
     { value: "mixtral-8x7b-32768", label: "Mixtral 8x7B (32k ctx)", ctx: 32_768 },
     { value: "gemma2-9b-it", label: "Gemma 2 9B (instruction tuned)", ctx: 8192 },
     { value: "qwen-2.5-32b", label: "Qwen 2.5 32B", ctx: 128_000 },
-    { value: "deepseek-r1-distill-llama-70b", label: "DeepSeek R1 distill 70B (reasoning)", ctx: 128_000 },
+    {
+      value: "deepseek-r1-distill-llama-70b",
+      label: "DeepSeek R1 distill 70B (reasoning)",
+      ctx: 128_000,
+    },
   ],
 };
 

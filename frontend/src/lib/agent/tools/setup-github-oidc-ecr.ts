@@ -48,11 +48,13 @@ async function resolveAwsProviderId(projectId: string): Promise<string | null> {
 /** "owner/My_Repo.api" -> "my-repo-api" — a valid ECR/lowercase image name. */
 function defaultEcrName(repoFullName: string): string {
   const short = repoFullName.split("/").pop() ?? repoFullName;
-  return short
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^[-.]+|[-.]+$/g, "")
-    .slice(0, 200) || "app";
+  return (
+    short
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "")
+      .slice(0, 200) || "app"
+  );
 }
 
 /**
@@ -76,7 +78,7 @@ export const setupGithubOidcEcrTool: Tool<Input, Output> = {
     properties: {
       repoFullName: {
         type: "string",
-        description: 'owner/repo, must be attached to the current project.',
+        description: "owner/repo, must be attached to the current project.",
       },
       ecrRepoName: {
         type: "string",
@@ -114,7 +116,8 @@ export const setupGithubOidcEcrTool: Tool<Input, Output> = {
     if (!providerId) {
       return {
         ok: false,
-        error: "No AWS account is connected to this project. Connect one on the Cloud providers tab first.",
+        error:
+          "No AWS account is connected to this project. Connect one on the Cloud providers tab first.",
       };
     }
 
@@ -124,7 +127,9 @@ export const setupGithubOidcEcrTool: Tool<Input, Output> = {
     }
 
     const region = (input.region ?? resolved.region).trim();
-    const ecrRepoName = (input.ecrRepoName?.trim() || defaultEcrName(input.repoFullName)).toLowerCase();
+    const ecrRepoName = (
+      input.ecrRepoName?.trim() || defaultEcrName(input.repoFullName)
+    ).toLowerCase();
     const roleName = input.roleName?.trim() || `gha-ecr-${ecrRepoName}`.slice(0, 64);
 
     const result = await setupGithubOidcEcr({

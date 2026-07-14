@@ -11,7 +11,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!sess) redirect("/auth/login");
   if (!sess.user.isSuperAdmin) notFound();
   return (
-    <AppShell area="admin" me={{ name: sess.user.name, email: sess.user.email, isSuperAdmin: true }}>
+    <AppShell
+      area="admin"
+      me={{ name: sess.user.name, email: sess.user.email, isSuperAdmin: true }}
+    >
       {children}
     </AppShell>
   );

@@ -44,13 +44,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   const a = parsed.data;
   if (a.maxNodes < a.minNodes || a.desiredNodes < a.minNodes || a.desiredNodes > a.maxNodes) {
     return NextResponse.json(
-      { ok: false, code: "invalid_request", message: "Node counts must satisfy min ≤ desired ≤ max." },
+      {
+        ok: false,
+        code: "invalid_request",
+        message: "Node counts must satisfy min ≤ desired ≤ max.",
+      },
       { status: 400 },
     );
   }
   if (a.createNetwork === false && !a.existingNetwork?.trim()) {
     return NextResponse.json(
-      { ok: false, code: "invalid_request", message: "Provide an existing network name when not creating a new VPC." },
+      {
+        ok: false,
+        code: "invalid_request",
+        message: "Provide an existing network name when not creating a new VPC.",
+      },
       { status: 400 },
     );
   }
@@ -100,7 +108,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   // env already has. Matches the EKS S3-backend flow.
   if (a.envKey && a.stateBucket?.trim()) {
     spec.stateBucket = a.stateBucket.trim();
-    await setEnvGcsBackend(gate.access.project.id, a.envKey, { bucket: spec.stateBucket }).catch(() => {});
+    await setEnvGcsBackend(gate.access.project.id, a.envKey, { bucket: spec.stateBucket }).catch(
+      () => {},
+    );
   } else if (a.envKey) {
     const env = await envBySlugAndKey(gate.access.project.id, a.envKey);
     if (env?.tfBackendGcsBucket) {
@@ -119,7 +129,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     targetId: `${slug}/${a.name}`,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
-    metadata: { project: a.project, location: a.location, version: a.kubernetesVersion, machineType: a.machineType },
+    metadata: {
+      project: a.project,
+      location: a.location,
+      version: a.kubernetesVersion,
+      machineType: a.machineType,
+    },
   });
 
   return NextResponse.json({

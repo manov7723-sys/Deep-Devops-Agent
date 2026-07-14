@@ -42,12 +42,7 @@ export type RepoTokenResolution =
     }
   | {
       ok: false;
-      code:
-        | "repo_not_found"
-        | "no_account"
-        | "no_token"
-        | "decrypt_failed"
-        | "reconnect";
+      code: "repo_not_found" | "no_account" | "no_token" | "decrypt_failed" | "reconnect";
       message: string;
     };
 
@@ -136,8 +131,16 @@ const tokenSelect = { select: tokenSelectFields } as const;
 async function materialize(
   row: Pick<
     OAuthAccount,
-    | "id" | "userId" | "login" | "providerAccountId" | "provider" | "scope"
-    | "accessTokenRef" | "refreshTokenRef" | "tokenExpiresAt" | "providerBaseUrl"
+    | "id"
+    | "userId"
+    | "login"
+    | "providerAccountId"
+    | "provider"
+    | "scope"
+    | "accessTokenRef"
+    | "refreshTokenRef"
+    | "tokenExpiresAt"
+    | "providerBaseUrl"
   >,
   fromFallback: boolean,
 ): Promise<RepoTokenResolution> {

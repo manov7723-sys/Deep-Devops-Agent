@@ -97,7 +97,12 @@ export type AwsCredEnv = {
 
 export type AssumeRoleCredsResult =
   | { ok: true; env: AwsCredEnv; assumedAccountId: string | null }
-  | { ok: false; code: "cli_not_installed" | "platform_creds_missing" | "assume_failed"; message: string; stderr?: string };
+  | {
+      ok: false;
+      code: "cli_not_installed" | "platform_creds_missing" | "assume_failed";
+      message: string;
+      stderr?: string;
+    };
 
 /**
  * Assume the customer's cross-account role with our ExternalId and return the
@@ -168,7 +173,11 @@ export async function assumeRoleCreds(args: {
         };
         const c = parsed.Credentials;
         if (!c?.AccessKeyId || !c?.SecretAccessKey) {
-          return { ok: false, code: "assume_failed", message: "AssumeRole returned no credentials." };
+          return {
+            ok: false,
+            code: "assume_failed",
+            message: "AssumeRole returned no credentials.",
+          };
         }
         const arn = parsed.AssumedRoleUser?.Arn ?? "";
         const m = arn.match(/^arn:aws:sts::(\d{12}):/);
@@ -230,7 +239,12 @@ export async function assumeRoleCreds(args: {
 
 export type AssumeRoleVerifyResult =
   | { ok: true; assumedAccountId: string | null }
-  | { ok: false; code: "cli_not_installed" | "platform_creds_missing" | "assume_failed"; message: string; stderr?: string };
+  | {
+      ok: false;
+      code: "cli_not_installed" | "platform_creds_missing" | "assume_failed";
+      message: string;
+      stderr?: string;
+    };
 
 /** Best-effort live check that we can assume the role — thin wrapper over assumeRoleCreds. */
 export async function verifyAssumeRole(args: {
@@ -244,7 +258,12 @@ export async function verifyAssumeRole(args: {
 }
 
 export type ResolveExecEnvResult =
-  | { ok: true; env: Record<string, string>; region: string; source: "vault_keys" | "assumed_role" | "host" }
+  | {
+      ok: true;
+      env: Record<string, string>;
+      region: string;
+      source: "vault_keys" | "assumed_role" | "host";
+    }
   | { ok: false; message: string };
 
 /** True when this deployment has a configured platform AWS account (SaaS mode). */
@@ -263,7 +282,8 @@ function platformConfigured(): boolean {
 function hostAwsEnv(region: string): Record<string, string> | null {
   const hasEnvKeys = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
   const hasProfile = !!(process.env.AWS_PROFILE || process.env.AWS_DEFAULT_PROFILE);
-  const sharedFile = process.env.AWS_SHARED_CREDENTIALS_FILE || join(homedir(), ".aws", "credentials");
+  const sharedFile =
+    process.env.AWS_SHARED_CREDENTIALS_FILE || join(homedir(), ".aws", "credentials");
   const hasSharedFile = existsSync(sharedFile);
   if (!hasEnvKeys && !hasProfile && !hasSharedFile) return null;
 
@@ -327,8 +347,13 @@ export async function resolveAwsExecEnv(cloudProviderId: string): Promise<Resolv
 
   // 2 — Cross-account role (SaaS only: needs a platform identity to assume with).
   if (platformConfigured() && e.AWS_ROLE_ARN && e.AWS_EXTERNAL_ID) {
-    const assumed = await assumeRoleCreds({ roleArn: e.AWS_ROLE_ARN, externalId: e.AWS_EXTERNAL_ID, region });
-    if (assumed.ok) return { ok: true, region, source: "assumed_role", env: { PATH: pathEnv, ...assumed.env } };
+    const assumed = await assumeRoleCreds({
+      roleArn: e.AWS_ROLE_ARN,
+      externalId: e.AWS_EXTERNAL_ID,
+      region,
+    });
+    if (assumed.ok)
+      return { ok: true, region, source: "assumed_role", env: { PATH: pathEnv, ...assumed.env } };
     // Fall through to the host creds below rather than hard-failing.
   }
 

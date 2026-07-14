@@ -35,7 +35,9 @@ const OAUTH_ERROR_COPY: Record<string, string> = {
 
 function describeOauthError(code: string | null | undefined): string | null {
   if (!code) return null;
-  return OAUTH_ERROR_COPY[code] ?? "Sign-up with that provider failed. Please try again or use email.";
+  return (
+    OAUTH_ERROR_COPY[code] ?? "Sign-up with that provider failed. Please try again or use email."
+  );
 }
 
 function oauthStartUrl(provider: "github" | "google", next: string): string {
@@ -96,7 +98,10 @@ export function SignupClient() {
         </p>
       }
     >
-      <AuthHead title="Create your account" sub="Start running infrastructure in minutes — no credit card." />
+      <AuthHead
+        title="Create your account"
+        sub="Start running infrastructure in minutes — no credit card."
+      />
 
       {oauthError && (
         <div
@@ -214,7 +219,8 @@ export function SignupClient() {
         <form.Field
           name="password"
           validators={{
-            onChange: ({ value }) => (evaluatePassword(value).allMet ? undefined : "Password must meet all requirements"),
+            onChange: ({ value }) =>
+              evaluatePassword(value).allMet ? undefined : "Password must meet all requirements",
           }}
         >
           {(field) => (
@@ -237,13 +243,12 @@ export function SignupClient() {
 
         <form.Field
           name="terms"
-          validators={{ onChange: ({ value }) => (!value ? "You must accept the Terms" : undefined) }}
+          validators={{
+            onChange: ({ value }) => (!value ? "You must accept the Terms" : undefined),
+          }}
         >
           {(field) => (
-            <label
-              className="row gap-2"
-              style={{ cursor: "pointer", alignItems: "flex-start" }}
-            >
+            <label className="row gap-2" style={{ cursor: "pointer", alignItems: "flex-start" }}>
               <Toggle
                 ariaLabel="Accept Terms and Privacy Policy"
                 checked={field.state.value}

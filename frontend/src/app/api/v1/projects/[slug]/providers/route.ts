@@ -12,7 +12,8 @@ import { requireProjectAccess } from "@/lib/projects/permissions";
 export async function GET(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const gate = await requireProjectAccess(slug, "viewer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
   const projectId = gate.access.project.id;
 
   const envFilter = new URL(req.url).searchParams.get("env") ?? "all";

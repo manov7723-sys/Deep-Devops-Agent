@@ -38,7 +38,10 @@ export const CreateRepoRequest = z.object({
   fullName: z
     .string()
     .trim()
-    .regex(/^[A-Za-z0-9_.\-]+(\/[A-Za-z0-9_.\-]+)+$/, "fullName must be in 'owner/repo' (or 'group/sub/repo') form"),
+    .regex(
+      /^[A-Za-z0-9_.\-]+(\/[A-Za-z0-9_.\-]+)+$/,
+      "fullName must be in 'owner/repo' (or 'group/sub/repo') form",
+    ),
   description: z.string().trim().max(500).optional().default(""),
   lang: z.string().trim().min(1).max(40),
   kind: RepoKindApi,
@@ -241,8 +244,16 @@ export const CreateEksRequest = z.object({
         principalArn: z
           .string()
           .trim()
-          .regex(/^arn:aws:iam::\d{12}:(user|role)\/.+$/, "Must be an IAM user/role ARN, e.g. arn:aws:iam::123456789012:role/devops"),
-        policy: z.enum(["AmazonEKSClusterAdminPolicy", "AmazonEKSAdminPolicy", "AmazonEKSEditPolicy", "AmazonEKSViewPolicy"]),
+          .regex(
+            /^arn:aws:iam::\d{12}:(user|role)\/.+$/,
+            "Must be an IAM user/role ARN, e.g. arn:aws:iam::123456789012:role/devops",
+          ),
+        policy: z.enum([
+          "AmazonEKSClusterAdminPolicy",
+          "AmazonEKSAdminPolicy",
+          "AmazonEKSEditPolicy",
+          "AmazonEKSViewPolicy",
+        ]),
       }),
     )
     .max(10)

@@ -101,6 +101,9 @@ export async function PUT(req: Request, ctx: { params: Promise<{ slug: string; k
 
   const res = await setEnvTfBackend(gate.access.project.id, key, parsed.data);
   if (!res.ok) return NextResponse.json({ ok: false, code: res.code }, { status: 404 });
-  await audit({ ...auditTail, metadata: { bucket: parsed.data.bucket, region: parsed.data.region } });
+  await audit({
+    ...auditTail,
+    metadata: { bucket: parsed.data.bucket, region: parsed.data.region },
+  });
   return NextResponse.json({ ok: true, backend: res.backend });
 }

@@ -19,7 +19,9 @@ export function DangerRow({ title, description, destructive, ctaLabel, onAction 
         <span style={{ fontWeight: 600, color: destructive ? "var(--danger)" : "var(--text)" }}>
           {title}
         </span>
-        <span className="faint" style={{ fontSize: 12.5 }}>{description}</span>
+        <span className="faint" style={{ fontSize: 12.5 }}>
+          {description}
+        </span>
       </div>
       <Btn
         size="sm"

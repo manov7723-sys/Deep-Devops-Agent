@@ -9,7 +9,9 @@ import { runStage } from "@/lib/runner/exec";
 import { getKubeconfigForEnv, kubeExecEnv } from "@/lib/runner/creds";
 import { sanitizeAppName } from "./deploy-manifest";
 
-export type KubeRun = (args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+export type KubeRun = (
+  args: string[],
+) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
 /** Resolve the env's kubeconfig, hand a `run(args)` closure to `fn`, then clean up. */
 export async function withKubectl<T>(
@@ -24,14 +26,26 @@ export async function withKubectl<T>(
   if (!env) return { ok: false, error: `Env "${envKey}" not found in this project.` };
 
   const kcfg = await getKubeconfigForEnv(env.id);
-  if (!kcfg.ok) return { ok: false, error: `${kcfg.message} Connect a cluster for env "${envKey}" on the Clusters page first.` };
+  if (!kcfg.ok)
+    return {
+      ok: false,
+      error: `${kcfg.message} Connect a cluster for env "${envKey}" on the Clusters page first.`,
+    };
 
   try {
     const execEnv = await kubeExecEnv(kcfg.handle.path, env.cloudProviderId);
     // Raise the output cap: `kubectl get deployments -A -o json` across all
     // namespaces (incl. kube-system) easily exceeds the small default buffer, and
     // a truncated tail makes the JSON unparseable → "0 deployments" false negative.
-    const run: KubeRun = (args) => runStage({ command: "kubectl", args, cwd: tmpdir(), env: execEnv, timeoutMs: 120_000, maxBufferBytes: 8 * 1024 * 1024 });
+    const run: KubeRun = (args) =>
+      runStage({
+        command: "kubectl",
+        args,
+        cwd: tmpdir(),
+        env: execEnv,
+        timeoutMs: 120_000,
+        maxBufferBytes: 8 * 1024 * 1024,
+      });
     const value = await fn(run, (env.namespace || "default").trim());
     return { ok: true, value };
   } finally {
@@ -52,7 +66,8 @@ export async function scaleDeployment(
   const wrapped = await withKubectl(projectId, envKey, async (run, defaultNs) => {
     const ns = (namespace || defaultNs).trim();
     const res = await run(["scale", `deployment/${app}`, `--replicas=${n}`, "-n", ns]);
-    if (res.exitCode !== 0) throw new Error(res.stderr.slice(-400) || res.stdout.slice(-400) || "scale failed");
+    if (res.exitCode !== 0)
+      throw new Error(res.stderr.slice(-400) || res.stdout.slice(-400) || "scale failed");
     return n;
   });
   if (!wrapped.ok) return wrapped;
@@ -70,7 +85,8 @@ export async function restartDeployment(
   const wrapped = await withKubectl(projectId, envKey, async (run, defaultNs) => {
     const ns = (namespace || defaultNs).trim();
     const res = await run(["rollout", "restart", `deployment/${app}`, "-n", ns]);
-    if (res.exitCode !== 0) throw new Error(res.stderr.slice(-400) || res.stdout.slice(-400) || "restart failed");
+    if (res.exitCode !== 0)
+      throw new Error(res.stderr.slice(-400) || res.stdout.slice(-400) || "restart failed");
     return true;
   });
   if (!wrapped.ok) return wrapped;

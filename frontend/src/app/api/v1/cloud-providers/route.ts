@@ -4,7 +4,11 @@ import { getActiveSession } from "@/lib/auth/session";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { createProvider, listProvidersForUser } from "@/lib/cloud/providers";
 import { connectAzureServicePrincipal, encryptAzureSecret } from "@/lib/cloud/azure";
-import { connectProxmox, encryptProxmoxSecret, normalizeProxmoxEndpoint } from "@/lib/cloud/proxmox";
+import {
+  connectProxmox,
+  encryptProxmoxSecret,
+  normalizeProxmoxEndpoint,
+} from "@/lib/cloud/proxmox";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
@@ -39,7 +43,8 @@ export async function POST(req: Request) {
   const projectSlug = typeof raw.projectSlug === "string" ? raw.projectSlug : "";
   if (projectSlug) {
     const g = await requireProjectAccess(projectSlug, "developer");
-    if (!g.ok) return NextResponse.json({ ok: false, code: "project_access" }, { status: g.status });
+    if (!g.ok)
+      return NextResponse.json({ ok: false, code: "project_access" }, { status: g.status });
     projectId = g.access.project.id;
   }
 
@@ -53,7 +58,11 @@ export async function POST(req: Request) {
     const clientSecret = data.externalId ?? "";
     if (!tenantId || !clientId || !clientSecret) {
       return NextResponse.json(
-        { ok: false, code: "invalid_request", message: "Azure needs Tenant ID, Client ID and Client secret." },
+        {
+          ok: false,
+          code: "invalid_request",
+          message: "Azure needs Tenant ID, Client ID and Client secret.",
+        },
         { status: 400 },
       );
     }
@@ -64,7 +73,10 @@ export async function POST(req: Request) {
       subscriptionId: data.accountRef,
     });
     if (!conn.ok) {
-      return NextResponse.json({ ok: false, code: "azure_connect_failed", message: conn.error }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, code: "azure_connect_failed", message: conn.error },
+        { status: 400 },
+      );
     }
     // Persist the validated subscription + encrypt the secret.
     data.accountRef = conn.subscriptionId;
@@ -80,13 +92,20 @@ export async function POST(req: Request) {
     const tokenSecret = data.externalId ?? "";
     if (!endpoint || !tokenId || !tokenSecret) {
       return NextResponse.json(
-        { ok: false, code: "invalid_request", message: "Proxmox needs the host URL, API token ID and token secret." },
+        {
+          ok: false,
+          code: "invalid_request",
+          message: "Proxmox needs the host URL, API token ID and token secret.",
+        },
         { status: 400 },
       );
     }
     const conn = await connectProxmox({ endpoint, tokenId, tokenSecret });
     if (!conn.ok) {
-      return NextResponse.json({ ok: false, code: "proxmox_connect_failed", message: conn.error }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, code: "proxmox_connect_failed", message: conn.error },
+        { status: 400 },
+      );
     }
     data.accountRef = normalizeProxmoxEndpoint(endpoint);
     data.externalId = encryptProxmoxSecret(tokenSecret);

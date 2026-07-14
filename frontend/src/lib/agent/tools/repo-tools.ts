@@ -1,8 +1,19 @@
 import { prisma } from "@/lib/db/prisma";
-import { listReposForUser, listReposForProject, attachRepoToProject, setProjectRepo } from "@/lib/repos/repos";
+import {
+  listReposForUser,
+  listReposForProject,
+  attachRepoToProject,
+  setProjectRepo,
+} from "@/lib/repos/repos";
 import type { Tool } from "./types";
 
-type AvailableRepo = { id: string; fullName: string; defaultBranch: string; visibility: string; lang: string };
+type AvailableRepo = {
+  id: string;
+  fullName: string;
+  defaultBranch: string;
+  visibility: string;
+  lang: string;
+};
 
 /**
  * List the user's connected GitHub/GitLab repos NOT yet attached to this
@@ -24,12 +35,21 @@ export const listAvailableReposTool: Tool<Record<string, never>, AvailableRepo[]
       ok: true,
       output: all
         .filter((r) => !attachedIds.has(r.id))
-        .map((r) => ({ id: r.id, fullName: r.fullName, defaultBranch: r.defaultBranch, visibility: r.visibility, lang: r.lang })),
+        .map((r) => ({
+          id: r.id,
+          fullName: r.fullName,
+          defaultBranch: r.defaultBranch,
+          visibility: r.visibility,
+          lang: r.lang,
+        })),
     };
   },
 };
 
-export const attachProjectRepoTool: Tool<{ repoId: string; asOnly?: boolean }, { fullName: string }> = {
+export const attachProjectRepoTool: Tool<
+  { repoId: string; asOnly?: boolean },
+  { fullName: string }
+> = {
   name: "attach_project_repo",
   description:
     "Attach a repo (id from list_available_repos) to this project. Pass asOnly=true to make it the " +
@@ -39,7 +59,10 @@ export const attachProjectRepoTool: Tool<{ repoId: string; asOnly?: boolean }, {
     type: "object",
     properties: {
       repoId: { type: "string", description: "Repo id from list_available_repos." },
-      asOnly: { type: "boolean", description: "If true, replaces the project's repo set with just this one. Default false." },
+      asOnly: {
+        type: "boolean",
+        description: "If true, replaces the project's repo set with just this one. Default false.",
+      },
     },
     required: ["repoId"],
     additionalProperties: false,
@@ -49,7 +72,10 @@ export const attachProjectRepoTool: Tool<{ repoId: string; asOnly?: boolean }, {
       ? await setProjectRepo(ctx.userId, ctx.projectId, input.repoId)
       : await attachRepoToProject(ctx.userId, ctx.projectId, input.repoId);
     if (!res.ok) return { ok: false, error: res.code };
-    const repo = await prisma.repo.findUnique({ where: { id: input.repoId }, select: { fullName: true } });
+    const repo = await prisma.repo.findUnique({
+      where: { id: input.repoId },
+      select: { fullName: true },
+    });
     return { ok: true, output: { fullName: repo?.fullName ?? input.repoId } };
   },
 };

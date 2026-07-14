@@ -43,33 +43,56 @@ export type InfraApprovalResult =
   | { ok: true; approvalId: string; risk: ApprovalRisk; policy: PolicyResult }
   | { ok: false; blocked: true; policy: PolicyResult };
 
-const CHANGE_KIND: Record<"add" | "remove" | "info", DiffKind> = { add: "add", remove: "remove", info: "comment" };
+const CHANGE_KIND: Record<"add" | "remove" | "info", DiffKind> = {
+  add: "add",
+  remove: "remove",
+  info: "comment",
+};
 
 export async function createInfraApproval(input: InfraApprovalInput): Promise<InfraApprovalResult> {
   const hcl = input.files.map((f) => f.content).join("\n\n");
-  const policy = checkInfraPolicy({ cloud: input.cloud, region: input.region, instanceType: input.instanceType, publicBucket: input.publicBucket, hcl });
+  const policy = checkInfraPolicy({
+    cloud: input.cloud,
+    region: input.region,
+    instanceType: input.instanceType,
+    publicBucket: input.publicBucket,
+    hcl,
+  });
 
   // HIGH violations block outright — no approval is even created.
   if (!policy.ok) return { ok: false, blocked: true, policy };
 
-  const risk: ApprovalRisk = (input.costMonthly ?? 0) >= 500 ? "high" : policy.violations.length > 0 ? "medium" : "low";
+  const risk: ApprovalRisk =
+    (input.costMonthly ?? 0) >= 500 ? "high" : policy.violations.length > 0 ? "medium" : "low";
 
   const diff: Array<{ kind: DiffKind; text: string }> = [];
   for (const p of input.planSummary ?? []) diff.push({ kind: CHANGE_KIND[p.change], text: p.text });
-  if (input.costMonthly != null) diff.push({ kind: "comment", text: `💵 Estimated cost: ~$${input.costMonthly.toLocaleString()}/month` });
+  if (input.costMonthly != null)
+    diff.push({
+      kind: "comment",
+      text: `💵 Estimated cost: ~$${input.costMonthly.toLocaleString()}/month`,
+    });
   diff.push({ kind: "comment", text: `🛡️ Policy: passed (${policy.checked.join(", ")})` });
-  for (const v of policy.violations) diff.push({ kind: "comment", text: `⚠️ ${v.rule}: ${v.message}` });
+  for (const v of policy.violations)
+    diff.push({ kind: "comment", text: `⚠️ ${v.rule}: ${v.message}` });
 
   const approval = await createApproval({
     projectId: input.projectId,
     envId: input.envId,
     title: input.title,
     summary: input.summary,
-    changesSummary: input.costMonthly != null ? `~$${input.costMonthly.toLocaleString()}/mo` : undefined,
+    changesSummary:
+      input.costMonthly != null ? `~$${input.costMonthly.toLocaleString()}/mo` : undefined,
     risk,
     diff,
     kind: "terraform",
-    payloadJson: { type: "terraform", envKey: input.envKey, name: input.name, stack: input.stack ?? null, files: input.files } as unknown as Prisma.InputJsonValue,
+    payloadJson: {
+      type: "terraform",
+      envKey: input.envKey,
+      name: input.name,
+      stack: input.stack ?? null,
+      files: input.files,
+    } as unknown as Prisma.InputJsonValue,
     costMonthly: input.costMonthly,
     policyJson: policy as unknown as Prisma.InputJsonValue,
   });
@@ -77,8 +100,20 @@ export async function createInfraApproval(input: InfraApprovalInput): Promise<In
   return { ok: true, approvalId: approval.id, risk, policy };
 }
 
-type TerraformPayload = { type: "terraform"; envKey: string; name: string; stack: string | null; files: TerraformFile[] };
-type DeployPayload = { type: "deploy"; envKey: string; envId: string; namespace: string; spec: DeploySpec };
+type TerraformPayload = {
+  type: "terraform";
+  envKey: string;
+  name: string;
+  stack: string | null;
+  files: TerraformFile[];
+};
+type DeployPayload = {
+  type: "deploy";
+  envKey: string;
+  envId: string;
+  namespace: string;
+  spec: DeploySpec;
+};
 
 export type ApplyResult =
   | { ok: true; applied: true; runId: string }
@@ -86,10 +121,21 @@ export type ApplyResult =
   | { ok: false; error: string };
 
 /** Run the approved change (terraform apply OR deploy). Called from the decision route AFTER approve. Idempotent. */
-export async function applyApprovedChange(projectId: string, userId: string, approvalId: string): Promise<ApplyResult> {
+export async function applyApprovedChange(
+  projectId: string,
+  userId: string,
+  approvalId: string,
+): Promise<ApplyResult> {
   const a = await prisma.approval.findFirst({
     where: { id: approvalId, projectId },
-    select: { id: true, status: true, kind: true, payloadJson: true, appliedAt: true, env: { select: { key: true } } },
+    select: {
+      id: true,
+      status: true,
+      kind: true,
+      payloadJson: true,
+      appliedAt: true,
+      env: { select: { key: true } },
+    },
   });
   if (!a) return { ok: false, error: "Approval not found." };
   if (a.status !== "approved") return { ok: true, applied: false, reason: "Not approved." };
@@ -100,7 +146,11 @@ export async function applyApprovedChange(projectId: string, userId: string, app
   // scheduled time. The approve just flips ScheduledDeploy.approved (handled by
   // syncScheduledApproval in the decision route).
   if (a.kind === "scheduled_deploy") {
-    return { ok: true, applied: false, reason: "Scheduled — it will run at its scheduled time now that it's approved." };
+    return {
+      ok: true,
+      applied: false,
+      reason: "Scheduled — it will run at its scheduled time now that it's approved.",
+    };
   }
 
   // Deploy approval → run the deploy now (runDeploy is the executor; it is NOT gated).
@@ -113,7 +163,9 @@ export async function applyApprovedChange(projectId: string, userId: string, app
       { source: "manual" },
     );
     if (!res.ok) return { ok: false, error: res.error };
-    await prisma.approval.update({ where: { id: a.id }, data: { appliedAt: new Date() } }).catch(() => {});
+    await prisma.approval
+      .update({ where: { id: a.id }, data: { appliedAt: new Date() } })
+      .catch(() => {});
     return { ok: true, applied: true, runId: "deploy" };
   }
 
@@ -123,11 +175,22 @@ export async function applyApprovedChange(projectId: string, userId: string, app
     const envKey = (p.envKey || a.env.key || "").trim();
     const filesMap = Object.fromEntries((p.files ?? []).map((f) => [f.path, f.content]));
     const res = await runTerraformTool.execute(
-      { envKey, name: p.name || "approved-apply", action: "apply", files: filesMap, stack: p.stack ?? undefined },
+      {
+        envKey,
+        name: p.name || "approved-apply",
+        action: "apply",
+        files: filesMap,
+        stack: p.stack ?? undefined,
+      },
       { projectId, userId },
     );
     if (!res.ok) return { ok: false, error: res.error };
-    await prisma.approval.update({ where: { id: a.id }, data: { appliedAt: new Date(), applyRunId: res.output.runId } }).catch(() => {});
+    await prisma.approval
+      .update({
+        where: { id: a.id },
+        data: { appliedAt: new Date(), applyRunId: res.output.runId },
+      })
+      .catch(() => {});
     return { ok: true, applied: true, runId: res.output.runId };
   }
 

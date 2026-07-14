@@ -7,26 +7,22 @@ const FEATURES = [
   {
     icon: "zap" as const,
     title: "Terraform from a prompt",
-    body:
-      "Describe a service. Get a Terraform module with encryption at rest, scoped IAM, tagging — the boring parts done right.",
+    body: "Describe a service. Get a Terraform module with encryption at rest, scoped IAM, tagging — the boring parts done right.",
   },
   {
     icon: "cicd" as const,
     title: "CI/CD per environment",
-    body:
-      "Pipelines that map branches to alpha / beta / release. Promotion gates, auto-deploy, one-click retries.",
+    body: "Pipelines that map branches to alpha / beta / release. Promotion gates, auto-deploy, one-click retries.",
   },
   {
     icon: "shield" as const,
     title: "Agents that review",
-    body:
-      "Drift Watcher, Security Sentinel, Cost Pilot — open PRs, file issues, scan 24/7.",
+    body: "Drift Watcher, Security Sentinel, Cost Pilot — open PRs, file issues, scan 24/7.",
   },
   {
     icon: "approve" as const,
     title: "Approvals where it matters",
-    body:
-      "Risky moves wait for you. See the terraform plan. Approve & apply. Reject and the agent revises.",
+    body: "Risky moves wait for you. See the terraform plan. Approve & apply. Reject and the agent revises.",
   },
 ];
 
@@ -41,13 +37,11 @@ const STEPS = [
   },
   {
     title: "Describe what to ship",
-    body:
-      "“Add an SQS queue for orders.” “Migrate to a read replica.” Deep Agent drafts the Terraform + Helm + the PR.",
+    body: "“Add an SQS queue for orders.” “Migrate to a read replica.” Deep Agent drafts the Terraform + Helm + the PR.",
   },
   {
     title: "Approve, watch, learn",
-    body:
-      "Agents stream the plan. You approve. They ship. Drift, cost, security — all watched 24/7.",
+    body: "Agents stream the plan. You approve. They ship. Drift, cost, security — all watched 24/7.",
   },
 ];
 
@@ -83,16 +77,18 @@ export default async function Home() {
       <section className="dda-landing-hero">
         <div className="dda-landing-hero-glow" aria-hidden />
         <div className="dda-landing-hero-inner col gap-4">
-          <Badge tone="accent" withDot>v1.0 · Now in public beta</Badge>
+          <Badge tone="accent" withDot>
+            v1.0 · Now in public beta
+          </Badge>
           <h1>
             Run real infrastructure
             <br />
             <span className="dda-landing-grad">without the DevOps team.</span>
           </h1>
           <p className="muted tx-pretty dda-landing-sub">
-            Connect a repo, describe what you want, and Deep Agent writes the Terraform
-            and Kubernetes, ships it through your environments, and watches it 24/7 —
-            with you approving the moves that matter.
+            Connect a repo, describe what you want, and Deep Agent writes the Terraform and
+            Kubernetes, ships it through your environments, and watches it 24/7 — with you approving
+            the moves that matter.
           </p>
           <div className="row gap-3 wrap dda-landing-cta">
             {session ? (

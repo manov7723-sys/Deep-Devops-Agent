@@ -30,10 +30,13 @@ export function Spark({
   const max = Math.max(...data);
   const min = Math.min(...data);
   const rng = max - min || 1;
-  const pts = data.map((d, i) => [
-    (i / Math.max(1, data.length - 1)) * width,
-    height - 3 - ((d - min) / rng) * (height - 6),
-  ] as const);
+  const pts = data.map(
+    (d, i) =>
+      [
+        (i / Math.max(1, data.length - 1)) * width,
+        height - 3 - ((d - min) / rng) * (height - 6),
+      ] as const,
+  );
   const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
   const area = `${line} L${width} ${height} L0 ${height} Z`;
   return (
@@ -51,7 +54,14 @@ export function Spark({
         </linearGradient>
       </defs>
       {fill && <path d={area} fill={`url(#spark-${id})`} />}
-      <path d={line} fill="none" stroke={tone} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d={line}
+        fill="none"
+        stroke={tone}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

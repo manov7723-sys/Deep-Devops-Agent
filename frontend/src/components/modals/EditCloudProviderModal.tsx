@@ -149,7 +149,9 @@ export function EditCloudProviderModal({
       footer={
         confirmDelete ? (
           <>
-            <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Btn>
             <Btn
               variant="primary"
               icon="x"
@@ -170,7 +172,9 @@ export function EditCloudProviderModal({
           </>
         ) : (
           <>
-            <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Btn>
             <Btn
               variant="primary"
               icon="check"
@@ -233,7 +237,8 @@ export function EditCloudProviderModal({
           }}
         >
           <Icon name="shield" size={16} style={{ flex: "none" }} />
-          New credentials replace stored ones and are encrypted at rest with AES-256-GCM. Blank fields don't touch the existing values.
+          New credentials replace stored ones and are encrypted at rest with AES-256-GCM. Blank
+          fields don't touch the existing values.
         </div>
 
         {serverError && (
@@ -253,8 +258,8 @@ export function EditCloudProviderModal({
         >
           {confirmDelete ? (
             <p style={{ fontSize: 13, color: "var(--danger)" }}>
-              Disconnecting <b>{initial.name}</b> will unbind it from every environment using
-              it. This can't be undone here — you'd have to reconnect from scratch.
+              Disconnecting <b>{initial.name}</b> will unbind it from every environment using it.
+              This can't be undone here — you'd have to reconnect from scratch.
             </p>
           ) : (
             <button

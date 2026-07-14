@@ -56,10 +56,16 @@ export const deployToProxmoxVmTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'The repo as "owner/name", attached to the project.' },
+      repoFullName: {
+        type: "string",
+        description: 'The repo as "owner/name", attached to the project.',
+      },
       appName: { type: "string", description: "App name (lowercase-hyphen)." },
       port: { type: "number", description: "Container port to expose on the host." },
-      vmHost: { type: "string", description: "VM IP or DNS name reachable from GitHub-hosted runners." },
+      vmHost: {
+        type: "string",
+        description: "VM IP or DNS name reachable from GitHub-hosted runners.",
+      },
       branch: { type: "string", description: "Branch that triggers the workflow. Default 'main'." },
       dockerContext: { type: "string", description: "Docker build context. Default '.'." },
       dockerfile: { type: "string", description: "Path to the Dockerfile. Default 'Dockerfile'." },
@@ -77,7 +83,10 @@ export const deployToProxmoxVmTool: Tool<Input, Output> = {
 
     // 2. Push the two repo secrets the workflow reads.
     const secretsSet: string[] = [];
-    for (const [name, value] of [["VM_HOST", vmHost], ["VM_SSH_KEY", keys.privateKey]] as const) {
+    for (const [name, value] of [
+      ["VM_HOST", vmHost],
+      ["VM_SSH_KEY", keys.privateKey],
+    ] as const) {
       const res = await setGithubSecretTool.execute(
         { repoFullName: input.repoFullName, name, value },
         ctx,

@@ -56,8 +56,7 @@ export type CreateScopeArgs = {
 };
 
 export type CreateScopeResult =
-  | { ok: true; scope: ScopeRow }
-  | { ok: false; code: "provider_not_found" };
+  { ok: true; scope: ScopeRow } | { ok: false; code: "provider_not_found" };
 
 export async function createScope(args: CreateScopeArgs): Promise<CreateScopeResult> {
   const prov = await prisma.cloudProvider.findFirst({
@@ -129,8 +128,7 @@ export async function listBindingsForProject(projectId: string): Promise<Binding
 }
 
 export type BindResult =
-  | { ok: true; binding: BindingRow }
-  | { ok: false; code: "scope_not_found" | "already_bound" };
+  { ok: true; binding: BindingRow } | { ok: false; code: "scope_not_found" | "already_bound" };
 
 /**
  * The scope must belong to the project owner (so all project members can

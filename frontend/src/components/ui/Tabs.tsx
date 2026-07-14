@@ -19,7 +19,11 @@ export interface TabsProps {
 
 export function Tabs({ items, value, defaultValue, onValueChange }: TabsProps) {
   return (
-    <RTabs.Root value={value} defaultValue={defaultValue ?? items[0]?.value} onValueChange={onValueChange}>
+    <RTabs.Root
+      value={value}
+      defaultValue={defaultValue ?? items[0]?.value}
+      onValueChange={onValueChange}
+    >
       <RTabs.List className="tabs" style={{ overflowX: "auto" }}>
         {items.map((t) => (
           <RTabs.Trigger key={t.value} value={t.value} disabled={t.disabled} className="tab">
@@ -30,7 +34,11 @@ export function Tabs({ items, value, defaultValue, onValueChange }: TabsProps) {
       {items.map(
         (t) =>
           t.content !== undefined && (
-            <RTabs.Content key={t.value} value={t.value} style={{ paddingTop: 16, outline: "none" }}>
+            <RTabs.Content
+              key={t.value}
+              value={t.value}
+              style={{ paddingTop: 16, outline: "none" }}
+            >
               {t.content}
             </RTabs.Content>
           ),

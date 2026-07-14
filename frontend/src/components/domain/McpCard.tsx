@@ -30,7 +30,13 @@ function statusLabel(s: SeedMcpConnector["status"]): string {
  *   compact — single dense row used by /admin/dashboard. status dot + name + latency.
  *   full    — Phase 9 tile with Configure/Reconnect/Logs actions.
  */
-export function McpCard({ connector, variant = "full", onConfigure, onReconnect, onLogs }: McpCardProps) {
+export function McpCard({
+  connector,
+  variant = "full",
+  onConfigure,
+  onReconnect,
+  onLogs,
+}: McpCardProps) {
   if (variant === "compact") {
     return (
       <div className="row between gap-3 dda-mcp-row">
@@ -39,7 +45,9 @@ export function McpCard({ connector, variant = "full", onConfigure, onReconnect,
           <span style={{ fontWeight: 600, fontSize: 13 }}>{connector.name}</span>
         </div>
         <div className="row gap-3" style={{ flex: "none" }}>
-          <span className="faint mono" style={{ fontSize: 11.5 }}>{connector.latency}</span>
+          <span className="faint mono" style={{ fontSize: 11.5 }}>
+            {connector.latency}
+          </span>
           <StatusDot tone={statusTone(connector.status)} label={statusLabel(connector.status)} />
         </div>
       </div>
@@ -55,10 +63,16 @@ export function McpCard({ connector, variant = "full", onConfigure, onReconnect,
           </span>
           <div className="col" style={{ lineHeight: 1.3, minWidth: 0 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>{connector.name}</span>
-            <span className="faint" style={{ fontSize: 11.5 }}>{connector.description}</span>
+            <span className="faint" style={{ fontSize: 11.5 }}>
+              {connector.description}
+            </span>
           </div>
         </div>
-        <StatusDot tone={tone} pulse={connector.status === "ok"} label={statusLabel(connector.status)} />
+        <StatusDot
+          tone={tone}
+          pulse={connector.status === "ok"}
+          label={statusLabel(connector.status)}
+        />
       </div>
       <div className="divider" />
       <div className="row between" style={{ fontSize: 12.5 }}>
@@ -76,11 +90,22 @@ export function McpCard({ connector, variant = "full", onConfigure, onReconnect,
         </div>
       </div>
       <div className="row gap-2">
-        <Btn size="sm" variant="outline" block icon="settings" onClick={() => onConfigure?.(connector.id)}>
+        <Btn
+          size="sm"
+          variant="outline"
+          block
+          icon="settings"
+          onClick={() => onConfigure?.(connector.id)}
+        >
           Configure
         </Btn>
         {connector.status === "down" ? (
-          <Btn size="sm" variant="primary" icon="refresh" onClick={() => onReconnect?.(connector.id)}>
+          <Btn
+            size="sm"
+            variant="primary"
+            icon="refresh"
+            onClick={() => onReconnect?.(connector.id)}
+          >
             Reconnect
           </Btn>
         ) : (

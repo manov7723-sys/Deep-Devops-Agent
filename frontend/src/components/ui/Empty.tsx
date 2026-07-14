@@ -8,7 +8,12 @@ export interface EmptyProps {
   action?: ReactNode;
 }
 
-export function Empty({ icon = "box", title = "Nothing here yet", description, action }: EmptyProps) {
+export function Empty({
+  icon = "box",
+  title = "Nothing here yet",
+  description,
+  action,
+}: EmptyProps) {
   return (
     <div className="empty">
       <span className="empty-icon">

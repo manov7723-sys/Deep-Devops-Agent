@@ -51,15 +51,32 @@ type ApplyOutput = {
 // Best-effort extraction from OUR OWN generated Terraform (eks.ts/gke.ts/aks.ts)
 // so the cost estimate + policy check are accurate for the common case: a repo
 // path that was pushed by this app's own cluster-creation flow.
-function sniffSpec(combined: string): { managedK8s: boolean; instanceType?: string; nodeCount?: number; region?: string } {
-  const managedK8s = /module\s+"(eks|gke|aks)"|terraform-aws-modules\/eks|google_container_cluster|azurerm_kubernetes_cluster/.test(combined);
+function sniffSpec(combined: string): {
+  managedK8s: boolean;
+  instanceType?: string;
+  nodeCount?: number;
+  region?: string;
+} {
+  const managedK8s =
+    /module\s+"(eks|gke|aks)"|terraform-aws-modules\/eks|google_container_cluster|azurerm_kubernetes_cluster/.test(
+      combined,
+    );
   const instanceType =
     combined.match(/instance_types\s*=\s*\["([^"]+)"/)?.[1] ??
     combined.match(/machine_type\s*=\s*"([^"]+)"/)?.[1] ??
     combined.match(/vm_size\s*=\s*"([^"]+)"/)?.[1];
-  const nodeCountRaw = combined.match(/desired_size\s*=\s*(\d+)/)?.[1] ?? combined.match(/node_count\s*=\s*(\d+)/)?.[1];
-  const region = combined.match(/region\s*=\s*"([^"]+)"/)?.[1] ?? combined.match(/location\s*=\s*"([^"]+)"/)?.[1];
-  return { managedK8s, instanceType, nodeCount: nodeCountRaw ? Number(nodeCountRaw) : undefined, region };
+  const nodeCountRaw =
+    combined.match(/desired_size\s*=\s*(\d+)/)?.[1] ??
+    combined.match(/node_count\s*=\s*(\d+)/)?.[1];
+  const region =
+    combined.match(/region\s*=\s*"([^"]+)"/)?.[1] ??
+    combined.match(/location\s*=\s*"([^"]+)"/)?.[1];
+  return {
+    managedK8s,
+    instanceType,
+    nodeCount: nodeCountRaw ? Number(nodeCountRaw) : undefined,
+    region,
+  };
 }
 
 export const applyRepoTerraformTool: Tool<Input, PlanOutput | ApplyOutput> = {
@@ -74,11 +91,28 @@ export const applyRepoTerraformTool: Tool<Input, PlanOutput | ApplyOutput> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'owner/repo, must be attached to this project.' },
-      path: { type: "string", description: "Folder inside the repo containing the .tf files, e.g. 'terraform/eks/agent'. Not recursive." },
-      envKey: { type: "string", description: "Env whose cloud credentials + state backend to use." },
-      action: { type: "string", enum: ["plan", "apply"], description: "plan = preview, apply = submit for approval." },
-      ref: { type: "string", description: "Optional branch/tag/commit. Defaults to the repo's default branch." },
+      repoFullName: {
+        type: "string",
+        description: "owner/repo, must be attached to this project.",
+      },
+      path: {
+        type: "string",
+        description:
+          "Folder inside the repo containing the .tf files, e.g. 'terraform/eks/agent'. Not recursive.",
+      },
+      envKey: {
+        type: "string",
+        description: "Env whose cloud credentials + state backend to use.",
+      },
+      action: {
+        type: "string",
+        enum: ["plan", "apply"],
+        description: "plan = preview, apply = submit for approval.",
+      },
+      ref: {
+        type: "string",
+        description: "Optional branch/tag/commit. Defaults to the repo's default branch.",
+      },
       stack: { type: "string", description: "Stable logical stack name. Defaults to the path." },
     },
     required: ["repoFullName", "path", "envKey", "action"],
@@ -86,23 +120,33 @@ export const applyRepoTerraformTool: Tool<Input, PlanOutput | ApplyOutput> = {
   },
   async execute(input, ctx) {
     const repo = await prisma.repo.findFirst({
-      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
       select: { id: true, defaultBranch: true, fullName: true },
     });
-    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    if (!repo)
+      return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
 
     const resolved = await resolveRepoClient(repo.id);
-    if (!resolved.ok) return { ok: false, error: `Cannot access ${input.repoFullName}: ${resolved.message}` };
+    if (!resolved.ok)
+      return { ok: false, error: `Cannot access ${input.repoFullName}: ${resolved.message}` };
 
     const ref = input.ref ?? repo.defaultBranch;
     const cleanPath = input.path.replace(/^\/+|\/+$/g, "");
-    if (!cleanPath) return { ok: false, error: "Path is required — the repo root is refused (too broad)." };
+    if (!cleanPath)
+      return { ok: false, error: "Path is required — the repo root is refused (too broad)." };
 
     let entries: Array<{ name: string; path: string; type: "file" | "dir" }>;
     try {
       entries = await resolved.client.listFiles(cleanPath, ref);
     } catch (err) {
-      return { ok: false, error: `Could not list ${repo.fullName}/${cleanPath}@${ref}: ${err instanceof Error ? err.message : "unknown"}` };
+      return {
+        ok: false,
+        error: `Could not list ${repo.fullName}/${cleanPath}@${ref}: ${err instanceof Error ? err.message : "unknown"}`,
+      };
     }
     const tfEntries = entries.filter((e) => e.type === "file" && e.name.endsWith(".tf"));
     if (tfEntries.length === 0) {
@@ -115,7 +159,8 @@ export const applyRepoTerraformTool: Tool<Input, PlanOutput | ApplyOutput> = {
     const files: Record<string, string> = {};
     for (const e of tfEntries) {
       const content = await resolved.client.readFile(e.path, ref);
-      if (content === null) return { ok: false, error: `Could not read ${e.path} — it disappeared or isn't a file.` };
+      if (content === null)
+        return { ok: false, error: `Could not read ${e.path} — it disappeared or isn't a file.` };
       files[e.name] = content;
     }
 
@@ -170,9 +215,15 @@ export const applyRepoTerraformTool: Tool<Input, PlanOutput | ApplyOutput> = {
 
     // action === "apply" — always through the approval gate, never a direct apply.
     if (!env.cloudProviderId) {
-      return { ok: false, error: `Env "${input.envKey}" has no cloud provider connected — connect one before applying.` };
+      return {
+        ok: false,
+        error: `Env "${input.envKey}" has no cloud provider connected — connect one before applying.`,
+      };
     }
-    const provider = await prisma.cloudProvider.findUnique({ where: { id: env.cloudProviderId }, select: { kind: true, region: true } });
+    const provider = await prisma.cloudProvider.findUnique({
+      where: { id: env.cloudProviderId },
+      select: { kind: true, region: true },
+    });
     const cloud = (provider?.kind ?? "aws") as Cloud;
 
     const combined = Object.values(files).join("\n");
@@ -198,7 +249,10 @@ export const applyRepoTerraformTool: Tool<Input, PlanOutput | ApplyOutput> = {
       stack,
       files: Object.entries(files).map(([path, content]): TerraformFile => ({ path, content })),
       costMonthly: est.monthly,
-      planSummary: filesRead.map((f) => ({ change: "info" as const, text: `Apply ${f} (from ${repo.fullName}/${cleanPath})` })),
+      planSummary: filesRead.map((f) => ({
+        change: "info" as const,
+        text: `Apply ${f} (from ${repo.fullName}/${cleanPath})`,
+      })),
     });
 
     if (!res.ok) {

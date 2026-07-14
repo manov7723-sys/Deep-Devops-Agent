@@ -50,8 +50,9 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
   const filtered =
     list?.filter((a) => {
       if (env === "all") return true;
-      const key = (a as unknown as { envKey?: string; env?: string }).envKey
-        ?? (a as unknown as { env?: string }).env;
+      const key =
+        (a as unknown as { envKey?: string; env?: string }).envKey ??
+        (a as unknown as { env?: string }).env;
       return key === env;
     }) ?? [];
   const activeId = sp.get("id") ?? filtered[0]?.id ?? null;
@@ -81,7 +82,11 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
       <PageHead
         title="Approvals"
         sub="Human-in-the-loop gates. Deep Agent waits for you on risky moves."
-        actions={<Badge tone="warn" icon="clock">{pending} pending</Badge>}
+        actions={
+          <Badge tone="warn" icon="clock">
+            {pending} pending
+          </Badge>
+        }
       />
       <EnvFilter />
 
@@ -115,114 +120,134 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
           )}
         </Block>
 
-        {detail ? (() => {
-          const d = detail as unknown as {
-            id: string;
-            title: string;
-            summary: string | null;
-            risk: "high" | "medium" | "low";
-            agent?: string;
-            requestedRelative?: string;
-            requestedAt?: string;
-            repo?: string;
-            env?: string;
-            envKey?: string;
-            changes?: string;
-            changesSummary?: string | null;
-            diff?: ReadonlyArray<{ kind: string; text: string }>;
-          };
-          const requester = d.agent ?? "Deep Agent";
-          const requested = d.requestedRelative ?? timeAgo(d.requestedAt);
-          const envKey = d.envKey ?? d.env ?? "—";
-          const changesLabel = d.changes ?? d.changesSummary ?? "Pending review";
-          const repoLabel = d.repo ?? "Linked repo";
-          const diffLines = d.diff ?? [];
-          return (
-          <Block>
-            <Block.Body>
-              <div className="col gap-4">
-                <div className="row between wrap gap-2">
-                  <Badge tone={riskTone(detail.risk)} icon="alert">
-                    {detail.risk} risk
-                  </Badge>
-                  <span className="row gap-2 faint" style={{ fontSize: 12 }}>
-                    <Icon name="bot" size={14} />
-                    Requested by {requester} · {requested}
-                  </span>
-                </div>
-                <h2 style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.25 }}>{detail.title}</h2>
-                <p className="muted tx-pretty" style={{ fontSize: 14, lineHeight: 1.55 }}>
-                  {detail.summary}
-                </p>
-                <div className="row gap-2 wrap">
-                  <Badge icon="github">{repoLabel}</Badge>
-                  <Badge tone={ENV_TONE[envKey] ?? "default"}>{envKey}</Badge>
-                  <Badge icon="edit">{changesLabel}</Badge>
-                </div>
-                <div className="dda-approval-diff">
-                  <div className="dda-approval-diff-head">
-                    <span style={{ fontSize: 11.5 }} className="muted">terraform plan</span>
-                    <Badge tone="ok">{changesLabel}</Badge>
-                  </div>
-                  <pre>
-                    {diffLines.length === 0 ? (
-                      <span className="faint" style={{ fontSize: 12 }}>
-                        No diff attached to this approval.
+        {detail ? (
+          (() => {
+            const d = detail as unknown as {
+              id: string;
+              title: string;
+              summary: string | null;
+              risk: "high" | "medium" | "low";
+              agent?: string;
+              requestedRelative?: string;
+              requestedAt?: string;
+              repo?: string;
+              env?: string;
+              envKey?: string;
+              changes?: string;
+              changesSummary?: string | null;
+              diff?: ReadonlyArray<{ kind: string; text: string }>;
+            };
+            const requester = d.agent ?? "Deep Agent";
+            const requested = d.requestedRelative ?? timeAgo(d.requestedAt);
+            const envKey = d.envKey ?? d.env ?? "—";
+            const changesLabel = d.changes ?? d.changesSummary ?? "Pending review";
+            const repoLabel = d.repo ?? "Linked repo";
+            const diffLines = d.diff ?? [];
+            return (
+              <Block>
+                <Block.Body>
+                  <div className="col gap-4">
+                    <div className="row between wrap gap-2">
+                      <Badge tone={riskTone(detail.risk)} icon="alert">
+                        {detail.risk} risk
+                      </Badge>
+                      <span className="row gap-2 faint" style={{ fontSize: 12 }}>
+                        <Icon name="bot" size={14} />
+                        Requested by {requester} · {requested}
                       </span>
-                    ) : (
-                      diffLines.map((line, i) => (
-                        <span
-                          key={i}
-                          style={{ color: DIFF_COLOR[line.kind] ?? "inherit", display: "block" }}
-                        >
-                          {line.text}
+                    </div>
+                    <h2 style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.25 }}>
+                      {detail.title}
+                    </h2>
+                    <p className="muted tx-pretty" style={{ fontSize: 14, lineHeight: 1.55 }}>
+                      {detail.summary}
+                    </p>
+                    <div className="row gap-2 wrap">
+                      <Badge icon="github">{repoLabel}</Badge>
+                      <Badge tone={ENV_TONE[envKey] ?? "default"}>{envKey}</Badge>
+                      <Badge icon="edit">{changesLabel}</Badge>
+                    </div>
+                    <div className="dda-approval-diff">
+                      <div className="dda-approval-diff-head">
+                        <span style={{ fontSize: 11.5 }} className="muted">
+                          terraform plan
                         </span>
-                      ))
+                        <Badge tone="ok">{changesLabel}</Badge>
+                      </div>
+                      <pre>
+                        {diffLines.length === 0 ? (
+                          <span className="faint" style={{ fontSize: 12 }}>
+                            No diff attached to this approval.
+                          </span>
+                        ) : (
+                          diffLines.map((line, i) => (
+                            <span
+                              key={i}
+                              style={{
+                                color: DIFF_COLOR[line.kind] ?? "inherit",
+                                display: "block",
+                              }}
+                            >
+                              {line.text}
+                            </span>
+                          ))
+                        )}
+                      </pre>
+                    </div>
+                    {decisions[detail.id] ? (
+                      <div
+                        className="row gap-2 dda-approval-result"
+                        style={{
+                          padding: 14,
+                          borderRadius: 10,
+                          background:
+                            decisions[detail.id] === "approve"
+                              ? "var(--ok-soft)"
+                              : "var(--danger-soft)",
+                          color: decisions[detail.id] === "approve" ? "var(--ok)" : "var(--danger)",
+                          fontWeight: 700,
+                          fontSize: 13.5,
+                        }}
+                      >
+                        <Icon name={decisions[detail.id] === "approve" ? "check" : "x"} size={18} />
+                        {decisions[detail.id] === "approve"
+                          ? "Approved — Deep Agent is applying the change."
+                          : "Rejected — Deep Agent will revise and resubmit."}
+                      </div>
+                    ) : (
+                      <div className="row gap-2 wrap">
+                        <Btn
+                          variant="primary"
+                          icon="approve"
+                          onClick={() => act(detail.id, "approve")}
+                        >
+                          Approve &amp; apply
+                        </Btn>
+                        <Btn variant="danger" icon="x" onClick={() => act(detail.id, "reject")}>
+                          Reject
+                        </Btn>
+                        <Link href={`/p/${slug}/chat` as Route} className="btn outline">
+                          <Icon name="chat" size={16} />
+                          Ask a question
+                        </Link>
+                      </div>
                     )}
-                  </pre>
-                </div>
-                {decisions[detail.id] ? (
-                  <div
-                    className="row gap-2 dda-approval-result"
-                    style={{
-                      padding: 14,
-                      borderRadius: 10,
-                      background: decisions[detail.id] === "approve" ? "var(--ok-soft)" : "var(--danger-soft)",
-                      color: decisions[detail.id] === "approve" ? "var(--ok)" : "var(--danger)",
-                      fontWeight: 700,
-                      fontSize: 13.5,
-                    }}
-                  >
-                    <Icon name={decisions[detail.id] === "approve" ? "check" : "x"} size={18} />
-                    {decisions[detail.id] === "approve"
-                      ? "Approved — Deep Agent is applying the change."
-                      : "Rejected — Deep Agent will revise and resubmit."}
                   </div>
-                ) : (
-                  <div className="row gap-2 wrap">
-                    <Btn variant="primary" icon="approve" onClick={() => act(detail.id, "approve")}>
-                      Approve &amp; apply
-                    </Btn>
-                    <Btn variant="danger" icon="x" onClick={() => act(detail.id, "reject")}>
-                      Reject
-                    </Btn>
-                    <Link href={`/p/${slug}/chat` as Route} className="btn outline">
-                      <Icon name="chat" size={16} />
-                      Ask a question
-                    </Link>
-                  </div>
-                )}
-              </div>
-            </Block.Body>
-          </Block>
-          );
-        })() : activeId ? (
+                </Block.Body>
+              </Block>
+            );
+          })()
+        ) : activeId ? (
           <Block>
             <Block.Loading />
           </Block>
         ) : (
           <Block>
-            <Block.Empty icon="approve" title="Select an approval" description="Pick one from the queue to see the diff." />
+            <Block.Empty
+              icon="approve"
+              title="Select an approval"
+              description="Pick one from the queue to see the diff."
+            />
           </Block>
         )}
       </div>

@@ -27,10 +27,13 @@ export function GrantTokensModal({ open, onOpenChange, user }: GrantTokensModalP
   const grant = useMutation({
     mutationFn: async (body: { amount: number; reason?: string }) => {
       if (!user) throw new Error("No user selected");
-      const res = await api.post<{ ok: boolean; tokensGranted?: number; tokensRemaining?: number; message?: string; code?: string }>(
-        `/admin/users/${user.id}/grant-tokens`,
-        body,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        tokensGranted?: number;
+        tokensRemaining?: number;
+        message?: string;
+        code?: string;
+      }>(`/admin/users/${user.id}/grant-tokens`, body);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not grant tokens.");
       return res;
     },
@@ -67,7 +70,9 @@ export function GrantTokensModal({ open, onOpenChange, user }: GrantTokensModalP
       description={user ? user.email : undefined}
       footer={
         <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
+          <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Btn>
           <Btn
             variant="primary"
             icon="zap"
@@ -98,7 +103,12 @@ export function GrantTokensModal({ open, onOpenChange, user }: GrantTokensModalP
           }}
         >
           {(field) => (
-            <Field label="Amount" required error={field.state.meta.errors[0]} hint="Whole tokens (e.g. 100000)">
+            <Field
+              label="Amount"
+              required
+              error={field.state.meta.errors[0]}
+              hint="Whole tokens (e.g. 100000)"
+            >
               <Input
                 type="number"
                 inputMode="numeric"

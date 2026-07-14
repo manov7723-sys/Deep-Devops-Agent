@@ -21,7 +21,8 @@ import { DOCKER_STACKS } from "@/lib/ci/templates";
 export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
   const gate = await requireProjectAccess(slug, "viewer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
   const projectId = gate.access.project.id;
 
   const [repos, clouds, targets] = await Promise.all([
@@ -30,7 +31,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
       select: { fullName: true, defaultBranch: true },
       orderBy: { fullName: "asc" },
     }),
-    prisma.cloudProvider.findMany({ where: { projectId }, select: { kind: true }, distinct: ["kind"] }),
+    prisma.cloudProvider.findMany({
+      where: { projectId },
+      select: { kind: true },
+      distinct: ["kind"],
+    }),
     listDeployTargets(projectId),
   ]);
   const kinds = clouds.map((c) => c.kind);
@@ -38,7 +43,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
   return NextResponse.json({
     ok: true,
     repos: repos.map((r) => ({ fullName: r.fullName, defaultBranch: r.defaultBranch || "main" })),
-    envs: targets.map((t) => ({ envKey: t.envKey, name: t.name, namespace: t.namespace, cloudKind: t.cloudKind })),
+    envs: targets.map((t) => ({
+      envKey: t.envKey,
+      name: t.name,
+      namespace: t.namespace,
+      cloudKind: t.cloudKind,
+    })),
     clouds: kinds,
     registrySupported: kinds.includes("aws"),
     stacks: DOCKER_STACKS.map((s) => ({ id: s.id, title: s.title, fields: s.fields })),
@@ -70,7 +80,10 @@ const Body = z.object({
   imageName: z.string().trim().max(200).optional(),
   containerPort: z.coerce.number().int().min(1).max(65535).optional(),
   replicas: z.coerce.number().int().min(1).max(50).optional(),
-  env: z.array(z.object({ key: z.string(), value: z.string() })).max(100).optional(),
+  env: z
+    .array(z.object({ key: z.string(), value: z.string() }))
+    .max(100)
+    .optional(),
   expose: z.boolean().optional(),
   host: z.string().trim().max(253).optional(),
   namespace: z.string().trim().max(63).optional(),
@@ -98,11 +111,15 @@ const Body = z.object({
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message },
+      { status: 400 },
+    );
   }
   const a = parsed.data;
   const toolCtx = { projectId: gate.access.project.id, userId: gate.access.session.userId };
@@ -142,30 +159,61 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       toolCtx,
     );
     if (!oidc.ok) {
-      return NextResponse.json({ ok: false, code: "registry_setup_failed", message: oidc.error }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, code: "registry_setup_failed", message: oidc.error },
+        { status: 400 },
+      );
     }
-    registry = { cloud: "aws", roleArn: oidc.output.roleArn, region: oidc.output.region, ecrRepositoryUri: oidc.output.ecrRepositoryUri };
+    registry = {
+      cloud: "aws",
+      roleArn: oidc.output.roleArn,
+      region: oidc.output.region,
+      ecrRepositoryUri: oidc.output.ecrRepositoryUri,
+    };
     ecrRepositoryUri = oidc.output.ecrRepositoryUri;
 
     // Publish the config as GitHub Actions VARIABLES (production style — the
     // generated workflow references vars.* instead of hardcoding ARN/region/URI).
     const repoRow = await prisma.repo.findFirst({
-      where: { fullName: a.repoFullName, deletedAt: null, projectRepos: { some: { projectId: toolCtx.projectId } } },
+      where: {
+        fullName: a.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: toolCtx.projectId } },
+      },
       select: { id: true },
     });
     if (repoRow) {
       const tok = await resolveTokenForRepo(repoRow.id);
       if (tok.ok) {
-        await setRepoActionsVariable(tok.accessToken, a.repoFullName, "AWS_ROLE_ARN", oidc.output.roleArn);
-        await setRepoActionsVariable(tok.accessToken, a.repoFullName, "AWS_REGION", oidc.output.region);
-        await setRepoActionsVariable(tok.accessToken, a.repoFullName, "ECR_REPOSITORY", oidc.output.ecrRepositoryUri);
+        await setRepoActionsVariable(
+          tok.accessToken,
+          a.repoFullName,
+          "AWS_ROLE_ARN",
+          oidc.output.roleArn,
+        );
+        await setRepoActionsVariable(
+          tok.accessToken,
+          a.repoFullName,
+          "AWS_REGION",
+          oidc.output.region,
+        );
+        await setRepoActionsVariable(
+          tok.accessToken,
+          a.repoFullName,
+          "ECR_REPOSITORY",
+          oidc.output.ecrRepositoryUri,
+        );
       }
     }
   }
 
   // 3) CI trigger branch = the repo's default branch (fixes the main/master bug).
   const repo = await prisma.repo.findFirst({
-    where: { fullName: a.repoFullName, deletedAt: null, projectRepos: { some: { projectId: toolCtx.projectId } } },
+    where: {
+      fullName: a.repoFullName,
+      deletedAt: null,
+      projectRepos: { some: { projectId: toolCtx.projectId } },
+    },
     select: { defaultBranch: true },
   });
   const branch = (a.branch || repo?.defaultBranch || "main").trim();
@@ -198,7 +246,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
 
   if (built.files.length === 0) {
     return NextResponse.json(
-      { ok: false, code: "no_files", message: "No files selected — enable at least one file to write." },
+      {
+        ok: false,
+        code: "no_files",
+        message: "No files selected — enable at least one file to write.",
+      },
       { status: 400 },
     );
   }
@@ -231,7 +283,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     );
     if (!res.ok) {
       return NextResponse.json(
-        { ok: false, code: "push_failed", message: `Failed writing ${f.path}: ${res.error}`, filesPushed: committed },
+        {
+          ok: false,
+          code: "push_failed",
+          message: `Failed writing ${f.path}: ${res.error}`,
+          filesPushed: committed,
+        },
         { status: 400 },
       );
     }
@@ -244,7 +301,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   let kubeconfigSet = false;
   let kubeconfigNote: string | undefined;
   if (a.setKubeconfig !== false && wantCd) {
-    const sec = await setKubeconfigSecretTool.execute({ repoFullName: a.repoFullName, envKey: a.envKey }, toolCtx);
+    const sec = await setKubeconfigSecretTool.execute(
+      { repoFullName: a.repoFullName, envKey: a.envKey },
+      toolCtx,
+    );
     kubeconfigSet = sec.ok;
     if (!sec.ok) kubeconfigNote = sec.error;
   }
@@ -256,10 +316,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   let registeredPipeline: { id: string; name: string; agentReview: boolean } | undefined;
   if (a.agentReview) {
     const saved = await savePipelineToProjectTool.execute(
-      { repoFullName: a.repoFullName, name: `CI/CD — ${a.appName}`, files: built.files, agentReview: true },
+      {
+        repoFullName: a.repoFullName,
+        name: `CI/CD — ${a.appName}`,
+        files: built.files,
+        agentReview: true,
+      },
       toolCtx,
     );
-    if (saved.ok) registeredPipeline = { id: saved.output.id, name: saved.output.name, agentReview: true };
+    if (saved.ok)
+      registeredPipeline = { id: saved.output.id, name: saved.output.name, agentReview: true };
   }
 
   return NextResponse.json({

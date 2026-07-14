@@ -3,11 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Badge, Block, Btn, Icon, PageHead } from "@/components/ui";
 import { PaymentMethodRow } from "@/components/domain/PaymentMethodRow";
-import {
-  useAddonCatalog,
-  useMyAddons,
-  useStartAddonCheckout,
-} from "@/hooks/queries/addons";
+import { useAddonCatalog, useMyAddons, useStartAddonCheckout } from "@/hooks/queries/addons";
 import { useInvoices, usePlan, useUsage } from "@/hooks/queries/me";
 import { api } from "@/lib/api/client";
 
@@ -111,22 +107,28 @@ export function SubscriptionClient() {
             {isUnlimited
               ? "Platform admin · unlimited access"
               : subscription
-              ? `${subscription.planName} plan · ${formatCents(subscription.basePriceCents, subscription.currency)}/mo`
-              : "No plan yet"}
+                ? `${subscription.planName} plan · ${formatCents(subscription.basePriceCents, subscription.currency)}/mo`
+                : "No plan yet"}
           </span>
           <span className="muted" style={{ fontSize: 13 }}>
             {isUnlimited
               ? "No plan or charges apply. Use the controls below to grant tokens to other users."
               : subscription
-              ? `Renews ${formatDate(subscription.currentPeriodEnd)}${defaultCard ? ` · ${defaultCard.brand} ending ${defaultCard.last4}` : ""}`
-              : "Pick a plan below to start your subscription."}
+                ? `Renews ${formatDate(subscription.currentPeriodEnd)}${defaultCard ? ` · ${defaultCard.brand} ending ${defaultCard.last4}` : ""}`
+                : "Pick a plan below to start your subscription."}
           </span>
         </div>
         {!isUnlimited && <Btn variant="outline">Change plan</Btn>}
       </div>
 
       {!isUnlimited && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: 14,
+          }}
+        >
           {(catalog ?? []).map((p) => {
             const current = subscription?.planTier === p.tier;
             return (
@@ -183,7 +185,14 @@ export function SubscriptionClient() {
           </Block.Actions>
         </Block.Header>
         {catalogAddons ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, padding: 14 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 14,
+              padding: 14,
+            }}
+          >
             {sortedAddons.map((a) => (
               <div key={a.id} className="card card-pad col gap-3">
                 <div className="row gap-2" style={{ alignItems: "center" }}>
@@ -194,7 +203,9 @@ export function SubscriptionClient() {
                   <span style={{ fontSize: 24, fontWeight: 800 }}>
                     ${(a.priceCents / 100).toFixed(0)}
                   </span>
-                  <span className="muted" style={{ fontSize: 12 }}>one-time</span>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    one-time
+                  </span>
                 </div>
                 <span className="muted" style={{ fontSize: 12.5, lineHeight: 1.4 }}>
                   +{a.tokenGrant.toLocaleString()} tokens · {a.description}
@@ -221,13 +232,16 @@ export function SubscriptionClient() {
         )}
         {recentPurchases.length > 0 && (
           <div style={{ borderTop: "1px solid var(--border)", padding: 14 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>Recent top-ups</span>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
+              Recent top-ups
+            </span>
             <div className="col gap-1" style={{ marginTop: 6 }}>
               {recentPurchases.map((p) => (
                 <div key={p.id} className="row between" style={{ fontSize: 12.5 }}>
                   <span>{p.name}</span>
                   <span className="faint">
-                    ${(p.priceCents / 100).toFixed(0)} · {new Date(p.purchasedAt).toLocaleDateString()}
+                    ${(p.priceCents / 100).toFixed(0)} ·{" "}
+                    {new Date(p.purchasedAt).toLocaleDateString()}
                   </span>
                 </div>
               ))}
@@ -250,7 +264,8 @@ export function SubscriptionClient() {
             <Block.Loading />
           ) : invoices.length === 0 ? (
             <span className="muted" style={{ fontSize: 13 }}>
-              No invoices yet. Purchases — plan upgrades or token packs — appear here once Stripe finalizes them.
+              No invoices yet. Purchases — plan upgrades or token packs — appear here once Stripe
+              finalizes them.
             </span>
           ) : (
             <div className="col gap-1">
@@ -258,17 +273,26 @@ export function SubscriptionClient() {
                 <div
                   key={inv.id}
                   className="row between"
-                  style={{ fontSize: 13, padding: "10px 0", borderBottom: "1px solid var(--border)" }}
+                  style={{
+                    fontSize: 13,
+                    padding: "10px 0",
+                    borderBottom: "1px solid var(--border)",
+                  }}
                 >
                   <div className="col" style={{ lineHeight: 1.35 }}>
                     <span className="row gap-2" style={{ fontWeight: 600, alignItems: "center" }}>
                       <span>{inv.number ?? inv.id.slice(0, 12)}</span>
-                      <Badge tone={inv.status === "paid" ? "ok" : inv.status === "open" ? "warn" : "default"}>
+                      <Badge
+                        tone={
+                          inv.status === "paid" ? "ok" : inv.status === "open" ? "warn" : "default"
+                        }
+                      >
                         {inv.status}
                       </Badge>
                     </span>
                     <span className="faint" style={{ fontSize: 12 }}>
-                      {formatDate(inv.paidAt ?? inv.issuedAt)} · {formatCents(inv.amountCents, inv.currency)}
+                      {formatDate(inv.paidAt ?? inv.issuedAt)} ·{" "}
+                      {formatCents(inv.amountCents, inv.currency)}
                     </span>
                   </div>
                   <div className="row gap-2">
@@ -277,7 +301,9 @@ export function SubscriptionClient() {
                         size="sm"
                         variant="ghost"
                         icon="eye"
-                        onClick={() => window.open(inv.hostedInvoiceUrl!, "_blank", "noopener,noreferrer")}
+                        onClick={() =>
+                          window.open(inv.hostedInvoiceUrl!, "_blank", "noopener,noreferrer")
+                        }
                       >
                         View
                       </Btn>

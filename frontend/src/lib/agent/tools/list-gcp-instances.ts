@@ -14,7 +14,9 @@ type VmItem = {
 type Output = { gcpProject: string; count: number; vms: VmItem[] };
 
 /** Find the project's GCP provider (per-project isolation). accountRef = GCP project id. */
-async function resolveGcpProvider(projectId: string): Promise<{ id: string; gcpProject: string } | null> {
+async function resolveGcpProvider(
+  projectId: string,
+): Promise<{ id: string; gcpProject: string } | null> {
   const cp = await prisma.cloudProvider.findFirst({
     where: { projectId, kind: "gcp" },
     select: { id: true, accountRef: true },
@@ -41,7 +43,8 @@ export const listGcpInstancesTool: Tool<Input, Output> = {
     if (!prov) {
       return {
         ok: false,
-        error: "No GCP account is connected to this project. Connect one with 'Sign in with Google' on the Cloud providers tab first.",
+        error:
+          "No GCP account is connected to this project. Connect one with 'Sign in with Google' on the Cloud providers tab first.",
       };
     }
     const tok = await getGcpAccessToken(prov.id);
@@ -50,20 +53,32 @@ export const listGcpInstancesTool: Tool<Input, Output> = {
     const url = `https://compute.googleapis.com/compute/v1/projects/${encodeURIComponent(prov.gcpProject)}/aggregated/instances`;
     let res: Response;
     try {
-      res = await fetch(url, { headers: { Authorization: `Bearer ${tok.accessToken}` }, cache: "no-store" });
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${tok.accessToken}` },
+        cache: "no-store",
+      });
     } catch (err) {
-      return { ok: false, error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}` };
+      return {
+        ok: false,
+        error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}`,
+      };
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       // 403 usually means the Compute Engine API isn't enabled on the project.
-      if (res.status === 403 && /Compute Engine API has not been used|SERVICE_DISABLED/i.test(body)) {
+      if (
+        res.status === 403 &&
+        /Compute Engine API has not been used|SERVICE_DISABLED/i.test(body)
+      ) {
         return {
           ok: false,
           error: `The Compute Engine API isn't enabled for GCP project "${prov.gcpProject}". Enable it at console.cloud.google.com/apis/library/compute.googleapis.com then retry.`,
         };
       }
-      return { ok: false, error: `GCP returned ${res.status} listing instances: ${body.slice(0, 220)}` };
+      return {
+        ok: false,
+        error: `GCP returned ${res.status} listing instances: ${body.slice(0, 220)}`,
+      };
     }
 
     const data = (await res.json().catch(() => ({}))) as {
@@ -75,7 +90,10 @@ export const listGcpInstancesTool: Tool<Input, Output> = {
             zone?: string;
             machineType?: string;
             status: string;
-            networkInterfaces?: Array<{ networkIP?: string; accessConfigs?: Array<{ natIP?: string }> }>;
+            networkInterfaces?: Array<{
+              networkIP?: string;
+              accessConfigs?: Array<{ natIP?: string }>;
+            }>;
           }>;
         }
       >;

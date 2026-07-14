@@ -68,7 +68,9 @@ export type CreateInvitationResult =
  * pending row (refreshes its TTL and MagicLink). A user who already holds
  * a Membership is rejected with `already_member`.
  */
-export async function createInvitation(args: CreateInvitationArgs): Promise<CreateInvitationResult> {
+export async function createInvitation(
+  args: CreateInvitationArgs,
+): Promise<CreateInvitationResult> {
   const email = args.email.trim().toLowerCase();
 
   // If the email already corresponds to a member, refuse.
@@ -158,7 +160,9 @@ export type InvitationPreviewRow = {
 };
 
 /** Preview an invitation by token (does NOT consume it). */
-export async function previewInvitationByToken(token: string): Promise<InvitationPreviewRow | null> {
+export async function previewInvitationByToken(
+  token: string,
+): Promise<InvitationPreviewRow | null> {
   // We can't lookup MagicLink by token alone without consuming, but we can
   // look it up by hash (the lookup function does that).
   const { lookupMagicLink } = await import("@/lib/auth/magic-link");

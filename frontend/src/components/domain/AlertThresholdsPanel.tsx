@@ -12,7 +12,13 @@ import { api, apiErrorMessage } from "@/lib/api/client";
 import { useProjectEnvs } from "@/hooks/queries/project";
 
 type Metric = "cpu" | "memory" | "disk";
-type Threshold = { metric: Metric; percent: number; severity: "low" | "medium" | "high"; enabled: boolean; isDefault: boolean };
+type Threshold = {
+  metric: Metric;
+  percent: number;
+  severity: "low" | "medium" | "high";
+  enabled: boolean;
+  isDefault: boolean;
+};
 type ListResp = { ok: true; thresholds: Threshold[] };
 
 const METRIC_LABEL: Record<Metric, string> = { cpu: "CPU", memory: "Memory", disk: "Disk" };
@@ -21,10 +27,16 @@ const SEVERITIES = ["low", "medium", "high"] as const;
 export function AlertThresholdsPanel({ slug }: { slug: string }) {
   const qc = useQueryClient();
   const { data: envs } = useProjectEnvs(slug);
-  const envList = (envs ?? []) as unknown as Array<{ key: string; name: string; namespace?: string }>;
+  const envList = (envs ?? []) as unknown as Array<{
+    key: string;
+    name: string;
+    namespace?: string;
+  }>;
   const [envKey, setEnvKey] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Record<string, { percent: string; severity: string; enabled: boolean }>>({});
+  const [draft, setDraft] = useState<
+    Record<string, { percent: string; severity: string; enabled: boolean }>
+  >({});
 
   useEffect(() => {
     if (!envKey && envList.length) setEnvKey(envList[0].key);
@@ -32,7 +44,8 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
 
   const thresholdsQ = useQuery<ListResp>({
     queryKey: ["p", slug, "alert-thresholds", envKey],
-    queryFn: () => api.get<ListResp>(`/projects/${slug}/alert-thresholds?envKey=${encodeURIComponent(envKey)}`),
+    queryFn: () =>
+      api.get<ListResp>(`/projects/${slug}/alert-thresholds?envKey=${encodeURIComponent(envKey)}`),
     enabled: !!envKey,
   });
 
@@ -41,7 +54,12 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
     const t = thresholdsQ.data?.thresholds;
     if (!t) return;
     const d: Record<string, { percent: string; severity: string; enabled: boolean }> = {};
-    for (const row of t) d[row.metric] = { percent: String(row.percent), severity: row.severity, enabled: row.enabled };
+    for (const row of t)
+      d[row.metric] = {
+        percent: String(row.percent),
+        severity: row.severity,
+        enabled: row.enabled,
+      };
     setDraft(d);
   }, [thresholdsQ.data]);
 
@@ -54,7 +72,10 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
   });
 
   const reset = useMutation({
-    mutationFn: (metric: Metric) => api.del(`/projects/${slug}/alert-thresholds?envKey=${encodeURIComponent(envKey)}&metric=${metric}`),
+    mutationFn: (metric: Metric) =>
+      api.del(
+        `/projects/${slug}/alert-thresholds?envKey=${encodeURIComponent(envKey)}&metric=${metric}`,
+      ),
     onMutate: () => setErr(null),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug, "alert-thresholds", envKey] }),
     onError: (e) => setErr(apiErrorMessage(e)),
@@ -98,8 +119,13 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
                 </thead>
                 <tbody>
                   {rows.map((row) => {
-                    const d = draft[row.metric] ?? { percent: String(row.percent), severity: row.severity, enabled: row.enabled };
-                    const set = (patch: Partial<typeof d>) => setDraft((prev) => ({ ...prev, [row.metric]: { ...d, ...patch } }));
+                    const d = draft[row.metric] ?? {
+                      percent: String(row.percent),
+                      severity: row.severity,
+                      enabled: row.enabled,
+                    };
+                    const set = (patch: Partial<typeof d>) =>
+                      setDraft((prev) => ({ ...prev, [row.metric]: { ...d, ...patch } }));
                     return (
                       <tr key={row.metric} style={{ borderTop: "1px solid var(--border)" }}>
                         <td style={{ padding: "8px 10px", fontWeight: 600 }}>
@@ -107,7 +133,13 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
                           {row.isDefault && <Badge tone="default">default</Badge>}
                         </td>
                         <td style={{ padding: "8px 10px", maxWidth: 120 }}>
-                          <Input type="number" min={1} max={100} value={d.percent} onChange={(e) => set({ percent: e.target.value })} />
+                          <Input
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={d.percent}
+                            onChange={(e) => set({ percent: e.target.value })}
+                          />
                         </td>
                         <td style={{ padding: "8px 10px", maxWidth: 140 }}>
                           <Select
@@ -118,7 +150,12 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
                           />
                         </td>
                         <td style={{ padding: "8px 10px" }}>
-                          <input type="checkbox" checked={d.enabled} onChange={(e) => set({ enabled: e.target.checked })} aria-label="Enabled" />
+                          <input
+                            type="checkbox"
+                            checked={d.enabled}
+                            onChange={(e) => set({ enabled: e.target.checked })}
+                            aria-label="Enabled"
+                          />
                         </td>
                         <td style={{ padding: "8px 10px" }}>
                           <span className="row gap-2">
@@ -126,12 +163,27 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
                               variant="primary"
                               size="sm"
                               loading={save.isPending}
-                              onClick={() => save.mutate({ metric: row.metric, percent: Math.max(1, Math.min(100, Number(d.percent) || row.percent)), severity: d.severity, enabled: d.enabled })}
+                              onClick={() =>
+                                save.mutate({
+                                  metric: row.metric,
+                                  percent: Math.max(
+                                    1,
+                                    Math.min(100, Number(d.percent) || row.percent),
+                                  ),
+                                  severity: d.severity,
+                                  enabled: d.enabled,
+                                })
+                              }
                             >
                               Save
                             </Btn>
                             {!row.isDefault && (
-                              <Btn variant="ghost" size="sm" loading={reset.isPending} onClick={() => reset.mutate(row.metric)}>
+                              <Btn
+                                variant="ghost"
+                                size="sm"
+                                loading={reset.isPending}
+                                onClick={() => reset.mutate(row.metric)}
+                              >
                                 Reset
                               </Btn>
                             )}
@@ -146,7 +198,8 @@ export function AlertThresholdsPanel({ slug }: { slug: string }) {
           )}
 
           <span className="muted" style={{ fontSize: 11.5 }}>
-            Changes to live alerts apply on the next poll (~1 min). Cloud alarms pick up new thresholds the next time you set them up (chat: “set up CloudWatch/Azure/GCP alarms”).
+            Changes to live alerts apply on the next poll (~1 min). Cloud alarms pick up new
+            thresholds the next time you set them up (chat: “set up CloudWatch/Azure/GCP alarms”).
           </span>
         </div>
       </Block.Body>

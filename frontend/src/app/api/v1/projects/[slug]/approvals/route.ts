@@ -11,12 +11,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   const gate = await requireProjectAccess(slug, "viewer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
   const status = new URL(req.url).searchParams.get("status");
-  const filter:
-    | { status: "pending" | "approved" | "rejected" }
-    | undefined =
-    status === "pending" || status === "approved" || status === "rejected"
-      ? { status }
-      : undefined;
+  const filter: { status: "pending" | "approved" | "rejected" } | undefined =
+    status === "pending" || status === "approved" || status === "rejected" ? { status } : undefined;
   const approvals = await listApprovals(gate.access.project.id, filter);
   return NextResponse.json(approvals);
 }

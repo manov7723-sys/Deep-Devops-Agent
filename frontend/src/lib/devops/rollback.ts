@@ -23,7 +23,8 @@ export async function rolloutHistory(
   const wrapped = await withKubectl(projectId, envKey, async (run, defaultNs) => {
     const ns = (namespace || defaultNs).trim();
     const res = await run(["rollout", "history", `deployment/${app}`, "-n", ns]);
-    if (res.exitCode !== 0) throw new Error(res.stderr.slice(-500) || res.stdout.slice(-500) || "rollout history failed");
+    if (res.exitCode !== 0)
+      throw new Error(res.stderr.slice(-500) || res.stdout.slice(-500) || "rollout history failed");
     // Output is a table: "REVISION  CHANGE-CAUSE\n1  <none>\n2  ...".
     const revisions: RolloutRevision[] = [];
     for (const line of res.stdout.split("\n")) {
@@ -45,7 +46,9 @@ export async function rollbackDeployment(
   envKey: string,
   appName: string,
   opts?: { namespace?: string; toRevision?: number },
-): Promise<{ ok: true; message: string; namespace: string; app: string } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; message: string; namespace: string; app: string } | { ok: false; error: string }
+> {
   const app = sanitizeAppName(appName);
   const wrapped = await withKubectl(projectId, envKey, async (run, defaultNs) => {
     const ns = (opts?.namespace || defaultNs).trim();

@@ -73,14 +73,13 @@ function GkeClusterUtilities({ slug }: { slug: string }) {
   const canDelete =
     !!envKey && project.trim().length > 0 && location.trim().length > 0 && name.trim().length > 0;
   const result = del.data;
-  const resultMsg =
-    result?.alreadyGone
-      ? `Cluster "${name}" was already gone.`
-      : result?.deleted
-        ? `Deleted "${name}". You can now regenerate + apply the Terraform.`
-        : del.error instanceof Error
-          ? del.error.message
-          : null;
+  const resultMsg = result?.alreadyGone
+    ? `Cluster "${name}" was already gone.`
+    : result?.deleted
+      ? `Deleted "${name}". You can now regenerate + apply the Terraform.`
+      : del.error instanceof Error
+        ? del.error.message
+        : null;
 
   return (
     <Block>
@@ -93,7 +92,9 @@ function GkeClusterUtilities({ slug }: { slug: string }) {
       </Block.Header>
       <Block.Body>
         {!envs || envs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>Create an environment first.</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Create an environment first.
+          </span>
         ) : (
           <div className="col gap-3" style={{ maxWidth: 520 }}>
             <Field label="Environment (provides GCP creds)">
@@ -152,7 +153,10 @@ function GkeClusterUtilities({ slug }: { slug: string }) {
               <span
                 style={{
                   fontSize: 12.5,
-                  color: result?.deleted || result?.alreadyGone ? "var(--ok, #30a46c)" : "var(--danger, #e5484d)",
+                  color:
+                    result?.deleted || result?.alreadyGone
+                      ? "var(--ok, #30a46c)"
+                      : "var(--danger, #e5484d)",
                 }}
               >
                 {resultMsg}
@@ -236,7 +240,9 @@ function useNowTick(enabled: boolean, intervalMs = 1000): number {
  *   Error: googleapi: Error 409: Already exists:
  *     projects/new-project-495604/locations/us-central1/clusters/dev.
  */
-function findOrphanedGkeCluster(run: TfRun): { project: string; location: string; name: string } | null {
+function findOrphanedGkeCluster(
+  run: TfRun,
+): { project: string; location: string; name: string } | null {
   if (run.status !== "failed") return null;
   for (const stage of run.stages) {
     // Only look at the stages that talk to Google — plan/apply.
@@ -252,7 +258,8 @@ function findOrphanedGkeCluster(run: TfRun): { project: string; location: string
 }
 
 function RunCard({ slug, run }: { slug: string; run: TfRun }) {
-  const runningTone = run.status === "succeeded" ? "ok" : run.status === "failed" ? "danger" : "info";
+  const runningTone =
+    run.status === "succeeded" ? "ok" : run.status === "failed" ? "danger" : "info";
   const rerun = useRerunTerraformRun(slug, run.envKey);
   const deleteGke = useDeleteGkeCluster(slug, run.envKey);
   const isTerminal = run.status === "succeeded" || run.status === "failed";
@@ -265,14 +272,13 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
   // "self-contained" invariant this app is built to).
   const orphan = findOrphanedGkeCluster(run);
   const deleteResult = deleteGke.data;
-  const deleteMsg =
-    deleteResult?.alreadyGone
-      ? `The cluster "${orphan?.name}" was already gone. Rerun should succeed now.`
-      : deleteResult?.deleted
-        ? `Deleted "${orphan?.name}". Hit Rerun to apply again.`
-        : deleteGke.error instanceof Error
-          ? deleteGke.error.message
-          : null;
+  const deleteMsg = deleteResult?.alreadyGone
+    ? `The cluster "${orphan?.name}" was already gone. Rerun should succeed now.`
+    : deleteResult?.deleted
+      ? `Deleted "${orphan?.name}". Hit Rerun to apply again.`
+      : deleteGke.error instanceof Error
+        ? deleteGke.error.message
+        : null;
 
   // Live clock while the run is still going. Ends the moment the badge
   // flips to succeeded/failed. Also drives per-stage "still running" counters.
@@ -290,11 +296,16 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
   return (
     <Block>
       <Block.Header>
-        <div className="row gap-2" style={{ alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+        <div
+          className="row gap-2"
+          style={{ alignItems: "center", justifyContent: "space-between", width: "100%" }}
+        >
           <Block.Title sub={`${run.action} · ${run.envKey}`}>
             <span className="row gap-2" style={{ alignItems: "center" }}>
               {run.name}
-              <Badge tone={runningTone} withDot>{run.status}</Badge>
+              <Badge tone={runningTone} withDot>
+                {run.status}
+              </Badge>
               {runTimeLabel && (
                 <span
                   className="row gap-1 muted"
@@ -314,7 +325,9 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
                 variant="outline"
                 icon="trash"
                 loading={deleteGke.isPending}
-                disabled={deleteGke.isPending || !!deleteResult?.deleted || !!deleteResult?.alreadyGone}
+                disabled={
+                  deleteGke.isPending || !!deleteResult?.deleted || !!deleteResult?.alreadyGone
+                }
                 title={`Delete the orphaned cluster ${orphan.project}/${orphan.location}/${orphan.name} in GCP via stored env creds (5-8 min).`}
                 onClick={() => deleteGke.mutate(orphan)}
               >
@@ -347,12 +360,18 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
             return (
               <div key={s.name} className="col gap-1">
                 <div className="row gap-2" style={{ alignItems: "center" }}>
-                  <Badge tone={STAGE_TONE[s.status]} withDot>{s.name}</Badge>
+                  <Badge tone={STAGE_TONE[s.status]} withDot>
+                    {s.name}
+                  </Badge>
                   <span className="muted" style={{ fontSize: 12 }}>
-                    {s.status}{typeof s.exitCode === "number" ? ` · exit ${s.exitCode}` : ""}
+                    {s.status}
+                    {typeof s.exitCode === "number" ? ` · exit ${s.exitCode}` : ""}
                   </span>
                   {stageDuration && s.status !== "pending" && s.status !== "skipped" && (
-                    <span className="row gap-1 muted" style={{ fontSize: 12, alignItems: "center" }}>
+                    <span
+                      className="row gap-1 muted"
+                      style={{ fontSize: 12, alignItems: "center" }}
+                    >
                       <span aria-hidden>·</span>
                       <Icon name="clock" size={11} />
                       {stageDuration}
@@ -360,14 +379,27 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
                   )}
                 </div>
                 {s.logs.trim() && (
-                  <pre style={{ fontSize: 11.5, overflowX: "auto", whiteSpace: "pre-wrap", margin: 0, maxHeight: 220, background: "var(--surface-2, #0000000a)", padding: 8, borderRadius: 6 }}>
+                  <pre
+                    style={{
+                      fontSize: 11.5,
+                      overflowX: "auto",
+                      whiteSpace: "pre-wrap",
+                      margin: 0,
+                      maxHeight: 220,
+                      background: "var(--surface-2, #0000000a)",
+                      padding: 8,
+                      borderRadius: 6,
+                    }}
+                  >
                     {s.logs.slice(-4000)}
                   </pre>
                 )}
               </div>
             );
           })}
-          {run.error && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>{run.error}</span>}
+          {run.error && (
+            <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>{run.error}</span>
+          )}
           {errText && (
             <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>
               {errText.includes("source_evicted") || errText.includes("410")
@@ -377,7 +409,8 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
           )}
           {orphan && !deleteGke.isPending && !deleteResult && (
             <span className="muted" style={{ fontSize: 12.5 }}>
-              A cluster with this name already exists in GCP (likely from an earlier apply that lost state). Use
+              A cluster with this name already exists in GCP (likely from an earlier apply that lost
+              state). Use
               <b> Delete existing cluster</b> to wipe it, then Rerun.
             </span>
           )}
@@ -385,7 +418,10 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
             <span
               style={{
                 fontSize: 12.5,
-                color: deleteResult?.deleted || deleteResult?.alreadyGone ? "var(--ok, #30a46c)" : "var(--danger, #e5484d)",
+                color:
+                  deleteResult?.deleted || deleteResult?.alreadyGone
+                    ? "var(--ok, #30a46c)"
+                    : "var(--danger, #e5484d)",
               }}
             >
               {deleteMsg}
@@ -421,7 +457,9 @@ function TerraformPipelineSection({ slug }: { slug: string }) {
       </Block.Header>
       <Block.Body>
         {!envs || envs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>Create an environment to run Terraform.</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Create an environment to run Terraform.
+          </span>
         ) : (
           <div className="col gap-3">
             <div style={{ maxWidth: 320 }}>
@@ -440,7 +478,9 @@ function TerraformPipelineSection({ slug }: { slug: string }) {
               </span>
             ) : (
               <div className="col gap-3">
-                {runs.map((r) => <RunCard key={r.id} slug={slug} run={r} />)}
+                {runs.map((r) => (
+                  <RunCard key={r.id} slug={slug} run={r} />
+                ))}
               </div>
             )}
           </div>
@@ -475,13 +515,32 @@ function CredentialsSection({ slug }: { slug: string }) {
         ) : (
           <div className="col gap-2">
             {aws.map((p) => (
-              <div key={p.providerId} className="row gap-3" style={{ alignItems: "center", justifyContent: "space-between" }}>
+              <div
+                key={p.providerId}
+                className="row gap-3"
+                style={{ alignItems: "center", justifyContent: "space-between" }}
+              >
                 <div className="row gap-2" style={{ alignItems: "center" }}>
                   <span style={{ fontWeight: 600 }}>{p.name}</span>
-                  <span className="muted" style={{ fontSize: 13 }}>{p.region}</span>
-                  {p.hasVaultCreds ? <Badge tone="ok" withDot>keys in Vault</Badge> : <Badge tone="warn" withDot>no keys</Badge>}
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    {p.region}
+                  </span>
+                  {p.hasVaultCreds ? (
+                    <Badge tone="ok" withDot>
+                      keys in Vault
+                    </Badge>
+                  ) : (
+                    <Badge tone="warn" withDot>
+                      no keys
+                    </Badge>
+                  )}
                 </div>
-                <Btn variant="outline" size="sm" icon="lock" onClick={() => setCredFor({ id: p.providerId, name: p.name })}>
+                <Btn
+                  variant="outline"
+                  size="sm"
+                  icon="lock"
+                  onClick={() => setCredFor({ id: p.providerId, name: p.name })}
+                >
                   {p.hasVaultCreds ? "Update keys" : "Add keys"}
                 </Btn>
               </div>
@@ -550,38 +609,62 @@ function StateSection({ slug }: { slug: string }) {
       </Block.Header>
       <Block.Body>
         {!envs || envs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>Create an environment first to configure its state backend.</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Create an environment first to configure its state backend.
+          </span>
         ) : (
           <div className="col gap-3" style={{ maxWidth: 520 }}>
-          <Field label="Environment">
-            <Select
-              value={envKey}
-              onValueChange={(v) => { setEnvKey(v); setMsg(null); }}
-              ariaLabel="Environment"
-              options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))}
-            />
-          </Field>
-          <Field label="S3 state bucket" required>
-            <Input value={bucket} onChange={(e) => setBucket(e.target.value)} placeholder="my-tfstate-bucket" />
-          </Field>
-          <Field label="Bucket region" required>
-            <Input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="us-east-1" />
-          </Field>
-          <Field label="DynamoDB lock table" hint="Optional — enables state locking.">
-            <Input value={table} onChange={(e) => setTable(e.target.value)} placeholder="terraform-locks" />
-          </Field>
-          <div className="row gap-2" style={{ alignItems: "center" }}>
-            <Btn
-              variant="primary"
-              icon="check"
-              loading={save.isPending}
-              disabled={!bucket.trim() || !region.trim()}
-              onClick={() => { setMsg(null); save.mutate(); }}
-            >
-              Save state backend
-            </Btn>
-            {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
-          </div>
+            <Field label="Environment">
+              <Select
+                value={envKey}
+                onValueChange={(v) => {
+                  setEnvKey(v);
+                  setMsg(null);
+                }}
+                ariaLabel="Environment"
+                options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))}
+              />
+            </Field>
+            <Field label="S3 state bucket" required>
+              <Input
+                value={bucket}
+                onChange={(e) => setBucket(e.target.value)}
+                placeholder="my-tfstate-bucket"
+              />
+            </Field>
+            <Field label="Bucket region" required>
+              <Input
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                placeholder="us-east-1"
+              />
+            </Field>
+            <Field label="DynamoDB lock table" hint="Optional — enables state locking.">
+              <Input
+                value={table}
+                onChange={(e) => setTable(e.target.value)}
+                placeholder="terraform-locks"
+              />
+            </Field>
+            <div className="row gap-2" style={{ alignItems: "center" }}>
+              <Btn
+                variant="primary"
+                icon="check"
+                loading={save.isPending}
+                disabled={!bucket.trim() || !region.trim()}
+                onClick={() => {
+                  setMsg(null);
+                  save.mutate();
+                }}
+              >
+                Save state backend
+              </Btn>
+              {msg && (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {msg}
+                </span>
+              )}
+            </div>
           </div>
         )}
       </Block.Body>

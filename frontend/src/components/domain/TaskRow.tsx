@@ -30,10 +30,7 @@ export function TaskRow({ task: t, onRun }: TaskRowProps) {
     <div className="card card-pad">
       <div className="row between wrap gap-3">
         <div className="row gap-3" style={{ minWidth: 0 }}>
-          <span
-            className="row center dda-task-icon"
-            style={{ background: bg.bg, color: bg.fg }}
-          >
+          <span className="row center dda-task-icon" style={{ background: bg.bg, color: bg.fg }}>
             <Icon name={t.icon as IconName} size={19} />
           </span>
           <div className="col" style={{ lineHeight: 1.4, minWidth: 0 }}>
@@ -57,7 +54,10 @@ export function TaskRow({ task: t, onRun }: TaskRowProps) {
             <Badge tone={envTone}>{envLabel}</Badge>
           </div>
           {t.status === "running" ? (
-            <span className="row gap-2" style={{ color: "var(--info)", fontSize: 12.5, fontWeight: 700 }}>
+            <span
+              className="row gap-2"
+              style={{ color: "var(--info)", fontSize: 12.5, fontWeight: 700 }}
+            >
               <Icon name="refresh" size={15} className="spin" />
               Running
             </span>

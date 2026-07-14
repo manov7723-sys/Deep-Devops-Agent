@@ -78,8 +78,14 @@ export function verifyTotp(code: string): boolean {
 }
 
 export function totpSetupFor(email: string): { secret: string; otpauthUrl: string } {
-  const base = Buffer.from(`dda:${email}`).toString("base64").replace(/[^A-Z]/gi, "").toUpperCase();
-  const secret = (base + "JBSWY3DPEHPK3PXP").slice(0, 16).match(/.{1,4}/g)!.join(" ");
+  const base = Buffer.from(`dda:${email}`)
+    .toString("base64")
+    .replace(/[^A-Z]/gi, "")
+    .toUpperCase();
+  const secret = (base + "JBSWY3DPEHPK3PXP")
+    .slice(0, 16)
+    .match(/.{1,4}/g)!
+    .join(" ");
   const otpauthUrl = `otpauth://totp/DeepAgent:${encodeURIComponent(email)}?secret=${secret.replace(/\s/g, "")}&issuer=DeepAgent`;
   return { secret, otpauthUrl };
 }

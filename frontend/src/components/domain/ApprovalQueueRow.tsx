@@ -17,7 +17,12 @@ export interface ApprovalQueueRowProps {
   onSelect: (id: string) => void;
 }
 
-export function ApprovalQueueRow({ approval: a, active, decision, onSelect }: ApprovalQueueRowProps) {
+export function ApprovalQueueRow({
+  approval: a,
+  active,
+  decision,
+  onSelect,
+}: ApprovalQueueRowProps) {
   return (
     <button
       type="button"

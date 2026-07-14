@@ -33,7 +33,10 @@ export const setAzureContextTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       subscriptionId: { type: "string", description: "Chosen subscription id." },
-      resourceGroup: { type: "string", description: "Chosen resource group (empty string to clear)." },
+      resourceGroup: {
+        type: "string",
+        description: "Chosen resource group (empty string to clear).",
+      },
       region: { type: "string", description: "Chosen region, e.g. eastus." },
     },
     required: [],
@@ -51,7 +54,10 @@ export const setAzureContextTool: Tool<Input, Output> = {
     if (input.resourceGroup !== undefined) data.resourceGroup = input.resourceGroup.trim() || null;
     if (input.region?.trim()) data.region = input.region.trim();
     if (Object.keys(data).length === 0) {
-      return { ok: false, error: "Nothing to save — pass subscriptionId, resourceGroup, and/or region." };
+      return {
+        ok: false,
+        error: "Nothing to save — pass subscriptionId, resourceGroup, and/or region.",
+      };
     }
 
     const updated = await prisma.cloudProvider.update({

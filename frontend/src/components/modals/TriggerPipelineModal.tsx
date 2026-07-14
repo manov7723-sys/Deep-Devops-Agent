@@ -148,7 +148,9 @@ export function TriggerPipelineModal({
       footer={
         successInfo ? (
           <>
-            <Btn variant="ghost" onClick={close}>Close</Btn>
+            <Btn variant="ghost" onClick={close}>
+              Close
+            </Btn>
             {successInfo.approval ? (
               <a
                 className="btn primary"
@@ -169,7 +171,9 @@ export function TriggerPipelineModal({
           </>
         ) : (
           <>
-            <Btn variant="ghost" onClick={close}>Cancel</Btn>
+            <Btn variant="ghost" onClick={close}>
+              Cancel
+            </Btn>
             <Btn
               variant="primary"
               icon="play"
@@ -201,12 +205,23 @@ export function TriggerPipelineModal({
             </strong>
           </div>
           <div className="col gap-1" style={{ fontSize: 13 }}>
-            <span><b>Pipeline:</b> <span className="mono">{successInfo.pipeline?.id.slice(0, 8)}</span></span>
-            <span><b>Branch:</b> {successInfo.pipeline?.branch}</span>
-            <span><b>SHA:</b> <span className="mono">{successInfo.pipeline?.sha.slice(0, 7)}</span></span>
-            <span><b>Status:</b> {successInfo.pipeline?.status}</span>
+            <span>
+              <b>Pipeline:</b> <span className="mono">{successInfo.pipeline?.id.slice(0, 8)}</span>
+            </span>
+            <span>
+              <b>Branch:</b> {successInfo.pipeline?.branch}
+            </span>
+            <span>
+              <b>SHA:</b> <span className="mono">{successInfo.pipeline?.sha.slice(0, 7)}</span>
+            </span>
+            <span>
+              <b>Status:</b> {successInfo.pipeline?.status}
+            </span>
             {successInfo.approval && (
-              <span><b>Approval:</b> <span className="mono">{successInfo.approval.id.slice(0, 8)}</span> · pending</span>
+              <span>
+                <b>Approval:</b> <span className="mono">{successInfo.approval.id.slice(0, 8)}</span>{" "}
+                · pending
+              </span>
             )}
           </div>
         </div>
@@ -282,7 +297,10 @@ export function TriggerPipelineModal({
 
           <form.Field name="sha">
             {(field) => (
-              <Field label="Commit SHA" hint="Optional — defaults to a fresh ref captured from HEAD.">
+              <Field
+                label="Commit SHA"
+                hint="Optional — defaults to a fresh ref captured from HEAD."
+              >
                 <Input
                   className="mono"
                   placeholder="a1b2c3d…"

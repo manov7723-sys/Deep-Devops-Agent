@@ -38,7 +38,11 @@ export const accountTokenSelect = {
 
 export type FreshToken =
   | { ok: true; accessToken: string; refreshed: boolean }
-  | { ok: false; code: "no_token" | "decrypt_failed" | "reconnect" | "not_configured"; message: string };
+  | {
+      ok: false;
+      code: "no_token" | "decrypt_failed" | "reconnect" | "not_configured";
+      message: string;
+    };
 
 // Refresh slightly before the real expiry to avoid racing the clock on a
 // request that takes a moment to reach GitLab.
@@ -46,18 +50,27 @@ const EXPIRY_SKEW_MS = 60_000;
 
 export async function getFreshAccessTokenForAccount(acc: AccountTokenRow): Promise<FreshToken> {
   if (!acc.accessTokenRef) {
-    return { ok: false, code: "no_token", message: "Connected account has no access token — reconnect it." };
+    return {
+      ok: false,
+      code: "no_token",
+      message: "Connected account has no access token — reconnect it.",
+    };
   }
 
   let accessToken: string;
   try {
     accessToken = decryptSecret(acc.accessTokenRef);
   } catch {
-    return { ok: false, code: "decrypt_failed", message: "Could not decrypt the access token — reconnect this account." };
+    return {
+      ok: false,
+      code: "decrypt_failed",
+      message: "Could not decrypt the access token — reconnect this account.",
+    };
   }
 
   // Only GitLab tokens expire. GitHub never expires; Google isn't used for repos.
-  const expiresSoon = acc.tokenExpiresAt != null && acc.tokenExpiresAt.getTime() - EXPIRY_SKEW_MS <= Date.now();
+  const expiresSoon =
+    acc.tokenExpiresAt != null && acc.tokenExpiresAt.getTime() - EXPIRY_SKEW_MS <= Date.now();
   if (acc.provider !== "gitlab" || !expiresSoon) {
     return { ok: true, accessToken, refreshed: false };
   }
@@ -67,18 +80,30 @@ export async function getFreshAccessTokenForAccount(acc: AccountTokenRow): Promi
 
 async function refreshGitlab(acc: AccountTokenRow): Promise<FreshToken> {
   if (!acc.refreshTokenRef) {
-    return { ok: false, code: "reconnect", message: "GitLab session expired and no refresh token is stored — reconnect GitLab." };
+    return {
+      ok: false,
+      code: "reconnect",
+      message: "GitLab session expired and no refresh token is stored — reconnect GitLab.",
+    };
   }
   let refreshToken: string;
   try {
     refreshToken = decryptSecret(acc.refreshTokenRef);
   } catch {
-    return { ok: false, code: "reconnect", message: "GitLab refresh token is unreadable — reconnect GitLab." };
+    return {
+      ok: false,
+      code: "reconnect",
+      message: "GitLab refresh token is unreadable — reconnect GitLab.",
+    };
   }
 
   const cfg = await getProviderAsync("gitlab");
   if (!cfg || !cfg.clientId || !cfg.clientSecret) {
-    return { ok: false, code: "not_configured", message: "GitLab OAuth is not configured on the server." };
+    return {
+      ok: false,
+      code: "not_configured",
+      message: "GitLab OAuth is not configured on the server.",
+    };
   }
 
   const base = (acc.providerBaseUrl || gitlabBaseUrl()).replace(/\/+$/, "");
@@ -111,7 +136,11 @@ async function refreshGitlab(acc: AccountTokenRow): Promise<FreshToken> {
         where: { id: acc.id },
         select: { accessTokenRef: true, tokenExpiresAt: true },
       });
-      if (fresh?.accessTokenRef && fresh.tokenExpiresAt && fresh.tokenExpiresAt.getTime() - EXPIRY_SKEW_MS > Date.now()) {
+      if (
+        fresh?.accessTokenRef &&
+        fresh.tokenExpiresAt &&
+        fresh.tokenExpiresAt.getTime() - EXPIRY_SKEW_MS > Date.now()
+      ) {
         try {
           return { ok: true, accessToken: decryptSecret(fresh.accessTokenRef), refreshed: true };
         } catch {
@@ -119,7 +148,11 @@ async function refreshGitlab(acc: AccountTokenRow): Promise<FreshToken> {
         }
       }
     }
-    return { ok: false, code: "reconnect", message: "GitLab session expired — reconnect GitLab to continue." };
+    return {
+      ok: false,
+      code: "reconnect",
+      message: "GitLab session expired — reconnect GitLab to continue.",
+    };
   }
 
   const newAccess = body.access_token;

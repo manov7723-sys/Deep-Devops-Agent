@@ -21,7 +21,10 @@ export const listRolloutHistoryTool: Tool<
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: "Env key the app is deployed to (from list_deploy_targets)." },
+      envKey: {
+        type: "string",
+        description: "Env key the app is deployed to (from list_deploy_targets).",
+      },
       appName: { type: "string", description: "The deployed app / Deployment name." },
       namespace: { type: "string", description: "Namespace. Defaults to the env's namespace." },
     },
@@ -49,10 +52,17 @@ export const rollbackDeploymentTool: Tool<
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: "Env key the app is deployed to (from list_deploy_targets)." },
+      envKey: {
+        type: "string",
+        description: "Env key the app is deployed to (from list_deploy_targets).",
+      },
       appName: { type: "string", description: "The deployed app / Deployment name to roll back." },
       namespace: { type: "string", description: "Namespace. Defaults to the env's namespace." },
-      toRevision: { type: "number", description: "Optional specific revision to revert to (from list_rollout_history). Omit to go to the immediately previous version." },
+      toRevision: {
+        type: "number",
+        description:
+          "Optional specific revision to revert to (from list_rollout_history). Omit to go to the immediately previous version.",
+      },
     },
     required: ["envKey", "appName"],
     additionalProperties: false,
@@ -72,10 +82,19 @@ export const rollbackDeploymentTool: Tool<
     if (!res.ok) return { ok: false, error: res.error };
 
     const where = `${res.app} → ${input.envKey}`;
-    const detail = input.toRevision ? `Rolled back to revision ${input.toRevision}.` : "Rolled back to the previous version.";
+    const detail = input.toRevision
+      ? `Rolled back to revision ${input.toRevision}.`
+      : "Rolled back to the previous version.";
     await postEventToChatOps(ctx.projectId, "↩️", `Rolled back ${where}`, detail).catch(() => {});
-    await emailProjectMembers(ctx.projectId, `↩️ Rolled back — ${where}`, `"${res.app}" in ${input.envKey} was rolled back.\n\n${detail}`).catch(() => {});
+    await emailProjectMembers(
+      ctx.projectId,
+      `↩️ Rolled back — ${where}`,
+      `"${res.app}" in ${input.envKey} was rolled back.\n\n${detail}`,
+    ).catch(() => {});
 
-    return { ok: true, output: { rolledBack: true, app: res.app, namespace: res.namespace, message: res.message } };
+    return {
+      ok: true,
+      output: { rolledBack: true, app: res.app, namespace: res.namespace, message: res.message },
+    };
   },
 };

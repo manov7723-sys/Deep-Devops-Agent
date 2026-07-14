@@ -42,19 +42,36 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, message: parsed.error.issues[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, message: parsed.error.issues[0]?.message },
+      { status: 400 },
+    );
   const b = parsed.data;
 
   const envs = await listEnvs(gate.access.project.id);
   const env = envs.find((e) => e.key === b.envKey);
-  if (!env) return NextResponse.json({ ok: false, message: `Env "${b.envKey}" not found.` }, { status: 400 });
+  if (!env)
+    return NextResponse.json(
+      { ok: false, message: `Env "${b.envKey}" not found.` },
+      { status: 400 },
+    );
 
   // Cloud is ALWAYS the env's connected cloud — never the client's choice. This
   // keeps the whole gate scoped to THIS project's cloud provider.
-  const cloud = env.cloudKind === "aws" || env.cloudKind === "azure" || env.cloudKind === "gcp" ? env.cloudKind : null;
-  if (!cloud) return NextResponse.json({ ok: false, message: `Environment "${b.envKey}" has no cloud provider connected.` }, { status: 400 });
+  const cloud =
+    env.cloudKind === "aws" || env.cloudKind === "azure" || env.cloudKind === "gcp"
+      ? env.cloudKind
+      : null;
+  if (!cloud)
+    return NextResponse.json(
+      { ok: false, message: `Environment "${b.envKey}" has no cloud provider connected.` },
+      { status: 400 },
+    );
 
-  const files: TerraformFile[] = (b.hcl || "").trim() ? [{ path: "main.tf", content: b.hcl!.trim() }] : [];
+  const files: TerraformFile[] = (b.hcl || "").trim()
+    ? [{ path: "main.tf", content: b.hcl!.trim() }]
+    : [];
 
   const est = estimateInfraCost({
     cloud,
@@ -75,15 +92,38 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     region: b.region,
     instanceType: b.instanceType,
     publicBucket: b.publicBucket,
-    name: b.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40) || "infra-change",
+    name:
+      b.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .slice(0, 40) || "infra-change",
     files,
     costMonthly: est.monthly,
     planSummary: [
       { change: "add", text: b.summary || b.title },
-      ...(b.instanceType && b.nodeCount ? [{ change: "add" as const, text: `${b.nodeCount} × ${b.instanceType} in ${b.region || "default region"}` }] : []),
+      ...(b.instanceType && b.nodeCount
+        ? [
+            {
+              change: "add" as const,
+              text: `${b.nodeCount} × ${b.instanceType} in ${b.region || "default region"}`,
+            },
+          ]
+        : []),
     ],
   });
 
-  if (!res.ok) return NextResponse.json({ ok: true, status: "blocked", violations: res.policy.violations, costMonthly: est.monthly });
-  return NextResponse.json({ ok: true, status: "pending_approval", approvalId: res.approvalId, risk: res.risk, costMonthly: est.monthly });
+  if (!res.ok)
+    return NextResponse.json({
+      ok: true,
+      status: "blocked",
+      violations: res.policy.violations,
+      costMonthly: est.monthly,
+    });
+  return NextResponse.json({
+    ok: true,
+    status: "pending_approval",
+    approvalId: res.approvalId,
+    risk: res.risk,
+    costMonthly: est.monthly,
+  });
 }

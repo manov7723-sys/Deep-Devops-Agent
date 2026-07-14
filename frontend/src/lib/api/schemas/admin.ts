@@ -23,9 +23,7 @@ export const AdminSubscription = z.object({
   status: z.enum(["active", "trial", "past_due", "suspended"]),
   renews: z.string(),
   method: z.string(),
-  addons: z.array(
-    z.object({ name: z.string(), price: z.number(), icon: z.string() }),
-  ),
+  addons: z.array(z.object({ name: z.string(), price: z.number(), icon: z.string() })),
 });
 export type AdminSubscription = z.infer<typeof AdminSubscription>;
 

@@ -32,10 +32,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     parsed.data.repoId,
   );
   if (!res.ok) {
-    const status =
-      res.code === "repo_not_found" ? 404 :
-      res.code === "repo_not_yours" ? 403 :
-      409;
+    const status = res.code === "repo_not_found" ? 404 : res.code === "repo_not_yours" ? 403 : 409;
     return NextResponse.json({ ok: false, code: res.code }, { status });
   }
   const meta = extractRequestMeta(req);
@@ -79,13 +76,20 @@ export async function PUT(req: Request, ctx: { params: Promise<{ slug: string }>
     return NextResponse.json({ ok: false, code: "invalid_request" }, { status: 400 });
   }
 
-  const res = await setProjectRepo(gate.access.session.userId, gate.access.project.id, parsed.data.repoId);
+  const res = await setProjectRepo(
+    gate.access.session.userId,
+    gate.access.project.id,
+    parsed.data.repoId,
+  );
   if (!res.ok) {
     const status = res.code === "repo_not_found" ? 404 : res.code === "repo_not_yours" ? 403 : 409;
     return NextResponse.json({ ok: false, code: res.code }, { status });
   }
 
-  const repo = await prisma.repo.findUnique({ where: { id: parsed.data.repoId }, select: { fullName: true } });
+  const repo = await prisma.repo.findUnique({
+    where: { id: parsed.data.repoId },
+    select: { fullName: true },
+  });
   const meta = extractRequestMeta(req);
   await audit({
     userId: gate.access.session.userId,

@@ -113,15 +113,17 @@ export type PatchWorkloadArgs = Partial<{
 }>;
 
 export type PatchWorkloadResult =
-  | { ok: true; workload: WorkloadRow }
-  | { ok: false; code: "not_found" };
+  { ok: true; workload: WorkloadRow } | { ok: false; code: "not_found" };
 
 export async function patchWorkload(
   projectId: string,
   id: string,
   patch: PatchWorkloadArgs,
 ): Promise<PatchWorkloadResult> {
-  const existing = await prisma.managedResource.findFirst({ where: { id, projectId }, select: { id: true } });
+  const existing = await prisma.managedResource.findFirst({
+    where: { id, projectId },
+    select: { id: true },
+  });
   if (!existing) return { ok: false, code: "not_found" };
 
   const updated = await prisma.managedResource.update({

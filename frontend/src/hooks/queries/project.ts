@@ -127,10 +127,12 @@ export function useUpdateEnv(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { key: string; patch: UpdateEnvPatch }) => {
-      const res = await api.patch<{ ok: boolean; env?: ProjectEnv; message?: string; code?: string }>(
-        `/projects/${slug}/envs/${input.key}`,
-        input.patch,
-      );
+      const res = await api.patch<{
+        ok: boolean;
+        env?: ProjectEnv;
+        message?: string;
+        code?: string;
+      }>(`/projects/${slug}/envs/${input.key}`, input.patch);
       if (!res.ok || !res.env) throw new Error(res.message ?? res.code ?? "Could not update env.");
       return res.env;
     },
@@ -410,7 +412,9 @@ export function useAlertAction(slug: string) {
         if (!data) continue;
         qc.setQueryData<SeedAlert[]>(
           key,
-          data.map((a) => (a.id === id ? { ...a, status: action === "ack" ? "ack" : "resolved" } : a)),
+          data.map((a) =>
+            a.id === id ? { ...a, status: action === "ack" ? "ack" : "resolved" } : a,
+          ),
         );
       }
       return { snapshots };
@@ -424,8 +428,7 @@ export function useAlertAction(slug: string) {
 export function useApprovalDetail(slug: string, id: string | null) {
   return useQuery({
     queryKey: pk(slug, "approvals", id ?? ""),
-    queryFn: () =>
-      api.get<SeedApproval & SeedApprovalDetail>(`/projects/${slug}/approvals/${id}`),
+    queryFn: () => api.get<SeedApproval & SeedApprovalDetail>(`/projects/${slug}/approvals/${id}`),
     enabled: !!id,
     staleTime: 15_000,
   });
@@ -491,15 +494,17 @@ export function useProjectSettings(slug: string) {
 export function useUpdateProjectSettings(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (patch: Partial<{
-      name: string;
-      description: string;
-      defaultBranch: string;
-      autoDeployNonProd: boolean;
-      requireApprovalRelease: boolean;
-      defaultModel: string;
-      colorHue: number;
-    }>) => {
+    mutationFn: async (
+      patch: Partial<{
+        name: string;
+        description: string;
+        defaultBranch: string;
+        autoDeployNonProd: boolean;
+        requireApprovalRelease: boolean;
+        defaultModel: string;
+        colorHue: number;
+      }>,
+    ) => {
       const res = await api.patch<{ ok: boolean; project: SeedProject; meta: ProjectMeta }>(
         `/projects/${slug}/settings`,
         patch,
@@ -519,10 +524,12 @@ export function useArchiveProject(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await api.post<{ ok: boolean; archivedAt?: string; message?: string; code?: string }>(
-        `/projects/${slug}/archive`,
-        {},
-      );
+      const res = await api.post<{
+        ok: boolean;
+        archivedAt?: string;
+        message?: string;
+        code?: string;
+      }>(`/projects/${slug}/archive`, {});
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not archive project.");
       return res;
     },
@@ -679,9 +686,12 @@ export function useDeleteProject(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await api.del<{ ok: boolean; deletedAt?: string; message?: string; code?: string }>(
-        `/projects/${slug}`,
-      );
+      const res = await api.del<{
+        ok: boolean;
+        deletedAt?: string;
+        message?: string;
+        code?: string;
+      }>(`/projects/${slug}`);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not delete project.");
       return res;
     },
@@ -695,7 +705,9 @@ export function useRunTask(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const res = await api.post<{ ok: boolean; task: SeedTask }>(`/projects/${slug}/tasks`, { id });
+      const res = await api.post<{ ok: boolean; task: SeedTask }>(`/projects/${slug}/tasks`, {
+        id,
+      });
       if (!res.ok) throw new Error("Could not start task.");
       return res.task;
     },

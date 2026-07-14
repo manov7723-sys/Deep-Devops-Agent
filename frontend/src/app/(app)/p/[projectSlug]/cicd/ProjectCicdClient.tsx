@@ -6,15 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { TriggerPipelineModal } from "@/components/modals/TriggerPipelineModal";
 import { AttachReposModal } from "@/components/modals/AttachReposModal";
-import {
-  Badge,
-  Block,
-  Btn,
-  DataTable,
-  Icon,
-  PageHead,
-  TileGrid,
-} from "@/components/ui";
+import { Badge, Block, Btn, DataTable, Icon, PageHead, TileGrid } from "@/components/ui";
 import { EnvFilter, type EnvFilterValue } from "@/components/domain/EnvFilter";
 import { PipelineCard } from "@/components/domain/PipelineCard";
 import { CiPipelinesPanel } from "@/components/domain/CiPipelinesPanel";
@@ -84,15 +76,23 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
         header: "Issue",
         cell: ({ row }) => (
           <div className="col" style={{ lineHeight: 1.35, maxWidth: 360 }}>
-            <span style={{ fontWeight: 600 }}>#{row.original.id} {row.original.title}</span>
-            <span className="faint" style={{ fontSize: 11.5 }}>{row.original.note}</span>
+            <span style={{ fontWeight: 600 }}>
+              #{row.original.id} {row.original.title}
+            </span>
+            <span className="faint" style={{ fontSize: 11.5 }}>
+              {row.original.note}
+            </span>
           </div>
         ),
       },
       {
         id: "repo",
         header: "Repo",
-        cell: ({ row }) => <span className="mono" style={{ fontSize: 12 }}>{row.original.repo}</span>,
+        cell: ({ row }) => (
+          <span className="mono" style={{ fontSize: 12 }}>
+            {row.original.repo}
+          </span>
+        ),
       },
       {
         id: "reviewer",
@@ -104,16 +104,28 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
         header: "Verdict",
         cell: ({ row }) =>
           row.original.verdict === "passed" ? (
-            <Badge tone="ok" icon="check">Passed</Badge>
+            <Badge tone="ok" icon="check">
+              Passed
+            </Badge>
           ) : (
-            <Badge tone="warn" icon="alert">Needs changes</Badge>
+            <Badge tone="warn" icon="alert">
+              Needs changes
+            </Badge>
           ),
       },
       {
         id: "state",
         header: "State",
         cell: ({ row }) => (
-          <Badge tone={row.original.state === "closed" ? "ok" : row.original.state === "reopened" ? "danger" : "default"}>
+          <Badge
+            tone={
+              row.original.state === "closed"
+                ? "ok"
+                : row.original.state === "reopened"
+                  ? "danger"
+                  : "default"
+            }
+          >
             {row.original.state}
           </Badge>
         ),
@@ -121,7 +133,11 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
       {
         id: "open",
         header: "",
-        cell: () => <Btn size="sm" variant="ghost" iconRight="chevR">Open</Btn>,
+        cell: () => (
+          <Btn size="sm" variant="ghost" iconRight="chevR">
+            Open
+          </Btn>
+        ),
       },
     ],
     [],
@@ -203,91 +219,91 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
             </p>
           )}
           <TileGrid minTile={280}>
-          {(repos ?? []).map((r) => {
-            // Build the upstream GitHub URL when fullName is "owner/repo".
-            const ghHref = r.fullName
-              ? `https://github.com/${r.fullName}`
-              : undefined;
-            return (
-            <div key={r.id} className="card card-pad col gap-3">
-              <div className="row between">
-                <div className="row gap-2" style={{ minWidth: 0 }}>
-                  <Icon name="github" size={18} />
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{r.name}</span>
+            {(repos ?? []).map((r) => {
+              // Build the upstream GitHub URL when fullName is "owner/repo".
+              const ghHref = r.fullName ? `https://github.com/${r.fullName}` : undefined;
+              return (
+                <div key={r.id} className="card card-pad col gap-3">
+                  <div className="row between">
+                    <div className="row gap-2" style={{ minWidth: 0 }}>
+                      <Icon name="github" size={18} />
+                      <span style={{ fontWeight: 700, fontSize: 14 }}>{r.name}</span>
+                    </div>
+                    <Badge tone={KIND_TONE[r.kind] ?? "default"}>{r.kind}</Badge>
+                  </div>
+                  <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.45, minHeight: 36 }}>
+                    {r.desc}
+                  </p>
+                  <div className="row gap-3 faint" style={{ fontSize: 11.5 }}>
+                    <span className="row gap-1">
+                      <Icon name="commit" size={13} /> {r.lastCommit}
+                    </span>
+                    <span className="row gap-1">
+                      <Icon name="branch" size={13} /> {r.branch}
+                    </span>
+                  </div>
+                  <div className="divider" />
+                  <div className="row between">
+                    <div className="row gap-3" style={{ fontSize: 12 }}>
+                      <span className="row gap-1">
+                        <span
+                          style={{
+                            width: 9,
+                            height: 9,
+                            borderRadius: 99,
+                            background: LANG_COLOR[r.lang] ?? "#888",
+                            display: "inline-block",
+                          }}
+                        />
+                        {r.lang}
+                      </span>
+                      <span className="muted">{r.issues} issues</span>
+                      <span className="muted">{r.prs} PRs</span>
+                    </div>
+                    <div className="row gap-1">
+                      {ghHref && (
+                        <a
+                          href={ghHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn ghost sm"
+                          aria-label="Open in GitHub"
+                          title="Open in GitHub"
+                        >
+                          <Icon name="ext" size={14} />
+                        </a>
+                      )}
+                      <Btn
+                        size="sm"
+                        variant="ghost"
+                        icon="trash"
+                        aria-label={`Remove ${r.name} from project`}
+                        title="Remove from project"
+                        loading={detach.isPending && detach.variables === r.id}
+                        onClick={async () => {
+                          setDetachError(null);
+                          const label = r.fullName ?? r.name;
+                          if (
+                            !confirm(
+                              `Remove ${label} from this project?\n\nThe repo itself stays connected — it just gets unlinked from this project. Pipelines and approvals tied to it stop firing.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          try {
+                            await detach.mutateAsync(r.id);
+                          } catch (e) {
+                            setDetachError(
+                              e instanceof Error ? e.message : "Could not remove repo.",
+                            );
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <Badge tone={KIND_TONE[r.kind] ?? "default"}>{r.kind}</Badge>
-              </div>
-              <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.45, minHeight: 36 }}>{r.desc}</p>
-              <div className="row gap-3 faint" style={{ fontSize: 11.5 }}>
-                <span className="row gap-1">
-                  <Icon name="commit" size={13} /> {r.lastCommit}
-                </span>
-                <span className="row gap-1">
-                  <Icon name="branch" size={13} /> {r.branch}
-                </span>
-              </div>
-              <div className="divider" />
-              <div className="row between">
-                <div className="row gap-3" style={{ fontSize: 12 }}>
-                  <span className="row gap-1">
-                    <span
-                      style={{
-                        width: 9,
-                        height: 9,
-                        borderRadius: 99,
-                        background: LANG_COLOR[r.lang] ?? "#888",
-                        display: "inline-block",
-                      }}
-                    />
-                    {r.lang}
-                  </span>
-                  <span className="muted">{r.issues} issues</span>
-                  <span className="muted">{r.prs} PRs</span>
-                </div>
-                <div className="row gap-1">
-                  {ghHref && (
-                    <a
-                      href={ghHref}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn ghost sm"
-                      aria-label="Open in GitHub"
-                      title="Open in GitHub"
-                    >
-                      <Icon name="ext" size={14} />
-                    </a>
-                  )}
-                  <Btn
-                    size="sm"
-                    variant="ghost"
-                    icon="trash"
-                    aria-label={`Remove ${r.name} from project`}
-                    title="Remove from project"
-                    loading={detach.isPending && detach.variables === r.id}
-                    onClick={async () => {
-                      setDetachError(null);
-                      const label = r.fullName ?? r.name;
-                      if (
-                        !confirm(
-                          `Remove ${label} from this project?\n\nThe repo itself stays connected — it just gets unlinked from this project. Pipelines and approvals tied to it stop firing.`,
-                        )
-                      ) {
-                        return;
-                      }
-                      try {
-                        await detach.mutateAsync(r.id);
-                      } catch (e) {
-                        setDetachError(
-                          e instanceof Error ? e.message : "Could not remove repo.",
-                        );
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-            );
-          })}
+              );
+            })}
           </TileGrid>
         </>
       )}

@@ -19,7 +19,9 @@ export function TopbarSearch() {
           fontFamily: "inherit",
         }}
       />
-      <span className="kbd" style={{ flex: "none" }}>⌘K</span>
+      <span className="kbd" style={{ flex: "none" }}>
+        ⌘K
+      </span>
     </div>
   );
 }

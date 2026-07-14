@@ -57,7 +57,9 @@ export type ExchangeResult = { ok: true; profile: ProviderProfile } | ExchangeEr
  *   invalid_grant, invalid_client, redirect_uri_mismatch,
  *   unsupported_grant_type
  */
-function normalizeExchangeCode(raw: string | undefined | null):
+function normalizeExchangeCode(
+  raw: string | undefined | null,
+):
   | "incorrect_client_credentials"
   | "redirect_uri_mismatch"
   | "bad_verification_code"
@@ -126,8 +128,7 @@ export async function exchange(
       return {
         ok: false,
         code: mapped,
-        message:
-          token.error_description ?? token.error ?? "Provider rejected the code exchange.",
+        message: token.error_description ?? token.error ?? "Provider rejected the code exchange.",
       };
     }
     return {

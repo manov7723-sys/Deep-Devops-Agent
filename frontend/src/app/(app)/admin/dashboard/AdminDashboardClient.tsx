@@ -21,7 +21,11 @@ export function AdminDashboardClient() {
       <PageHead
         title="Platform overview"
         sub="Revenue, customers and system health across DeepAgent."
-        actions={<Btn variant="outline" icon="download">Report</Btn>}
+        actions={
+          <Btn variant="outline" icon="download">
+            Report
+          </Btn>
+        }
       />
 
       <div className="dda-stat-row">
@@ -64,7 +68,12 @@ export function AdminDashboardClient() {
           <Block.Body>
             {data ? (
               <>
-                <Bars data={data.mrrTrend} width={560} height={150} ariaLabel="Monthly recurring revenue" />
+                <Bars
+                  data={data.mrrTrend}
+                  width={560}
+                  height={150}
+                  ariaLabel="Monthly recurring revenue"
+                />
                 <div className="row between faint" style={{ fontSize: 11, marginTop: 8 }}>
                   <span>Jul &apos;25</span>
                   <span>Jun &apos;26</span>
@@ -85,10 +94,16 @@ export function AdminDashboardClient() {
               <div className="row gap-4" style={{ alignItems: "center", flexWrap: "wrap" }}>
                 <Donut
                   size={130}
-                  segments={data.plans.map((p) => ({ name: p.name, value: p.active, color: p.accent }))}
+                  segments={data.plans.map((p) => ({
+                    name: p.name,
+                    value: p.active,
+                    color: p.accent,
+                  }))}
                   center={
                     <>
-                      <span className="faint" style={{ fontSize: 10 }}>PAID</span>
+                      <span className="faint" style={{ fontSize: 10 }}>
+                        PAID
+                      </span>
                       <span style={{ fontSize: 18, fontWeight: 800 }}>{data.paidUsers}</span>
                     </>
                   }
@@ -117,7 +132,9 @@ export function AdminDashboardClient() {
           <Block.Header>
             <Block.Title>MCP server health</Block.Title>
             <Block.Actions>
-              <Link href={"/admin/mcp" as Route} className="btn ghost sm">All →</Link>
+              <Link href={"/admin/mcp" as Route} className="btn ghost sm">
+                All →
+              </Link>
             </Block.Actions>
           </Block.Header>
           {data ? (
@@ -135,7 +152,9 @@ export function AdminDashboardClient() {
           <Block.Header>
             <Block.Title>Recent signups</Block.Title>
             <Block.Actions>
-              <Link href={"/admin/users" as Route} className="btn ghost sm">All users →</Link>
+              <Link href={"/admin/users" as Route} className="btn ghost sm">
+                All users →
+              </Link>
             </Block.Actions>
           </Block.Header>
           {data ? (
@@ -148,7 +167,9 @@ export function AdminDashboardClient() {
                     <Avatar name={u.name} size={30} />
                     <div className="col" style={{ lineHeight: 1.3 }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>{u.name}</span>
-                      <span className="faint" style={{ fontSize: 11.5 }}>{u.email}</span>
+                      <span className="faint" style={{ fontSize: 11.5 }}>
+                        {u.email}
+                      </span>
                     </div>
                   </div>
                   <Badge tone={planTone(u.plan)}>{u.plan}</Badge>

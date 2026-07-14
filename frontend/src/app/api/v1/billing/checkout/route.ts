@@ -2,10 +2,7 @@ import { NextResponse } from "next/server";
 import { CheckoutRequest } from "@/lib/api/schemas/billing-api";
 import { prisma } from "@/lib/db/prisma";
 import { getActiveSession } from "@/lib/auth/session";
-import {
-  attachStripeCustomerId,
-  recordCheckoutSession,
-} from "@/lib/billing/billing";
+import { attachStripeCustomerId, recordCheckoutSession } from "@/lib/billing/billing";
 import {
   createCheckoutSession,
   createStripeCustomer,
@@ -53,7 +50,11 @@ export async function POST(req: Request) {
     if (!plan) return NextResponse.json({ ok: false, code: "plan_not_found" }, { status: 404 });
     if (!plan.stripePriceId) {
       return NextResponse.json(
-        { ok: false, code: "plan_not_purchasable", message: "This plan has no Stripe price configured." },
+        {
+          ok: false,
+          code: "plan_not_purchasable",
+          message: "This plan has no Stripe price configured.",
+        },
         { status: 400 },
       );
     }
@@ -73,11 +74,7 @@ export async function POST(req: Request) {
       },
     });
     const SWITCHABLE_STATUSES = new Set(["active", "trialing", "past_due"]);
-    if (
-      existing &&
-      existing.stripeSubscriptionId &&
-      SWITCHABLE_STATUSES.has(existing.status)
-    ) {
+    if (existing && existing.stripeSubscriptionId && SWITCHABLE_STATUSES.has(existing.status)) {
       if (existing.planId === plan.id || existing.stripePriceId === plan.stripePriceId) {
         return NextResponse.json(
           { ok: false, code: "same_plan", message: "You're already on this plan." },
@@ -97,7 +94,11 @@ export async function POST(req: Request) {
           targetId: existing.stripeSubscriptionId,
           ipAddress: reqMeta.ipAddress,
           userAgent: reqMeta.userAgent,
-          metadata: { fromPlanId: existing.planId, toPlanId: plan.id, newPriceId: plan.stripePriceId },
+          metadata: {
+            fromPlanId: existing.planId,
+            toPlanId: plan.id,
+            newPriceId: plan.stripePriceId,
+          },
         });
         return NextResponse.json({
           ok: true,
@@ -125,10 +126,7 @@ export async function POST(req: Request) {
     const addon = await prisma.addon.findUnique({ where: { id: parsed.data.addonId } });
     if (!addon) return NextResponse.json({ ok: false, code: "addon_not_found" }, { status: 404 });
     if (!addon.stripePriceId) {
-      return NextResponse.json(
-        { ok: false, code: "addon_not_purchasable" },
-        { status: 400 },
-      );
+      return NextResponse.json({ ok: false, code: "addon_not_purchasable" }, { status: 400 });
     }
     mode = "payment";
     priceId = addon.stripePriceId;
@@ -200,9 +198,6 @@ export async function POST(req: Request) {
     }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[checkout] unexpected: ${message}`);
-    return NextResponse.json(
-      { ok: false, code: "checkout_failed", message },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, code: "checkout_failed", message }, { status: 500 });
   }
 }

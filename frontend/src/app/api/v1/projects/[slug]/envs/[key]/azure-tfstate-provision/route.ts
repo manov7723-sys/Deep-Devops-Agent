@@ -22,7 +22,10 @@ const Body = z.object({
     .trim()
     .min(3)
     .max(24)
-    .regex(/^[a-z0-9]+$/, "Storage account name must be lowercase letters + digits only, no hyphens."),
+    .regex(
+      /^[a-z0-9]+$/,
+      "Storage account name must be lowercase letters + digits only, no hyphens.",
+    ),
   /** Blob container name (3-63, lowercase, digits, single hyphens). */
   container: z.string().trim().min(3).max(63),
   /** Azure region. Defaults to eastus. */
@@ -44,10 +47,7 @@ const Body = z.object({
  * so no CLI needed. Idempotent — safe to click twice if the first Save was
  * done without provisioning.
  */
-export async function POST(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; key: string }> },
-) {
+export async function POST(req: Request, ctx: { params: Promise<{ slug: string; key: string }> }) {
   const { slug, key } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
@@ -76,7 +76,11 @@ export async function POST(
   });
   if (cp?.kind !== "azure") {
     return NextResponse.json(
-      { ok: false, code: "wrong_cloud", message: `Env's cloud is ${cp?.kind ?? "unknown"}, not Azure.` },
+      {
+        ok: false,
+        code: "wrong_cloud",
+        message: `Env's cloud is ${cp?.kind ?? "unknown"}, not Azure.`,
+      },
       { status: 409 },
     );
   }
@@ -111,7 +115,12 @@ export async function POST(
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       return NextResponse.json(
-        { ok: false, code: "rg_failed", status: res.status, message: `Resource group PUT failed: ${body.slice(0, 500)}` },
+        {
+          ok: false,
+          code: "rg_failed",
+          status: res.status,
+          message: `Resource group PUT failed: ${body.slice(0, 500)}`,
+        },
         { status: 502 },
       );
     }
@@ -144,7 +153,11 @@ export async function POST(
       const opUrl = res.headers.get("Azure-AsyncOperation") ?? res.headers.get("Location");
       if (!opUrl) {
         return NextResponse.json(
-          { ok: false, code: "no_op_header", message: "Storage account create returned 202 with no polling URL." },
+          {
+            ok: false,
+            code: "no_op_header",
+            message: "Storage account create returned 202 with no polling URL.",
+          },
           { status: 502 },
         );
       }
@@ -154,8 +167,14 @@ export async function POST(
         await new Promise((r) => setTimeout(r, POLL_MS));
         const pol = await fetch(opUrl, { headers: authHeaders, cache: "no-store" });
         if (!pol.ok) continue;
-        const opState = (await pol.json().catch(() => ({}))) as { status?: string; error?: unknown };
-        if (opState.status === "Succeeded") { done = true; break; }
+        const opState = (await pol.json().catch(() => ({}))) as {
+          status?: string;
+          error?: unknown;
+        };
+        if (opState.status === "Succeeded") {
+          done = true;
+          break;
+        }
         if (opState.status === "Failed" || opState.status === "Canceled") {
           return NextResponse.json(
             {
@@ -172,7 +191,8 @@ export async function POST(
           {
             ok: false,
             code: "storage_timeout",
-            message: "Storage account create is still going on Azure's side. Click Provision again in a minute to keep polling.",
+            message:
+              "Storage account create is still going on Azure's side. Click Provision again in a minute to keep polling.",
           },
           { status: 504 },
         );

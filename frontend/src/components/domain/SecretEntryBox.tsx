@@ -28,7 +28,8 @@ export function SecretEntryBox({ slug }: { slug: string }) {
   });
 
   const save = useMutation({
-    mutationFn: () => api.put<{ ok: boolean }>(`/projects/${slug}/secrets`, { key: key.trim(), value }),
+    mutationFn: () =>
+      api.put<{ ok: boolean }>(`/projects/${slug}/secrets`, { key: key.trim(), value }),
     onMutate: () => setErr(null),
     onSuccess: () => {
       setSavedKey(key.trim());
@@ -39,7 +40,8 @@ export function SecretEntryBox({ slug }: { slug: string }) {
     onError: (e) => setErr(apiErrorMessage(e, "Could not save secret.")),
   });
 
-  const canSave = /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key.trim()) && value.length > 0 && !save.isPending;
+  const canSave =
+    /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key.trim()) && value.length > 0 && !save.isPending;
 
   return (
     <Block>
@@ -52,12 +54,29 @@ export function SecretEntryBox({ slug }: { slug: string }) {
         <div className="col gap-4" style={{ maxWidth: 480 }}>
           {!!keysQ.data?.secrets.length && (
             <div className="col gap-1">
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>
+              <span
+                className="muted"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.4,
+                }}
+              >
                 Existing keys
               </span>
               <div className="row gap-2 wrap">
                 {keysQ.data.secrets.map((s) => (
-                  <span key={s.key} className="mono" style={{ fontSize: 12, padding: "3px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+                  <span
+                    key={s.key}
+                    className="mono"
+                    style={{
+                      fontSize: 12,
+                      padding: "3px 8px",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                    }}
+                  >
                     {s.key}
                   </span>
                 ))}
@@ -66,21 +85,52 @@ export function SecretEntryBox({ slug }: { slug: string }) {
           )}
 
           <Field label="Key" hint="Letters, digits, _, . or -; starts with a letter or underscore.">
-            <Input className="mono" value={key} placeholder="DATABASE_URL" onChange={(e) => { setKey(e.target.value); setSavedKey(null); }} />
+            <Input
+              className="mono"
+              value={key}
+              placeholder="DATABASE_URL"
+              onChange={(e) => {
+                setKey(e.target.value);
+                setSavedKey(null);
+              }}
+            />
           </Field>
           <Field label="Value">
-            <Input type="password" value={value} placeholder="••••••••••••" autoComplete="off" spellCheck={false} onChange={(e) => { setValue(e.target.value); setSavedKey(null); }} />
+            <Input
+              type="password"
+              value={value}
+              placeholder="••••••••••••"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => {
+                setValue(e.target.value);
+                setSavedKey(null);
+              }}
+            />
           </Field>
 
-          {err && <span style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">{err}</span>}
+          {err && (
+            <span style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">
+              {err}
+            </span>
+          )}
           {savedKey && (
-            <div className="row gap-2" style={{ alignItems: "center", fontSize: 12.5, color: "var(--ok, #2f9e44)" }}>
+            <div
+              className="row gap-2"
+              style={{ alignItems: "center", fontSize: 12.5, color: "var(--ok, #2f9e44)" }}
+            >
               <Icon name="check" size={14} /> Saved <span className="mono">{savedKey}</span>
             </div>
           )}
 
           <div className="row" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-            <Btn variant="primary" icon="lock" loading={save.isPending} disabled={!canSave} onClick={() => save.mutate()}>
+            <Btn
+              variant="primary"
+              icon="lock"
+              loading={save.isPending}
+              disabled={!canSave}
+              onClick={() => save.mutate()}
+            >
               Save secret
             </Btn>
           </div>

@@ -76,14 +76,13 @@ export function ArchiveProjectModal({
       <p style={{ fontSize: 13, lineHeight: 1.5 }}>
         {archived ? (
           <>
-            <b>{projectName}</b> will become writable again, and any auto-deploy
-            wiring will resume on the next push.
+            <b>{projectName}</b> will become writable again, and any auto-deploy wiring will resume
+            on the next push.
           </>
         ) : (
           <>
-            While archived, members can still <i>view</i> the project, but no new
-            pipelines, deployments or agent runs will start. Existing audit
-            history is kept intact.
+            While archived, members can still <i>view</i> the project, but no new pipelines,
+            deployments or agent runs will start. Existing audit history is kept intact.
           </>
         )}
       </p>
@@ -178,9 +177,8 @@ export function TransferProjectModal({
             Ownership transferred to <b>{doneFor}</b>.
           </p>
           <p className="muted" style={{ fontSize: 12.5 }}>
-            You&apos;ve been demoted to <b>developer</b> on this project. You can
-            still push, deploy and review approvals — only owner-level lifecycle
-            actions are gone.
+            You&apos;ve been demoted to <b>developer</b> on this project. You can still push, deploy
+            and review approvals — only owner-level lifecycle actions are gone.
           </p>
         </div>
       ) : (
@@ -198,11 +196,7 @@ export function TransferProjectModal({
               autoFocus
             />
           </Field>
-          <Field
-            label="Type the project slug to confirm"
-            required
-            hint={`Expected: ${slug}`}
-          >
+          <Field label="Type the project slug to confirm" required hint={`Expected: ${slug}`}>
             <Input
               className="mono"
               placeholder={slug}
@@ -287,15 +281,11 @@ export function DeleteProjectModal({
     >
       <div className="col gap-4">
         <p style={{ fontSize: 13, color: "var(--danger)", lineHeight: 1.5 }}>
-          This stops every agent, pauses every pipeline, and removes <b>{projectName}</b>{" "}
-          from listings for all members. Snapshot and audit history are retained for
-          recovery and forensics.
+          This stops every agent, pauses every pipeline, and removes <b>{projectName}</b> from
+          listings for all members. Snapshot and audit history are retained for recovery and
+          forensics.
         </p>
-        <Field
-          label="Type the project slug to confirm"
-          required
-          hint={`Expected: ${slug}`}
-        >
+        <Field label="Type the project slug to confirm" required hint={`Expected: ${slug}`}>
           <Input
             className="mono"
             placeholder={slug}

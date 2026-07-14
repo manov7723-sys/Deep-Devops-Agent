@@ -18,16 +18,14 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   if (parsed.data.isSuperAdmin !== undefined) {
-    const res = await setSuperAdmin(
-      { userId: gate.session.userId },
-      id,
-      parsed.data.isSuperAdmin,
-    );
+    const res = await setSuperAdmin({ userId: gate.session.userId }, id, parsed.data.isSuperAdmin);
     if (!res.ok) {
       const status =
-        res.code === "not_found" ? 404 :
-        res.code === "self_demote" || res.code === "last_admin_demote" ? 409 :
-        400;
+        res.code === "not_found"
+          ? 404
+          : res.code === "self_demote" || res.code === "last_admin_demote"
+            ? 409
+            : 400;
       return NextResponse.json({ ok: false, code: res.code }, { status });
     }
     const meta = extractRequestMeta(req);

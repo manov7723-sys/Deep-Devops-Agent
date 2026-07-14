@@ -35,10 +35,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   if (!provider) {
     if (isMockMode()) {
       // Tests check the JSON envelope; only browsers should see the redirect.
-      return NextResponse.json(
-        { ok: false, code: "provider_unavailable" },
-        { status: 503 },
-      );
+      return NextResponse.json({ ok: false, code: "provider_unavailable" }, { status: 503 });
     }
     const url = new URL(req.url);
     const dest = new URL("/auth/login", url.origin);
@@ -77,14 +74,22 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   // non-popup full-page flow. The callback prefers the values from `state`.
   if (requestedNext) {
     jar.set(NEXT_COOKIE, requestedNext, {
-      httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: TEN_MIN_SEC,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: TEN_MIN_SEC,
     });
   } else {
     jar.delete(NEXT_COOKIE);
   }
   if (isPopup) {
     jar.set(POPUP_COOKIE, "1", {
-      httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: TEN_MIN_SEC,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: TEN_MIN_SEC,
     });
   } else {
     jar.delete(POPUP_COOKIE);

@@ -23,7 +23,13 @@ export async function POST(
   const parsed = RollbackRequest.safeParse(await req.json().catch(() => ({})));
   const note = parsed.success ? parsed.data.note : undefined;
 
-  const res = await rollbackTo(env.id, gate.access.project.id, gate.access.session.userId, sequence, note);
+  const res = await rollbackTo(
+    env.id,
+    gate.access.project.id,
+    gate.access.session.userId,
+    sequence,
+    note,
+  );
   if (!res.ok) {
     const status = res.code === "target_not_found" ? 404 : 400;
     return NextResponse.json({ ok: false, code: res.code }, { status });
@@ -37,7 +43,12 @@ export async function POST(
     targetId: res.deploymentId,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
-    metadata: { envKey: key, toSequence: sequence, newSequence: res.sequence, pipelineId: res.pipelineId },
+    metadata: {
+      envKey: key,
+      toSequence: sequence,
+      newSequence: res.sequence,
+      pipelineId: res.pipelineId,
+    },
   });
   return NextResponse.json({
     ok: true,

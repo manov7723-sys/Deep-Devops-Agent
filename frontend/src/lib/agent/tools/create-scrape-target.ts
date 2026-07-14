@@ -32,13 +32,26 @@ export const createScrapeTargetTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: 'Env key, e.g. "alpha". Omit to use the env with a cluster connected.' },
-      kind: { type: "string", enum: ["ServiceMonitor", "PodMonitor"], description: "ServiceMonitor (via Service) or PodMonitor (via pods)." },
+      envKey: {
+        type: "string",
+        description: 'Env key, e.g. "alpha". Omit to use the env with a cluster connected.',
+      },
+      kind: {
+        type: "string",
+        enum: ["ServiceMonitor", "PodMonitor"],
+        description: "ServiceMonitor (via Service) or PodMonitor (via pods).",
+      },
       name: { type: "string", description: "Short name for the scrape config, e.g. the app name." },
       namespace: { type: "string", description: "Namespace where the app runs, e.g. 'dev'." },
-      selectorKey: { type: "string", description: "Label key that selects the Service/pods, e.g. 'app'." },
+      selectorKey: {
+        type: "string",
+        description: "Label key that selects the Service/pods, e.g. 'app'.",
+      },
       selectorValue: { type: "string", description: "Label value, e.g. 'vote'." },
-      port: { type: "string", description: "Metrics port — a named port ('metrics') or a number ('8080')." },
+      port: {
+        type: "string",
+        description: "Metrics port — a named port ('metrics') or a number ('8080').",
+      },
       path: { type: "string", description: "Metrics path. Default /metrics." },
       interval: { type: "string", description: "Scrape interval. Default 30s." },
     },
@@ -47,10 +60,24 @@ export const createScrapeTargetTool: Tool<Input, Output> = {
   },
   async execute(input, ctx) {
     const env = input.envKey
-      ? await prisma.env.findFirst({ where: { projectId: ctx.projectId, key: input.envKey }, select: { id: true, key: true, kubeconfigRef: true } })
-      : await prisma.env.findFirst({ where: { projectId: ctx.projectId, kubeconfigRef: { not: null } }, orderBy: { promotionRank: "asc" }, select: { id: true, key: true, kubeconfigRef: true } });
-    if (!env) return { ok: false, error: input.envKey ? `Env "${input.envKey}" not found.` : "No environment has a cluster connected." };
-    if (!env.kubeconfigRef) return { ok: false, error: `Env "${env.key}" has no cluster connected.` };
+      ? await prisma.env.findFirst({
+          where: { projectId: ctx.projectId, key: input.envKey },
+          select: { id: true, key: true, kubeconfigRef: true },
+        })
+      : await prisma.env.findFirst({
+          where: { projectId: ctx.projectId, kubeconfigRef: { not: null } },
+          orderBy: { promotionRank: "asc" },
+          select: { id: true, key: true, kubeconfigRef: true },
+        });
+    if (!env)
+      return {
+        ok: false,
+        error: input.envKey
+          ? `Env "${input.envKey}" not found.`
+          : "No environment has a cluster connected.",
+      };
+    if (!env.kubeconfigRef)
+      return { ok: false, error: `Env "${env.key}" has no cluster connected.` };
 
     const res = await createScrapeTarget(env.id, {
       kind: input.kind,
@@ -62,6 +89,14 @@ export const createScrapeTargetTool: Tool<Input, Output> = {
       interval: input.interval || "30s",
     });
     if (!res.ok) return { ok: false, error: res.message };
-    return { ok: true, output: { kind: input.kind, name: input.name, namespace: input.namespace, message: res.message } };
+    return {
+      ok: true,
+      output: {
+        kind: input.kind,
+        name: input.name,
+        namespace: input.namespace,
+        message: res.message,
+      },
+    };
   },
 };

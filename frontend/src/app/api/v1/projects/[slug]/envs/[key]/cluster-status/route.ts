@@ -5,7 +5,9 @@ import { envBySlugAndKey } from "@/lib/devops/envs";
 import { getKubeconfigForEnv, getDecryptedCloudCreds } from "@/lib/runner/creds";
 import { runStage } from "@/lib/runner/exec";
 
-const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].filter(Boolean).join(":");
+const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+  .filter(Boolean)
+  .join(":");
 
 /** Pass the host's AWS creds + HOME so an EKS kubeconfig's `aws eks get-token`
  *  exec plugin can authenticate (Option A local creds live in process.env). */
@@ -52,7 +54,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
 
   const kcfg = await getKubeconfigForEnv(env.id);
   if (!kcfg.ok) {
-    return NextResponse.json({ ok: true, connected: true, verified: false, verifyError: kcfg.message });
+    return NextResponse.json({
+      ok: true,
+      connected: true,
+      verified: false,
+      verifyError: kcfg.message,
+    });
   }
   try {
     // Cluster name from the stored kubeconfig (for the UI label).
@@ -84,18 +91,30 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
       timeoutMs: 25_000,
     });
     if (res.exitCode !== 0) {
-      return NextResponse.json({ ok: true, connected: true, verified: false, cluster, verifyError: res.stderr.slice(-500) });
+      return NextResponse.json({
+        ok: true,
+        connected: true,
+        verified: false,
+        cluster,
+        verifyError: res.stderr.slice(-500),
+      });
     }
     let nodes: Array<{ name: string; status: string; version: string }> = [];
     try {
       const parsed = JSON.parse(res.stdout) as {
-        items?: Array<{ metadata?: { name?: string }; status?: { conditions?: Array<{ type?: string; status?: string }>; nodeInfo?: { kubeletVersion?: string } } }>;
+        items?: Array<{
+          metadata?: { name?: string };
+          status?: {
+            conditions?: Array<{ type?: string; status?: string }>;
+            nodeInfo?: { kubeletVersion?: string };
+          };
+        }>;
       };
       nodes = (parsed.items ?? []).map((n) => {
         const ready = n.status?.conditions?.find((c) => c.type === "Ready");
         return {
           name: n.metadata?.name ?? "(unknown)",
-          status: ready?.status === "True" ? "Ready" : ready?.status ?? "Unknown",
+          status: ready?.status === "True" ? "Ready" : (ready?.status ?? "Unknown"),
           version: n.status?.nodeInfo?.kubeletVersion ?? "?",
         };
       });

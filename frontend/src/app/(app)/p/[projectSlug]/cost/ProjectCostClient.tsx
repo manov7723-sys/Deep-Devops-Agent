@@ -94,18 +94,23 @@ export function ProjectCostClient({ slug }: { slug: string }) {
           }}
         >
           <span>
-            <strong>Snapshot recorded.</strong>{" "}
-            Synthesized from {syntheticReport.resources} resources across{" "}
-            {syntheticReport.envs} envs ·{" "}
-            <b>{formatCents(syntheticReport.totalCents)}</b> total ·{" "}
-            forecast <b>{formatCents(syntheticReport.forecastCents)}</b> ·{" "}
-            budget {formatCents(syntheticReport.budgetCents)}.
+            <strong>Snapshot recorded.</strong> Synthesized from {syntheticReport.resources}{" "}
+            resources across {syntheticReport.envs} envs ·{" "}
+            <b>{formatCents(syntheticReport.totalCents)}</b> total · forecast{" "}
+            <b>{formatCents(syntheticReport.forecastCents)}</b> · budget{" "}
+            {formatCents(syntheticReport.budgetCents)}.
           </span>
           <button
             type="button"
             onClick={() => setSyntheticReport(null)}
             className="auth-link"
-            style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer" }}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              font: "inherit",
+              cursor: "pointer",
+            }}
             aria-label="Dismiss"
           >
             Dismiss
@@ -129,7 +134,13 @@ export function ProjectCostClient({ slug }: { slug: string }) {
 
       <EnvFilter />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 14,
+        }}
+      >
         <Stat
           label="Month to date"
           value={c?.monthTotal ?? "—"}
@@ -139,13 +150,23 @@ export function ProjectCostClient({ slug }: { slug: string }) {
             c && c.budget > 0
               ? `${Math.round((c.monthTotalDollars / c.budget) * 100)}% of ${moneyK(c.budget)} budget`
               : c
-              ? "No budget set"
-              : undefined
+                ? "No budget set"
+                : undefined
           }
         />
         <Stat label="Forecast" value={c?.forecast ?? "—"} icon="activity" sub="within budget" />
-        <Stat label="Savings found" value={c?.savings ?? "—"} icon="zap" sub="by Cost Pilot this month" />
-        <Stat label="Untagged spend" value={c?.untagged ?? "—"} icon="alert" sub="3 resources need tags" />
+        <Stat
+          label="Savings found"
+          value={c?.savings ?? "—"}
+          icon="zap"
+          sub="by Cost Pilot this month"
+        />
+        <Stat
+          label="Untagged spend"
+          value={c?.untagged ?? "—"}
+          icon="alert"
+          sub="3 resources need tags"
+        />
       </div>
 
       <div className="dda-proj-dash-grid">
@@ -181,8 +202,7 @@ export function ProjectCostClient({ slug }: { slug: string }) {
               </>
             ) : c ? (
               <span className="muted" style={{ fontSize: 13 }}>
-                No spend recorded yet. Click <b>Record snapshot</b> to capture the
-                current month.
+                No spend recorded yet. Click <b>Record snapshot</b> to capture the current month.
               </span>
             ) : (
               <Block.Loading />
@@ -202,7 +222,9 @@ export function ProjectCostClient({ slug }: { slug: string }) {
                   segments={c.byEnv}
                   center={
                     <>
-                      <span className="faint" style={{ fontSize: 10 }}>TOTAL</span>
+                      <span className="faint" style={{ fontSize: 10 }}>
+                        TOTAL
+                      </span>
                       <span style={{ fontSize: 18, fontWeight: 800 }}>{c.monthTotal}</span>
                     </>
                   }
@@ -241,35 +263,39 @@ export function ProjectCostClient({ slug }: { slug: string }) {
               </tr>
             </thead>
             <tbody>
-              {c.byService.map((s: { name: string; value: number; total: string; pct: number }, i: number) => {
-                const up = i % 3 === 0;
-                return (
-                  <tr key={s.name}>
-                    <td style={{ fontWeight: 600 }}>{s.name}</td>
-                    <td>
-                      <div className="row gap-2">
-                        <div className="grow">
-                          <Progress value={s.pct} height={6} ariaLabel={`${s.name} share`} />
+              {c.byService.map(
+                (s: { name: string; value: number; total: string; pct: number }, i: number) => {
+                  const up = i % 3 === 0;
+                  return (
+                    <tr key={s.name}>
+                      <td style={{ fontWeight: 600 }}>{s.name}</td>
+                      <td>
+                        <div className="row gap-2">
+                          <div className="grow">
+                            <Progress value={s.pct} height={6} ariaLabel={`${s.name} share`} />
+                          </div>
+                          <span className="faint tnum" style={{ fontSize: 11.5, width: 32 }}>
+                            {s.pct}%
+                          </span>
                         </div>
-                        <span className="faint tnum" style={{ fontSize: 11.5, width: 32 }}>{s.pct}%</span>
-                      </div>
-                    </td>
-                    <td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">
-                      ${s.value.toLocaleString()}
-                    </td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        color: up ? "var(--danger)" : "var(--ok)",
-                        fontSize: 12,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {up ? "▲ 4%" : "▼ 2%"}
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">
+                        ${s.value.toLocaleString()}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          color: up ? "var(--danger)" : "var(--ok)",
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {up ? "▲ 4%" : "▼ 2%"}
+                      </td>
+                    </tr>
+                  );
+                },
+              )}
             </tbody>
           </table>
         ) : (
@@ -296,12 +322,21 @@ export function ProjectCostClient({ slug }: { slug: string }) {
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: "left", color: "var(--text-faint)", fontWeight: 600, fontSize: 12 }}>
+                <tr
+                  style={{
+                    textAlign: "left",
+                    color: "var(--text-faint)",
+                    fontWeight: 600,
+                    fontSize: 12,
+                  }}
+                >
                   <th style={{ padding: "8px 0" }}>Period</th>
                   <th style={{ padding: "8px 12px" }}>Total</th>
                   <th style={{ padding: "8px 12px" }}>Forecast</th>
                   <th style={{ padding: "8px 12px" }}>Budget</th>
-                  <th style={{ padding: "8px 12px" }} className="hide-sm">Breakdown</th>
+                  <th style={{ padding: "8px 12px" }} className="hide-sm">
+                    Breakdown
+                  </th>
                 </tr>
               </thead>
               <tbody>

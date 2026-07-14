@@ -102,8 +102,7 @@ export type UpdateProviderArgs = Partial<{
 }>;
 
 export type UpdateProviderResult =
-  | { ok: true; provider: CloudProviderRow }
-  | { ok: false; code: "not_found" };
+  { ok: true; provider: CloudProviderRow } | { ok: false; code: "not_found" };
 
 export async function updateProvider(
   userId: string,
@@ -125,22 +124,28 @@ export async function updateProvider(
 }
 
 export type DeleteProviderResult =
-  | { ok: true; unlinkedEnvs: number }
-  | { ok: false; code: "not_found" | "in_use"; inUse?: number };
+  { ok: true; unlinkedEnvs: number } | { ok: false; code: "not_found" | "in_use"; inUse?: number };
 
 /**
  * Delete a provider. By default it's rejected if any Env points at it; pass
  * `force` to first unlink it from those envs (clears `cloudProviderId`, leaving
  * each env's stored kubeconfig intact) and then delete.
  */
-export async function deleteProvider(userId: string, id: string, force = false): Promise<DeleteProviderResult> {
+export async function deleteProvider(
+  userId: string,
+  id: string,
+  force = false,
+): Promise<DeleteProviderResult> {
   const existing = await prisma.cloudProvider.findFirst({ where: { id, userId } });
   if (!existing) return { ok: false, code: "not_found" };
   const inUse = await prisma.env.count({ where: { cloudProviderId: id } });
   if (inUse > 0 && !force) return { ok: false, code: "in_use", inUse };
   let unlinkedEnvs = 0;
   if (inUse > 0) {
-    const r = await prisma.env.updateMany({ where: { cloudProviderId: id }, data: { cloudProviderId: null } });
+    const r = await prisma.env.updateMany({
+      where: { cloudProviderId: id },
+      data: { cloudProviderId: null },
+    });
     unlinkedEnvs = r.count;
   }
   await prisma.cloudProvider.delete({ where: { id } });

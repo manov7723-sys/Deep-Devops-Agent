@@ -9,8 +9,9 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   },
 );
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  function Textarea({ className, rows = 4, ...rest }, ref) {
-    return <textarea ref={ref} rows={rows} className={cn("textarea", className)} {...rest} />;
-  },
-);
+export const Textarea = forwardRef<
+  HTMLTextAreaElement,
+  TextareaHTMLAttributes<HTMLTextAreaElement>
+>(function Textarea({ className, rows = 4, ...rest }, ref) {
+  return <textarea ref={ref} rows={rows} className={cn("textarea", className)} {...rest} />;
+});

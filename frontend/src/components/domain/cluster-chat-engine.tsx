@@ -21,10 +21,7 @@ import {
   useStartTerraformRun,
   useTerraformRun,
 } from "@/hooks/queries/connectivity";
-import {
-  TerraformStageView,
-  apiErrorMessage,
-} from "@/components/domain/cluster-chat-shared";
+import { TerraformStageView, apiErrorMessage } from "@/components/domain/cluster-chat-shared";
 
 export type EnvRow = { id: string; key: string; name: string };
 export type RepoRow = { id: string; fullName: string; name: string; defaultBranch: string };
@@ -192,7 +189,10 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
   // Generate/apply state (the deterministic two-step flow).
   const [busy, setBusy] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
-  const [generated, setGenerated] = useState<{ files: Record<string, string>; clusterName: string } | null>(null);
+  const [generated, setGenerated] = useState<{
+    files: Record<string, string>;
+    clusterName: string;
+  } | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const envKey = String(values.envKey ?? "");
@@ -203,7 +203,9 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
 
   const sources = useMemo(() => {
     const s: Record<string, unknown> = {};
-    extra.forEach((q, i) => { s[q.key] = extraResults[i]?.data; });
+    extra.forEach((q, i) => {
+      s[q.key] = extraResults[i]?.data;
+    });
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(extraResults.map((r) => r.dataUpdatedAt))]);
@@ -237,11 +239,16 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
           // Don't force a value on optional selects (e.g. GKE subnetwork =
           // "leave unset to auto-allocate"); only seed required ones.
           const o = s.options(ctx);
-          if (o.length && !s.optional) { next[s.key] = s.default ? s.default(ctx) : o[0].value; changed = true; }
+          if (o.length && !s.optional) {
+            next[s.key] = s.default ? s.default(ctx) : o[0].value;
+            changed = true;
+          }
         } else if (s.kind === "choice") {
-          next[s.key] = s.choices[0].value; changed = true;
+          next[s.key] = s.choices[0].value;
+          changed = true;
         } else if ("default" in s && s.default) {
-          next[s.key] = s.default(ctx); changed = true;
+          next[s.key] = s.default(ctx);
+          changed = true;
         }
       }
       return changed ? next : prev;
@@ -256,9 +263,11 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
 
   function validateField(s: Step): string | null {
     const v = values[s.key];
-    if (s.kind === "select") return v ? null : (s.optional ? null : "Select an option.");
+    if (s.kind === "select") return v ? null : s.optional ? null : "Select an option.";
     if (s.kind === "multiselect") {
-      const chosen = String(v ?? "").split(",").filter(Boolean);
+      const chosen = String(v ?? "")
+        .split(",")
+        .filter(Boolean);
       return chosen.length === 0 && !s.optional ? "Select at least one." : null;
     }
     if (s.kind === "choice") return v === undefined ? "Choose one." : null;
@@ -308,13 +317,15 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
 
   function displayValue(s: Step, value: string | number | boolean | undefined): string {
     if (value === undefined || value === "") return "—";
-    if (s.kind === "select") return s.options(ctx).find((o) => o.value === value)?.label ?? String(value);
+    if (s.kind === "select")
+      return s.options(ctx).find((o) => o.value === value)?.label ?? String(value);
     if (s.kind === "multiselect") {
       const opts = s.options(ctx);
       const chosen = String(value).split(",").filter(Boolean);
       return chosen.map((v) => opts.find((o) => o.value === v)?.label ?? v).join(", ") || "—";
     }
-    if (s.kind === "choice") return s.choices.find((c) => c.value === value)?.label ?? String(value);
+    if (s.kind === "choice")
+      return s.choices.find((c) => c.value === value)?.label ?? String(value);
     if (s.kind === "list") {
       const rows = parseListRows(value);
       return rows.length === 0 ? "—" : `${rows.length} ${rows.length === 1 ? "entry" : "entries"}`;
@@ -354,7 +365,10 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
     setRunId(null);
     setNote(null);
     try {
-      const gen = await api.post<GenResult>(`/projects/${slug}/${config.optionsPath}`, config.buildBody(values));
+      const gen = await api.post<GenResult>(
+        `/projects/${slug}/${config.optionsPath}`,
+        config.buildBody(values),
+      );
       const pushed = await pushFiles.mutateAsync({
         repoFullName,
         basePath: ghPath,
@@ -395,7 +409,9 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
         setPhase("form");
       } else {
         setRunId(res.run.id);
-        setNote(`Applying to ${config.cloudLabel} — this takes ${config.applyEta}. Watch the stages below.`);
+        setNote(
+          `Applying to ${config.cloudLabel} — this takes ${config.applyEta}. Watch the stages below.`,
+        );
       }
     } catch (e) {
       setNote(`❌ ${apiErrorMessage(e)}`);
@@ -426,19 +442,34 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
           {/* Stepper header */}
           <div className="row gap-2" style={{ alignItems: "center" }}>
             {Array.from({ length: totalSteps }).map((_, i) => (
-              <span key={i} style={{
-                flex: 1, height: 4, borderRadius: 2,
-                background: i <= pageIdx ? "var(--accent, #5b8cff)" : "var(--surface-3, #00000018)",
-              }} />
+              <span
+                key={i}
+                style={{
+                  flex: 1,
+                  height: 4,
+                  borderRadius: 2,
+                  background:
+                    i <= pageIdx ? "var(--accent, #5b8cff)" : "var(--surface-3, #00000018)",
+                }}
+              />
             ))}
           </div>
-          <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{stepLabel}</span>
+          <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>
+            {stepLabel}
+          </span>
 
           {/* Input page */}
           {!onReview && phase === "form" && (
             <div className="col gap-3">
               {stepsOnPage(currentPage).map((s) => (
-                <FieldControl key={s.key} step={s} ctx={ctx} value={values[s.key]} error={errors[s.key]} onChange={(v) => setVal(s.key, v)} />
+                <FieldControl
+                  key={s.key}
+                  step={s}
+                  ctx={ctx}
+                  value={values[s.key]}
+                  error={errors[s.key]}
+                  onChange={(v) => setVal(s.key, v)}
+                />
               ))}
             </div>
           )}
@@ -446,37 +477,77 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
           {/* Review page */}
           {onReview && phase === "form" && (
             <div className="col gap-3">
-              <div className="col gap-1" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
+              <div
+                className="col gap-1"
+                style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}
+              >
                 {config.steps
-                  .filter((s) => (!s.skip || !s.skip(values)) && values[s.key] !== undefined && values[s.key] !== "")
+                  .filter(
+                    (s) =>
+                      (!s.skip || !s.skip(values)) &&
+                      values[s.key] !== undefined &&
+                      values[s.key] !== "",
+                  )
                   .map((s) => (
                     <div key={s.key} className="row between" style={{ gap: 12, fontSize: 13 }}>
                       <span className="muted">{s.label}</span>
-                      <span style={{ fontWeight: 600, textAlign: "right", wordBreak: "break-all" }}>{displayValue(s, values[s.key])}</span>
+                      <span style={{ fontWeight: 600, textAlign: "right", wordBreak: "break-all" }}>
+                        {displayValue(s, values[s.key])}
+                      </span>
                     </div>
                   ))}
               </div>
               <div className="row gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                <Btn variant="primary" icon="github" loading={pushFiles.isPending} disabled={!canGenerate} onClick={generateToGithub}>
+                <Btn
+                  variant="primary"
+                  icon="github"
+                  loading={pushFiles.isPending}
+                  disabled={!canGenerate}
+                  onClick={generateToGithub}
+                >
                   {generated ? "Regenerate to GitHub" : "Generate to GitHub"}
                 </Btn>
-                <Btn variant={generated ? "primary" : "outline"} icon="server" loading={startRun.isPending} disabled={!generated || busy} onClick={applyGenerated}>
+                <Btn
+                  variant={generated ? "primary" : "outline"}
+                  icon="server"
+                  loading={startRun.isPending}
+                  disabled={!generated || busy}
+                  onClick={applyGenerated}
+                >
                   Apply to {config.cloudLabel}
                 </Btn>
               </div>
             </div>
           )}
 
-          {note && <span style={{ fontSize: 12.5, color: note.startsWith("❌") ? "var(--danger, #e5484d)" : "var(--muted, #888)" }}>{note}</span>}
+          {note && (
+            <span
+              style={{
+                fontSize: 12.5,
+                color: note.startsWith("❌") ? "var(--danger, #e5484d)" : "var(--muted, #888)",
+              }}
+            >
+              {note}
+            </span>
+          )}
 
           {/* Bottom nav */}
           {phase === "form" && (
-            <div className="row between" style={{ alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-              <Btn variant="ghost" icon="chevL" disabled={pageIdx === 0 || busy} onClick={back}>Back</Btn>
+            <div
+              className="row between"
+              style={{ alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12 }}
+            >
+              <Btn variant="ghost" icon="chevL" disabled={pageIdx === 0 || busy} onClick={back}>
+                Back
+              </Btn>
               {!onReview ? (
-                <Btn variant="primary" iconRight="chevR" onClick={next}>Next</Btn>
+                <Btn variant="primary" iconRight="chevR" onClick={next}>
+                  Next
+                </Btn>
               ) : (
-                <Btn variant="ghost" size="sm" icon="refresh" onClick={restart}>Start over</Btn>
+                <Btn variant="ghost" size="sm" icon="refresh" onClick={restart}>
+                  Start over
+                </Btn>
               )}
             </div>
           )}
@@ -492,7 +563,9 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
                       Back to form &amp; retry
                     </Btn>
                   )}
-                  <Btn variant="ghost" size="sm" icon="refresh" onClick={restart}>Create another</Btn>
+                  <Btn variant="ghost" size="sm" icon="refresh" onClick={restart}>
+                    Create another
+                  </Btn>
                 </div>
               )}
             </div>
@@ -542,9 +615,16 @@ function FieldControl({
     return (
       <Field label={step.label} hint={step.hint} required={!step.optional} error={error}>
         {options.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>{step.emptyNote ?? "Nothing to choose yet."}</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            {step.emptyNote ?? "Nothing to choose yet."}
+          </span>
         ) : (
-          <Select value={String(value ?? "")} onValueChange={onChange} ariaLabel={step.label} options={options} />
+          <Select
+            value={String(value ?? "")}
+            onValueChange={onChange}
+            ariaLabel={step.label}
+            options={options}
+          />
         )}
       </Field>
     );
@@ -552,17 +632,29 @@ function FieldControl({
 
   if (step.kind === "multiselect") {
     const options = step.options(ctx);
-    const chosen = new Set(String(value ?? "").split(",").filter(Boolean));
+    const chosen = new Set(
+      String(value ?? "")
+        .split(",")
+        .filter(Boolean),
+    );
     const toggle = (v: string) => {
       const nextSet = new Set(chosen);
-      if (nextSet.has(v)) nextSet.delete(v); else nextSet.add(v);
+      if (nextSet.has(v)) nextSet.delete(v);
+      else nextSet.add(v);
       // Preserve option order in the stored comma list.
-      onChange(options.map((o) => o.value).filter((x) => nextSet.has(x)).join(","));
+      onChange(
+        options
+          .map((o) => o.value)
+          .filter((x) => nextSet.has(x))
+          .join(","),
+      );
     };
     return (
       <Field label={step.label} hint={step.hint} required={!step.optional} error={error}>
         {options.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>{step.emptyNote ?? "Nothing to choose yet."}</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            {step.emptyNote ?? "Nothing to choose yet."}
+          </span>
         ) : (
           <div className="col gap-1">
             {options.map((o) => (
@@ -585,7 +677,9 @@ function FieldControl({
   if (step.kind === "info") {
     return (
       <Field label={step.label}>
-        <span className="muted" style={{ fontSize: 13 }}>{step.text(ctx)}</span>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {step.text(ctx)}
+        </span>
       </Field>
     );
   }
@@ -609,7 +703,9 @@ function FieldControl({
             <div key={i} className="row gap-2" style={{ alignItems: "flex-end" }}>
               {step.fields.map((f) => (
                 <div key={f.key} className="col gap-1" style={{ flex: 1, minWidth: 0 }}>
-                  <span className="faint" style={{ fontSize: 11 }}>{f.label}</span>
+                  <span className="faint" style={{ fontSize: 11 }}>
+                    {f.label}
+                  </span>
                   {f.kind === "select" ? (
                     <Select
                       value={row[f.key] ?? ""}

@@ -30,7 +30,11 @@ export function Donut({
   const c = 2 * Math.PI * r;
   let off = 0;
   return (
-    <div style={{ position: "relative", width: size, height: size, flex: "none" }} role="img" aria-label={ariaLabel}>
+    <div
+      style={{ position: "relative", width: size, height: size, flex: "none" }}
+      role="img"
+      aria-label={ariaLabel}
+    >
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }} aria-hidden>
         <circle
           cx={size / 2}

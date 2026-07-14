@@ -17,7 +17,9 @@ type Output = {
 };
 
 /** Find the Azure provider for THIS project (per-project isolation). */
-async function resolveAzureProvider(projectId: string): Promise<{ id: string; subscriptionId: string } | null> {
+async function resolveAzureProvider(
+  projectId: string,
+): Promise<{ id: string; subscriptionId: string } | null> {
   const cp = await prisma.cloudProvider.findFirst({
     where: { projectId, kind: "azure" },
     select: { id: true, accountRef: true },
@@ -45,7 +47,8 @@ export const aksRunCommandTool: Tool<Input, Output> = {
     properties: {
       command: {
         type: "string",
-        description: "The command to run on the cluster, e.g. 'kubectl get pods -A' or 'helm list -A'.",
+        description:
+          "The command to run on the cluster, e.g. 'kubectl get pods -A' or 'helm list -A'.",
       },
       clusterName: {
         type: "string",
@@ -53,7 +56,8 @@ export const aksRunCommandTool: Tool<Input, Output> = {
       },
       resourceGroup: {
         type: "string",
-        description: "Optional — the cluster's resource group. Auto-detected from the cluster name if omitted.",
+        description:
+          "Optional — the cluster's resource group. Auto-detected from the cluster name if omitted.",
       },
     },
     required: ["command", "clusterName"],
@@ -68,7 +72,13 @@ export const aksRunCommandTool: Tool<Input, Output> = {
           "No Azure account is connected to this project. Connect one with 'Sign in with Microsoft' on the Cloud providers tab first.",
       };
     }
-    const res = await aksRunCommand(prov.id, prov.subscriptionId, input.resourceGroup ?? "", input.clusterName, input.command);
+    const res = await aksRunCommand(
+      prov.id,
+      prov.subscriptionId,
+      input.resourceGroup ?? "",
+      input.clusterName,
+      input.command,
+    );
     if (!res.ok) return { ok: false, error: res.error };
     return { ok: true, output: { exitCode: res.exitCode, logs: res.logs } };
   },

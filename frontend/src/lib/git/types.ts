@@ -44,7 +44,11 @@ export interface GitRepoClient {
   ensureBranch(branch: string, fromRef?: string): Promise<{ created: boolean }>;
 
   /** Commit one or more files to `branch` in a single commit. Creates/updates each path. */
-  commitFiles(args: { branch: string; message: string; files: CommitFile[] }): Promise<{ commitSha: string }>;
+  commitFiles(args: {
+    branch: string;
+    message: string;
+    files: CommitFile[];
+  }): Promise<{ commitSha: string }>;
 
   /** Open a PR (GitHub) / MR (GitLab) from `sourceBranch` → `targetBranch`. */
   openChangeRequest(args: {

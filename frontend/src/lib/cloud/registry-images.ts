@@ -68,8 +68,12 @@ async function listEcrImages(cloudProviderId: string): Promise<RegistryImagesRes
     maxBufferBytes: 4 * 1024 * 1024,
   });
   if (repoRes.exitCode !== 0) {
-    if (repoRes.exitCode === -1) return { ok: false, error: "`aws` CLI isn't installed on the server." };
-    return { ok: false, error: (repoRes.stderr.trim() || "Couldn't list ECR repositories.").slice(-300) };
+    if (repoRes.exitCode === -1)
+      return { ok: false, error: "`aws` CLI isn't installed on the server." };
+    return {
+      ok: false,
+      error: (repoRes.stderr.trim() || "Couldn't list ECR repositories.").slice(-300),
+    };
   }
   let repos: Array<{ repositoryName?: string; repositoryUri?: string }> = [];
   try {
@@ -91,13 +95,21 @@ async function listEcrImages(cloudProviderId: string): Promise<RegistryImagesRes
     });
     if (imgRes.exitCode !== 0) continue;
     try {
-      const details = (JSON.parse(imgRes.stdout) as {
-        imageDetails?: Array<{ imageTags?: string[]; imagePushedAt?: number | string }>;
-      }).imageDetails ?? [];
+      const details =
+        (
+          JSON.parse(imgRes.stdout) as {
+            imageDetails?: Array<{ imageTags?: string[]; imagePushedAt?: number | string }>;
+          }
+        ).imageDetails ?? [];
       for (const d of details) {
         const pushedAt = toIso(d.imagePushedAt);
         for (const tag of d.imageTags ?? []) {
-          images.push({ repository: repo.repositoryName, tag, image: `${repo.repositoryUri}:${tag}`, pushedAt });
+          images.push({
+            repository: repo.repositoryName,
+            tag,
+            image: `${repo.repositoryUri}:${tag}`,
+            pushedAt,
+          });
         }
       }
     } catch {
@@ -105,15 +117,28 @@ async function listEcrImages(cloudProviderId: string): Promise<RegistryImagesRes
     }
     if (images.length >= MAX_IMAGES) break;
   }
-  return { ok: true, cloud: "aws", images: sortAndCap(images), note: repos.length > MAX_REPOS ? `Showing the first ${MAX_REPOS} repositories.` : undefined };
+  return {
+    ok: true,
+    cloud: "aws",
+    images: sortAndCap(images),
+    note: repos.length > MAX_REPOS ? `Showing the first ${MAX_REPOS} repositories.` : undefined,
+  };
 }
 
 // ── GCP Artifact Registry ────────────────────────────────────────────────────
-async function listGarImages(cloudProviderId: string, region: string | null, project: string | null): Promise<RegistryImagesResult> {
+async function listGarImages(
+  cloudProviderId: string,
+  region: string | null,
+  project: string | null,
+): Promise<RegistryImagesResult> {
   const proj = (project || "").trim();
   const location = (region || "").trim();
   if (!proj) return { ok: false, error: "GCP provider has no project id." };
-  if (!location) return { ok: false, error: "GCP provider has no region set — set a region/location to list images." };
+  if (!location)
+    return {
+      ok: false,
+      error: "GCP provider has no region set — set a region/location to list images.",
+    };
   const tok = await getGcpAccessToken(cloudProviderId);
   if (!tok.ok) return { ok: false, error: tok.error };
   const token = tok.accessToken;
@@ -131,7 +156,11 @@ async function listGarImages(cloudProviderId: string, region: string | null, pro
   const repoList = await gget<{ repositories?: Array<{ name?: string; format?: string }> }>(
     `https://artifactregistry.googleapis.com/v1/projects/${proj}/locations/${location}/repositories`,
   );
-  if (!repoList) return { ok: false, error: "Couldn't list Artifact Registry repositories (check the region and API access)." };
+  if (!repoList)
+    return {
+      ok: false,
+      error: "Couldn't list Artifact Registry repositories (check the region and API access).",
+    };
   const repos = (repoList.repositories ?? [])
     .filter((r) => (r.format ?? "").toUpperCase() === "DOCKER" && r.name)
     .map((r) => r.name!.split("/").pop()!)
@@ -139,7 +168,9 @@ async function listGarImages(cloudProviderId: string, region: string | null, pro
 
   const images: RegistryImage[] = [];
   for (const repo of repos) {
-    const imgs = await gget<{ dockerImages?: Array<{ uri?: string; tags?: string[]; updateTime?: string }> }>(
+    const imgs = await gget<{
+      dockerImages?: Array<{ uri?: string; tags?: string[]; updateTime?: string }>;
+    }>(
       `https://artifactregistry.googleapis.com/v1/projects/${proj}/locations/${location}/repositories/${repo}/dockerImages`,
     );
     for (const im of imgs?.dockerImages ?? []) {
@@ -160,7 +191,13 @@ async function listAcrImages(cloudProviderId: string): Promise<RegistryImagesRes
   if (!tok.ok) return { ok: false, error: tok.error };
   const registries = await listAcr(cloudProviderId);
   if (!registries.ok) return { ok: false, error: registries.error };
-  if (registries.data.length === 0) return { ok: true, cloud: "azure", images: [], note: "No container registries found in this subscription." };
+  if (registries.data.length === 0)
+    return {
+      ok: true,
+      cloud: "azure",
+      images: [],
+      note: "No container registries found in this subscription.",
+    };
 
   const tenant = tenantFromJwt(tok.accessToken);
   const images: RegistryImage[] = [];
@@ -185,7 +222,11 @@ async function listAcrImages(cloudProviderId: string): Promise<RegistryImagesRes
 }
 
 /** Exchange an AAD token for an ACR access token scoped to read the catalog. */
-async function acrAccessToken(loginServer: string, aadToken: string, tenant: string | null): Promise<string | null> {
+async function acrAccessToken(
+  loginServer: string,
+  aadToken: string,
+  tenant: string | null,
+): Promise<string | null> {
   try {
     const exch = await fetch(`https://${loginServer}/oauth2/exchange`, {
       method: "POST",
@@ -220,7 +261,9 @@ async function acrAccessToken(loginServer: string, aadToken: string, tenant: str
 
 async function acrGet<T>(loginServer: string, path: string, token: string): Promise<T | null> {
   try {
-    const r = await fetch(`https://${loginServer}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    const r = await fetch(`https://${loginServer}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (!r.ok) return null;
     return (await r.json()) as T;
   } catch {
@@ -240,7 +283,9 @@ function tenantFromJwt(jwt: string): string | null {
   try {
     const payload = jwt.split(".")[1];
     if (!payload) return null;
-    const json = JSON.parse(Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+    const json = JSON.parse(
+      Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
+    );
     return typeof json.tid === "string" ? json.tid : null;
   } catch {
     return null;

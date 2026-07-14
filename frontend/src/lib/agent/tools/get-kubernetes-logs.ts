@@ -44,11 +44,17 @@ export const getKubernetesLogsTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       envKey: { type: "string", description: 'Env key, e.g. "alpha".' },
-      podName: { type: "string", description: "Exact pod name as returned by list_kubernetes_resources." },
+      podName: {
+        type: "string",
+        description: "Exact pod name as returned by list_kubernetes_resources.",
+      },
       namespace: { type: "string", description: "Namespace. Defaults to env's namespace." },
       container: { type: "string", description: "Container name for multi-container pods." },
       lines: { type: "number", description: "Last N lines. Default 200, max 1000." },
-      previous: { type: "boolean", description: "Read logs from the previously terminated container instance." },
+      previous: {
+        type: "boolean",
+        description: "Read logs from the previously terminated container instance.",
+      },
     },
     required: ["envKey", "podName"],
     additionalProperties: false,
@@ -70,12 +76,7 @@ export const getKubernetesLogsTool: Tool<Input, Output> = {
 
     const namespace = input.namespace ?? env.namespace ?? "default";
     const lines = Math.min(Math.max(input.lines ?? 200, 1), MAX_LINES);
-    const args = [
-      "logs",
-      input.podName,
-      "-n", namespace,
-      `--tail=${lines}`,
-    ];
+    const args = ["logs", input.podName, "-n", namespace, `--tail=${lines}`];
     if (input.container) args.push("-c", input.container);
     if (input.previous) args.push("--previous");
 

@@ -27,8 +27,13 @@ function row(
 ): ActivityRow {
   let actorName = a.actorLabel ?? "system";
   let actorKind: "user" | "agent" | "system" = "system";
-  if (a.actorUser) { actorName = a.actorUser.name; actorKind = "user"; }
-  else if (a.actorAgent) { actorName = a.actorAgent.name; actorKind = "agent"; }
+  if (a.actorUser) {
+    actorName = a.actorUser.name;
+    actorKind = "user";
+  } else if (a.actorAgent) {
+    actorName = a.actorAgent.name;
+    actorKind = "agent";
+  }
   return {
     id: a.id,
     envKey: a.env?.key ?? null,

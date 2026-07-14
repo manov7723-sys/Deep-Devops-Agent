@@ -96,8 +96,13 @@ export function AttachReposModal({
           // duplicate is fine — re-resolve using a fresh GET.
           let repoId = create.repo?.id ?? null;
           if (!repoId) {
-            const all = await api.get<Array<{ id: string; fullName: string; provider?: GitProvider }>>("/repos");
-            repoId = all.find((x) => x.fullName === r.fullName && (x.provider ?? "github") === provider)?.id ?? null;
+            const all =
+              await api.get<Array<{ id: string; fullName: string; provider?: GitProvider }>>(
+                "/repos",
+              );
+            repoId =
+              all.find((x) => x.fullName === r.fullName && (x.provider ?? "github") === provider)
+                ?.id ?? null;
           }
           if (!repoId) {
             results.push({ ok: false, fullName: r.fullName, code: "repo_resolve_failed" });
@@ -108,7 +113,11 @@ export function AttachReposModal({
             `/projects/${projectSlug}/repos`,
             { repoId },
           );
-          results.push({ ok: link.ok, fullName: r.fullName, code: link.ok ? undefined : link.code });
+          results.push({
+            ok: link.ok,
+            fullName: r.fullName,
+            code: link.ok ? undefined : link.code,
+          });
         } catch (err) {
           results.push({
             ok: false,
@@ -148,7 +157,9 @@ export function AttachReposModal({
       width={620}
       footer={
         <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
+          <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Btn>
           <Btn
             variant="primary"
             icon="link"
@@ -185,7 +196,11 @@ export function AttachReposModal({
                 type="button"
                 className={`chip ${provider === p ? "active" : ""}`}
                 style={{ height: 34 }}
-                onClick={() => { setProvider(p); setAccountId(null); setPicked({}); }}
+                onClick={() => {
+                  setProvider(p);
+                  setAccountId(null);
+                  setPicked({});
+                }}
               >
                 <Icon name={p} size={14} /> {PROVIDER_LABEL[p]}
               </button>
@@ -216,11 +231,18 @@ export function AttachReposModal({
 
       <Field label="Repositories" hint={`${pickedRepos.length} selected`}>
         {ghQuery.isLoading ? (
-          <span className="muted" style={{ fontSize: 13 }}>Loading your {label} repositories…</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Loading your {label} repositories…
+          </span>
         ) : ghError ? (
           <div
             className="col gap-2"
-            style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 12, fontSize: 13 }}
+            style={{
+              border: "1px dashed var(--border)",
+              borderRadius: 8,
+              padding: 12,
+              fontSize: 13,
+            }}
           >
             <span style={{ fontWeight: 600 }}>
               {ghCode?.endsWith("_not_connected")
@@ -256,7 +278,10 @@ export function AttachReposModal({
                 >
                   <div className="row gap-3" style={{ minWidth: 0 }}>
                     <Icon name={provider} size={17} />
-                    <div className="col" style={{ lineHeight: 1.3, minWidth: 0, textAlign: "left" }}>
+                    <div
+                      className="col"
+                      style={{ lineHeight: 1.3, minWidth: 0, textAlign: "left" }}
+                    >
                       <span style={{ fontWeight: 600, fontSize: 13 }}>{r.fullName}</span>
                       <span className="faint" style={{ fontSize: 11.5 }}>
                         {r.lang} · {r.kind} · {r.defaultBranch}

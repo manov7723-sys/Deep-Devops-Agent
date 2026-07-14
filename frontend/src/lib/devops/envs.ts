@@ -77,8 +77,7 @@ export type CreateEnvArgs = {
 };
 
 export type CreateEnvResult =
-  | { ok: true; env: EnvRow }
-  | { ok: false; code: "duplicate_key" | "provider_not_project_owner" };
+  { ok: true; env: EnvRow } | { ok: false; code: "duplicate_key" | "provider_not_project_owner" };
 
 export async function createEnv(args: CreateEnvArgs): Promise<CreateEnvResult> {
   if (args.cloudProviderId) {
@@ -136,8 +135,7 @@ export type UpdateEnvArgs = Partial<{
 }>;
 
 export type UpdateEnvResult =
-  | { ok: true; env: EnvRow }
-  | { ok: false; code: "not_found" | "provider_not_project_owner" };
+  { ok: true; env: EnvRow } | { ok: false; code: "not_found" | "provider_not_project_owner" };
 
 export async function updateEnv(
   projectId: string,
@@ -176,7 +174,9 @@ export async function updateEnv(
       ...(patch.autoDeploy !== undefined && { autoDeploy: patch.autoDeploy }),
       ...(patch.cloudProviderId !== undefined && { cloudProviderId: patch.cloudProviderId }),
       ...(patch.region !== undefined && { region: patch.region }),
-      ...(patch.terraformWorkspace !== undefined && { terraformWorkspace: patch.terraformWorkspace }),
+      ...(patch.terraformWorkspace !== undefined && {
+        terraformWorkspace: patch.terraformWorkspace,
+      }),
       ...(patch.url !== undefined && { url: patch.url }),
       ...(patch.promotionRank !== undefined && { promotionRank: patch.promotionRank }),
       ...(kubeconfigRef !== undefined && { kubeconfigRef }),
@@ -186,9 +186,7 @@ export async function updateEnv(
   return { ok: true, env: row(updated) };
 }
 
-export type DeleteEnvResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" | "has_deployments" };
+export type DeleteEnvResult = { ok: true } | { ok: false; code: "not_found" | "has_deployments" };
 
 export async function deleteEnv(projectId: string, key: string): Promise<DeleteEnvResult> {
   const env = await prisma.env.findUnique({
@@ -230,8 +228,7 @@ export async function listEnvRepos(envId: string): Promise<EnvRepoRow[]> {
 }
 
 export type WireRepoResult =
-  | { ok: true }
-  | { ok: false; code: "repo_not_attached" | "already_wired" };
+  { ok: true } | { ok: false; code: "repo_not_attached" | "already_wired" };
 
 /** The repo must already be attached to the project (ProjectRepo). */
 export async function wireRepoToEnv(
@@ -304,11 +301,7 @@ export function pickBackendForEnv(env: EnvWithBackend): TfBackendCfg | null {
   if (kind === "gcp" && env.tfBackendGcsBucket) {
     return { kind: "gcs", bucket: env.tfBackendGcsBucket };
   }
-  if (
-    kind === "azure" &&
-    env.tfBackendAzureStorageAccount &&
-    env.tfBackendAzureContainer
-  ) {
+  if (kind === "azure" && env.tfBackendAzureStorageAccount && env.tfBackendAzureContainer) {
     return {
       kind: "azurerm",
       resourceGroup: env.tfBackendAzureResourceGroup ?? "",
@@ -355,8 +348,7 @@ export async function setEnvTfBackend(
 
 export type GcsBackend = { bucket: string };
 export type SetGcsBackendResult =
-  | { ok: true; backend: { bucket: string | null } }
-  | { ok: false; code: "not_found" };
+  { ok: true; backend: { bucket: string | null } } | { ok: false; code: "not_found" };
 
 /**
  * Set the GCP remote-state backend (GCS bucket) for an env. Referenced by
@@ -380,7 +372,14 @@ export async function setEnvGcsBackend(
 
 export type AzureBackend = { resourceGroup: string; storageAccount: string; container: string };
 export type SetAzureBackendResult =
-  | { ok: true; backend: { resourceGroup: string | null; storageAccount: string | null; container: string | null } }
+  | {
+      ok: true;
+      backend: {
+        resourceGroup: string | null;
+        storageAccount: string | null;
+        container: string | null;
+      };
+    }
   | { ok: false; code: "not_found" };
 
 /**

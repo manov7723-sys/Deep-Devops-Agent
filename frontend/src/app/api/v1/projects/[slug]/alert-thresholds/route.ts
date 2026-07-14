@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { prisma } from "@/lib/db/prisma";
-import { listEnvThresholds, upsertThreshold, resetThreshold, METRIC_KEYS } from "@/lib/observability/thresholds";
+import {
+  listEnvThresholds,
+  upsertThreshold,
+  resetThreshold,
+  METRIC_KEYS,
+} from "@/lib/observability/thresholds";
 
 /**
  * Custom alarm thresholds per environment + metric. Drives both the live
@@ -20,7 +25,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   const gate = await requireProjectAccess(slug, "viewer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
   const envKey = (new URL(req.url).searchParams.get("envKey") || "").trim();
-  if (!envKey) return NextResponse.json({ ok: false, code: "invalid_request", message: "envKey is required." }, { status: 400 });
+  if (!envKey)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: "envKey is required." },
+      { status: 400 },
+    );
   const env = await resolveEnv(gate.access.project.id, envKey);
   if (!env) return NextResponse.json({ ok: false, code: "env_not_found" }, { status: 404 });
   return NextResponse.json({ ok: true, thresholds: await listEnvThresholds(env.id) });
@@ -39,7 +48,11 @@ export async function PUT(req: Request, ctx: { params: Promise<{ slug: string }>
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
   const parsed = PutBody.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message },
+      { status: 400 },
+    );
   const env = await resolveEnv(gate.access.project.id, parsed.data.envKey);
   if (!env) return NextResponse.json({ ok: false, code: "env_not_found" }, { status: 404 });
   const row = await upsertThreshold(
@@ -61,7 +74,10 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ slug: string
   const envKey = (sp.get("envKey") || "").trim();
   const metric = (sp.get("metric") || "").trim();
   if (!envKey || !(METRIC_KEYS as string[]).includes(metric)) {
-    return NextResponse.json({ ok: false, code: "invalid_request", message: "envKey and a valid metric are required." }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: "envKey and a valid metric are required." },
+      { status: 400 },
+    );
   }
   const env = await resolveEnv(gate.access.project.id, envKey);
   if (!env) return NextResponse.json({ ok: false, code: "env_not_found" }, { status: 404 });

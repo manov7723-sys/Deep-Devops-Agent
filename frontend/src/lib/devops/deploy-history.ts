@@ -43,11 +43,21 @@ export async function recordDeployment(
     .catch(() => {}); // history is best-effort — never fail a deploy over a log row
 }
 
-export async function listDeploymentRecords(projectId: string, limit = 100): Promise<DeploymentRecord[]> {
-  return prisma.deploymentRecord.findMany({ where: { projectId }, orderBy: { createdAt: "desc" }, take: limit });
+export async function listDeploymentRecords(
+  projectId: string,
+  limit = 100,
+): Promise<DeploymentRecord[]> {
+  return prisma.deploymentRecord.findMany({
+    where: { projectId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
 }
 
-export async function getDeploymentRecord(projectId: string, id: string): Promise<DeploymentRecord | null> {
+export async function getDeploymentRecord(
+  projectId: string,
+  id: string,
+): Promise<DeploymentRecord | null> {
   return prisma.deploymentRecord.findFirst({ where: { projectId, id } });
 }
 

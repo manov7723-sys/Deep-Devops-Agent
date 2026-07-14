@@ -44,7 +44,8 @@ export function ProjectCloudClient({ slug }: { slug: string }) {
     queryFn: () => api.get<{ project: { cloud: string | null } }>(`/projects/${slug}`),
     staleTime: 60_000,
   });
-  const lockedKind = (projectInfo?.project?.cloud as "aws" | "gcp" | "azure" | "proxmox" | null) ?? null;
+  const lockedKind =
+    (projectInfo?.project?.cloud as "aws" | "gcp" | "azure" | "proxmox" | null) ?? null;
 
   return (
     <div className="col gap-5">

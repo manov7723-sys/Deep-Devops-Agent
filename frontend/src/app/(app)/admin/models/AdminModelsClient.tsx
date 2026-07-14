@@ -2,15 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import {
-  Badge,
-  Block,
-  Btn,
-  DataTable,
-  Icon,
-  PageHead,
-  Toggle,
-} from "@/components/ui";
+import { Badge, Block, Btn, DataTable, Icon, PageHead, Toggle } from "@/components/ui";
 import { useAdminModelPatch, useAdminModels } from "@/hooks/queries/admin-ops";
 import { AddModelModal } from "@/components/modals/AddModelModal";
 import type { SeedAdminModel } from "@/lib/legacy-types";
@@ -41,12 +33,20 @@ export function AdminModelsClient() {
       {
         id: "ctx",
         header: "Context",
-        cell: ({ row }) => <span className="mono" style={{ fontSize: 12 }}>{row.original.ctx}</span>,
+        cell: ({ row }) => (
+          <span className="mono" style={{ fontSize: 12 }}>
+            {row.original.ctx}
+          </span>
+        ),
       },
       {
         id: "cost",
         header: "Cost",
-        cell: ({ row }) => <span className="mono faint" style={{ fontSize: 11.5 }}>{row.original.cost}</span>,
+        cell: ({ row }) => (
+          <span className="mono faint" style={{ fontSize: 11.5 }}>
+            {row.original.cost}
+          </span>
+        ),
       },
       {
         id: "enabled",

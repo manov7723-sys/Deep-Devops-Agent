@@ -11,10 +11,7 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  * UI uses. The right-side history rail hits this when the user clicks a past
  * thread to load it into the main chat pane.
  */
-export async function GET(
-  _req: Request,
-  ctx: { params: Promise<{ slug: string; id: string }> },
-) {
+export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "viewer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
@@ -36,10 +33,7 @@ export async function GET(
  * still return the user's message so the UI doesn't lose it; the failure
  * just shows up as an `agentError` field the client can render inline.
  */
-export async function POST(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; id: string }> },
-) {
+export async function POST(req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "viewer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });

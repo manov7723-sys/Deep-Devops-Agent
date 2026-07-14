@@ -39,7 +39,10 @@ export function ChangePasswordClient() {
               form.handleSubmit();
             }}
           >
-            <form.Field name="current" validators={{ onChange: ({ value }) => (!value ? "Required" : undefined) }}>
+            <form.Field
+              name="current"
+              validators={{ onChange: ({ value }) => (!value ? "Required" : undefined) }}
+            >
               {(field) => (
                 <Field label="Current password" required error={field.state.meta.errors[0]}>
                   <Input
@@ -56,7 +59,12 @@ export function ChangePasswordClient() {
 
             <form.Field
               name="password"
-              validators={{ onChange: ({ value }) => (evaluatePassword(value).allMet ? undefined : "Password must meet all requirements") }}
+              validators={{
+                onChange: ({ value }) =>
+                  evaluatePassword(value).allMet
+                    ? undefined
+                    : "Password must meet all requirements",
+              }}
             >
               {(field) => (
                 <Field label="New password" required error={field.state.meta.errors[0]}>
@@ -103,10 +111,14 @@ export function ChangePasswordClient() {
             </form.Subscribe>
 
             {serverError && (
-              <p style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">{serverError}</p>
+              <p style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">
+                {serverError}
+              </p>
             )}
             {success && (
-              <p style={{ fontSize: 12.5, color: "var(--ok)" }} role="status">Password updated.</p>
+              <p style={{ fontSize: 12.5, color: "var(--ok)" }} role="status">
+                Password updated.
+              </p>
             )}
 
             <div className="row gap-2 between">

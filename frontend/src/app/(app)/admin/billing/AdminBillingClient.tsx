@@ -2,14 +2,7 @@
 
 import { useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import {
-  Badge,
-  Block,
-  Btn,
-  DataTable,
-  PageHead,
-  Stat,
-} from "@/components/ui";
+import { Badge, Block, Btn, DataTable, PageHead, Stat } from "@/components/ui";
 import { useAdminBillingStats, useAdminInvoices } from "@/hooks/queries/admin-ops";
 import type { SeedAdminInvoice } from "@/lib/legacy-types";
 
@@ -23,7 +16,9 @@ export function AdminBillingClient() {
         id: "inv",
         header: "Invoice",
         cell: ({ row }) => (
-          <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{row.original.number}</span>
+          <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>
+            {row.original.number}
+          </span>
         ),
       },
       {
@@ -34,7 +29,11 @@ export function AdminBillingClient() {
       {
         id: "amount",
         header: "Amount",
-        cell: ({ row }) => <span className="tnum" style={{ fontWeight: 700 }}>{row.original.amount}</span>,
+        cell: ({ row }) => (
+          <span className="tnum" style={{ fontWeight: 700 }}>
+            {row.original.amount}
+          </span>
+        ),
       },
       {
         id: "date",
@@ -46,7 +45,13 @@ export function AdminBillingClient() {
         header: "Status",
         cell: ({ row }) => (
           <Badge
-            tone={row.original.status === "paid" ? "ok" : row.original.status === "failed" ? "danger" : "info"}
+            tone={
+              row.original.status === "paid"
+                ? "ok"
+                : row.original.status === "failed"
+                  ? "danger"
+                  : "info"
+            }
             icon={row.original.status === "paid" ? "check" : "alert"}
           >
             {row.original.status}
@@ -80,7 +85,13 @@ export function AdminBillingClient() {
           </Btn>
         }
       />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 14,
+        }}
+      >
         <Stat
           label="Collected (May)"
           value={stats?.collectedThisMonth ?? "—"}

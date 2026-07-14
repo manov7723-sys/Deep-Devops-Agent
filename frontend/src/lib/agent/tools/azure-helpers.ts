@@ -10,14 +10,20 @@ export type AzureCtx = { accessToken: string; subscriptionId: string };
  * isolation). Returns a friendly error string when no Azure account is
  * connected or auth fails.
  */
-export async function azureContext(projectId: string): Promise<{ ok: true; ctx: AzureCtx } | { ok: false; error: string }> {
+export async function azureContext(
+  projectId: string,
+): Promise<{ ok: true; ctx: AzureCtx } | { ok: false; error: string }> {
   const cp = await prisma.cloudProvider.findFirst({
     where: { projectId, kind: "azure" },
     select: { id: true, accountRef: true },
     orderBy: { createdAt: "desc" },
   });
   if (!cp) {
-    return { ok: false, error: "No Azure account is connected to this project. Connect one with 'Sign in with Microsoft' on the Cloud providers tab first." };
+    return {
+      ok: false,
+      error:
+        "No Azure account is connected to this project. Connect one with 'Sign in with Microsoft' on the Cloud providers tab first.",
+    };
   }
   const tok = await getAzureAccessToken(cp.id);
   if (!tok.ok) return { ok: false, error: `Could not authenticate to Azure: ${tok.error}` };
@@ -31,9 +37,15 @@ export async function armGet(
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
   let res: Response;
   try {
-    res = await fetch(`${ARM}${path}`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+    res = await fetch(`${ARM}${path}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
   } catch (err) {
-    return { ok: false, error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");

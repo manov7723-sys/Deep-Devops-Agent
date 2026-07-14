@@ -66,7 +66,14 @@ export function signState(input: StateInput): string {
 }
 
 export type VerifyResult =
-  | { ok: true; provider: string; nonce: string; issuedAtMs: number; popup: boolean; next: string | null }
+  | {
+      ok: true;
+      provider: string;
+      nonce: string;
+      issuedAtMs: number;
+      popup: boolean;
+      next: string | null;
+    }
   | { ok: false; code: "malformed" | "bad_sig" | "expired" };
 
 export function verifyState(token: string, expectedNonce: string): VerifyResult {

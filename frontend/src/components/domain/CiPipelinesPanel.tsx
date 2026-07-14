@@ -39,7 +39,9 @@ export function CiPipelinesPanel({ slug }: { slug: string }) {
   if (isLoading) {
     return (
       <Block>
-        <Block.Header><Block.Title>CI/CD Pipelines</Block.Title></Block.Header>
+        <Block.Header>
+          <Block.Title>CI/CD Pipelines</Block.Title>
+        </Block.Header>
         <Block.Loading />
       </Block>
     );
@@ -47,7 +49,9 @@ export function CiPipelinesPanel({ slug }: { slug: string }) {
   if (!pipelines || pipelines.length === 0) {
     return (
       <Block>
-        <Block.Header><Block.Title>CI/CD Pipelines</Block.Title></Block.Header>
+        <Block.Header>
+          <Block.Title>CI/CD Pipelines</Block.Title>
+        </Block.Header>
         <Block.Empty
           icon="cicd"
           title="No saved pipelines yet"
@@ -116,7 +120,8 @@ function PipelineRow(props: {
   const liveStatuses = ["committing", "running"];
   const status = useCiPipelineStatus(slug, open ? id : null, false);
   // Poll while running / committing / healing.
-  const isLive = !!status.data && (liveStatuses.includes(status.data.status) || status.data.healing);
+  const isLive =
+    !!status.data && (liveStatuses.includes(status.data.status) || status.data.healing);
   const statusLive = useCiPipelineStatus(slug, open ? id : null, isLive);
   const st = statusLive.data ?? status.data;
 
@@ -137,11 +142,25 @@ function PipelineRow(props: {
     <div style={{ borderTop: "1px solid var(--border)" }}>
       {/* Header row */}
       <div className="row between gap-3" style={{ padding: "12px 16px", alignItems: "center" }}>
-        <button type="button" className="row gap-2" onClick={props.onToggle} style={{ background: "none", border: 0, cursor: "pointer", textAlign: "left", flex: 1, minWidth: 0 }}>
+        <button
+          type="button"
+          className="row gap-2"
+          onClick={props.onToggle}
+          style={{
+            background: "none",
+            border: 0,
+            cursor: "pointer",
+            textAlign: "left",
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
           <Icon name={open ? "chevUD" : "chevR"} />
           <div className="col" style={{ gap: 2, minWidth: 0 }}>
             <span style={{ fontWeight: 600 }}>{props.name}</span>
-            <span className="faint" style={{ fontSize: 12 }}>{props.repoFullName} · {props.branch ?? "main"}</span>
+            <span className="faint" style={{ fontSize: 12 }}>
+              {props.repoFullName} · {props.branch ?? "main"}
+            </span>
           </div>
         </button>
         <div className="row gap-2" style={{ alignItems: "center" }}>
@@ -160,7 +179,11 @@ function PipelineRow(props: {
 
       {open && (
         <div className="col gap-3" style={{ padding: "0 16px 16px 40px" }}>
-          {run.isError && <div className="faint" style={{ color: "var(--danger)", fontSize: 12 }}>{(run.error as Error).message}</div>}
+          {run.isError && (
+            <div className="faint" style={{ color: "var(--danger)", fontSize: 12 }}>
+              {(run.error as Error).message}
+            </div>
+          )}
 
           {/* Agent reviewer toggle */}
           <label className="row gap-2" style={{ alignItems: "center", cursor: "pointer" }}>
@@ -175,7 +198,9 @@ function PipelineRow(props: {
 
           {/* Editable script */}
           {detail.isLoading || draft === null ? (
-            <div className="faint" style={{ fontSize: 12 }}>Loading script…</div>
+            <div className="faint" style={{ fontSize: 12 }}>
+              Loading script…
+            </div>
           ) : (
             <div className="col gap-2">
               <div className="row gap-2 wrap">
@@ -199,13 +224,32 @@ function PipelineRow(props: {
                 value={currentFile?.content ?? ""}
                 onChange={(e) => editFile(e.target.value)}
                 spellCheck={false}
-                style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12, minHeight: 260, whiteSpace: "pre" }}
+                style={{
+                  fontFamily: "var(--font-mono, monospace)",
+                  fontSize: 12,
+                  minHeight: 260,
+                  whiteSpace: "pre",
+                }}
               />
               <div className="row gap-2">
-                <Btn size="sm" variant="outline" icon="check" disabled={!dirty} loading={update.isPending} onClick={save}>
+                <Btn
+                  size="sm"
+                  variant="outline"
+                  icon="check"
+                  disabled={!dirty}
+                  loading={update.isPending}
+                  onClick={save}
+                >
                   Save changes
                 </Btn>
-                <Btn size="sm" variant="ghost" icon="trash" onClick={() => { if (confirm("Delete this pipeline?")) del.mutate(id); }}>
+                <Btn
+                  size="sm"
+                  variant="ghost"
+                  icon="trash"
+                  onClick={() => {
+                    if (confirm("Delete this pipeline?")) del.mutate(id);
+                  }}
+                >
                   Delete
                 </Btn>
               </div>
@@ -213,29 +257,61 @@ function PipelineRow(props: {
           )}
 
           {/* Live run status */}
-          {st && (st.status !== "draft") && (
-            <div className="col gap-2" style={{ borderTop: "1px dashed var(--border)", paddingTop: 12 }}>
+          {st && st.status !== "draft" && (
+            <div
+              className="col gap-2"
+              style={{ borderTop: "1px dashed var(--border)", paddingTop: 12 }}
+            >
               <div className="row gap-2" style={{ alignItems: "center" }}>
                 <span style={{ fontWeight: 600, fontSize: 13 }}>Run status</span>
                 <StatusBadge status={st.status} />
-                {st.healing && <Badge tone="info"><Icon name="bot" /> agent reviewing…</Badge>}
-                {st.runUrl && <a href={st.runUrl} target="_blank" rel="noreferrer" className="row gap-1" style={{ fontSize: 12 }}>Open on GitHub <Icon name="ext" /></a>}
+                {st.healing && (
+                  <Badge tone="info">
+                    <Icon name="bot" /> agent reviewing…
+                  </Badge>
+                )}
+                {st.runUrl && (
+                  <a
+                    href={st.runUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="row gap-1"
+                    style={{ fontSize: 12 }}
+                  >
+                    Open on GitHub <Icon name="ext" />
+                  </a>
+                )}
               </div>
-              {st.healNote && <div className="faint" style={{ fontSize: 12 }}>{st.healNote}</div>}
-              {st.lastError && <div style={{ color: "var(--danger)", fontSize: 12 }}>{st.lastError}</div>}
+              {st.healNote && (
+                <div className="faint" style={{ fontSize: 12 }}>
+                  {st.healNote}
+                </div>
+              )}
+              {st.lastError && (
+                <div style={{ color: "var(--danger)", fontSize: 12 }}>{st.lastError}</div>
+              )}
               {st.agentReview && (
-                <div className="faint" style={{ fontSize: 11 }}>Agent reviewer attempts: {st.healAttempts}/{st.maxHealAttempts}</div>
+                <div className="faint" style={{ fontSize: 11 }}>
+                  Agent reviewer attempts: {st.healAttempts}/{st.maxHealAttempts}
+                </div>
               )}
               <div className="col" style={{ gap: 4 }}>
                 {(st.stages ?? []).map((stage) => (
                   <div key={stage.name} className="col" style={{ gap: 2 }}>
-                    <div className="row gap-2" style={{ alignItems: "center", fontSize: 12, fontWeight: 600 }}>
+                    <div
+                      className="row gap-2"
+                      style={{ alignItems: "center", fontSize: 12, fontWeight: 600 }}
+                    >
                       <StepDot status={stage.status} conclusion={stage.conclusion} />
                       {stage.name}
                     </div>
                     <div className="col" style={{ gap: 1, paddingLeft: 18 }}>
                       {stage.steps.map((s, i) => (
-                        <div key={i} className="row gap-2" style={{ alignItems: "center", fontSize: 11.5 }}>
+                        <div
+                          key={i}
+                          className="row gap-2"
+                          style={{ alignItems: "center", fontSize: 11.5 }}
+                        >
                           <StepDot status={s.status} conclusion={s.conclusion} />
                           <span className="faint">{s.name}</span>
                         </div>
@@ -254,10 +330,25 @@ function PipelineRow(props: {
 
 function StepDot({ status, conclusion }: { status: string; conclusion: string | null }) {
   const color =
-    conclusion === "success" ? "var(--ok, #22c55e)"
-    : conclusion === "failure" ? "var(--danger, #ef4444)"
-    : conclusion === "skipped" ? "var(--border)"
-    : status === "in_progress" ? "var(--accent, #8b5cf6)"
-    : "var(--muted, #888)";
-  return <span style={{ width: 8, height: 8, borderRadius: 999, background: color, display: "inline-block", flex: "0 0 auto" }} />;
+    conclusion === "success"
+      ? "var(--ok, #22c55e)"
+      : conclusion === "failure"
+        ? "var(--danger, #ef4444)"
+        : conclusion === "skipped"
+          ? "var(--border)"
+          : status === "in_progress"
+            ? "var(--accent, #8b5cf6)"
+            : "var(--muted, #888)";
+  return (
+    <span
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: 999,
+        background: color,
+        display: "inline-block",
+        flex: "0 0 auto",
+      }}
+    />
+  );
 }

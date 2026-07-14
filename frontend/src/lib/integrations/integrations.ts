@@ -97,10 +97,11 @@ export type CreateIntegrationArgs = {
 };
 
 export type CreateIntegrationResult =
-  | { ok: true; id: string }
-  | { ok: false; code: "duplicate_provider" };
+  { ok: true; id: string } | { ok: false; code: "duplicate_provider" };
 
-export async function createIntegration(args: CreateIntegrationArgs): Promise<CreateIntegrationResult> {
+export async function createIntegration(
+  args: CreateIntegrationArgs,
+): Promise<CreateIntegrationResult> {
   const existing = await prisma.integration.findUnique({
     where: { projectId_provider: { projectId: args.projectId, provider: args.provider } },
     select: { id: true },
@@ -138,9 +139,7 @@ export type UpdateIntegrationArgs = Partial<{
   credentials: Array<{ key: string; value: string; isSecret?: boolean }>;
 }>;
 
-export type UpdateIntegrationResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" };
+export type UpdateIntegrationResult = { ok: true } | { ok: false; code: "not_found" };
 
 /**
  * Updates name/status atomically. If credentials are present, those keys
@@ -152,7 +151,10 @@ export async function updateIntegration(
   id: string,
   patch: UpdateIntegrationArgs,
 ): Promise<UpdateIntegrationResult> {
-  const existing = await prisma.integration.findFirst({ where: { id, projectId }, select: { id: true } });
+  const existing = await prisma.integration.findFirst({
+    where: { id, projectId },
+    select: { id: true },
+  });
   if (!existing) return { ok: false, code: "not_found" };
 
   const ops: Prisma.PrismaPromise<unknown>[] = [];
@@ -191,9 +193,7 @@ export async function updateIntegration(
   return { ok: true };
 }
 
-export type DeleteIntegrationResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" };
+export type DeleteIntegrationResult = { ok: true } | { ok: false; code: "not_found" };
 
 export async function deleteIntegration(
   projectId: string,

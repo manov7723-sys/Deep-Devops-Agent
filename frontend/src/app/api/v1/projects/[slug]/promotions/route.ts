@@ -31,9 +31,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, message: parsed.error.issues[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, message: parsed.error.issues[0]?.message },
+      { status: 400 },
+    );
 
-  const res = await promoteApp(gate.access.project.id, parsed.data.appName, parsed.data.fromEnvKey, parsed.data.toEnvKey, parsed.data.namespace);
+  const res = await promoteApp(
+    gate.access.project.id,
+    parsed.data.appName,
+    parsed.data.fromEnvKey,
+    parsed.data.toEnvKey,
+    parsed.data.namespace,
+  );
   if (!res.ok) return NextResponse.json({ ok: false, message: res.error }, { status: 400 });
   return NextResponse.json({
     ok: true,

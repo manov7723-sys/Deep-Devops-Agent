@@ -20,7 +20,11 @@ export default async function ProjectLayout({
     <AppShell
       area="project"
       projectSlug={projectSlug}
-      me={{ name: session.user.name, email: session.user.email, isSuperAdmin: session.user.isSuperAdmin }}
+      me={{
+        name: session.user.name,
+        email: session.user.email,
+        isSuperAdmin: session.user.isSuperAdmin,
+      }}
     >
       {children}
     </AppShell>

@@ -8,10 +8,7 @@ import { audit } from "@/lib/audit/log";
 import { recordActivity } from "@/lib/agentops/activity";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
-export async function POST(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; id: string }> },
-) {
+export async function POST(req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });

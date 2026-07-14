@@ -29,10 +29,12 @@ export type KnowledgeRow = {
 
 export type KnowledgeDetailRow = KnowledgeRow & { body: string | null };
 
-function summary(d: KnowledgeDoc & {
-  env: { key: string } | null;
-  author: { name: string } | null;
-}): KnowledgeRow {
+function summary(
+  d: KnowledgeDoc & {
+    env: { key: string } | null;
+    author: { name: string } | null;
+  },
+): KnowledgeRow {
   return {
     id: d.id,
     title: d.title,
@@ -55,7 +57,10 @@ export async function listKnowledge(projectId: string): Promise<KnowledgeRow[]> 
   return rows.map(summary);
 }
 
-export async function getKnowledge(projectId: string, id: string): Promise<KnowledgeDetailRow | null> {
+export async function getKnowledge(
+  projectId: string,
+  id: string,
+): Promise<KnowledgeDetailRow | null> {
   const d = await prisma.knowledgeDoc.findFirst({
     where: { id, projectId },
     include: { env: { select: { key: true } }, author: { select: { name: true } } },
@@ -103,8 +108,7 @@ export type PatchKnowledgeArgs = Partial<{
 }>;
 
 export type PatchKnowledgeResult =
-  | { ok: true; doc: KnowledgeRow }
-  | { ok: false; code: "not_found" };
+  { ok: true; doc: KnowledgeRow } | { ok: false; code: "not_found" };
 
 export async function patchKnowledge(
   projectId: string,

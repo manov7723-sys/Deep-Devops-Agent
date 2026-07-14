@@ -135,7 +135,8 @@ export function ResetClient() {
         <form.Field
           name="password"
           validators={{
-            onChange: ({ value }) => (evaluatePassword(value).allMet ? undefined : "Password must meet all requirements"),
+            onChange: ({ value }) =>
+              evaluatePassword(value).allMet ? undefined : "Password must meet all requirements",
           }}
         >
           {(field) => (

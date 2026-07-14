@@ -58,9 +58,18 @@ export const repairGcpWifBindingTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'GitHub repo as "owner/name" whose CI is failing.' },
-      ciWorkflowFile: { type: "string", description: 'CI workflow file to rerun (default "build-and-push-gar.yml").' },
-      waitSeconds: { type: "number", description: "Max IAM propagation wait before rerun. 30–120, default 60." },
+      repoFullName: {
+        type: "string",
+        description: 'GitHub repo as "owner/name" whose CI is failing.',
+      },
+      ciWorkflowFile: {
+        type: "string",
+        description: 'CI workflow file to rerun (default "build-and-push-gar.yml").',
+      },
+      waitSeconds: {
+        type: "number",
+        description: "Max IAM propagation wait before rerun. 30–120, default 60.",
+      },
     },
     required: ["repoFullName"],
     additionalProperties: false,
@@ -93,17 +102,24 @@ export const repairGcpWifBindingTool: Tool<Input, Output> = {
     //     Clamp is [60s, 300s] so the agent can push it higher on stubborn
     //     projects without allowing pathological runs.
     const waitMs = Math.min(Math.max((input.waitSeconds ?? 120) * 1000, 60_000), 300_000);
-    steps.push(`Waiting ${Math.round(waitMs / 1000)}s for IAM propagation before rerunning CI (GCP can take up to 7 min).`);
+    steps.push(
+      `Waiting ${Math.round(waitMs / 1000)}s for IAM propagation before rerunning CI (GCP can take up to 7 min).`,
+    );
     await new Promise((r) => setTimeout(r, waitMs));
 
     // 3 — Rerun the failed CI workflow. If we get a "no failure to rerun" back,
     //     the workflow was already rerun by the user; return the reason and
     //     let the agent surface it verbatim.
     const repo = await prisma.repo.findFirst({
-      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
       select: { id: true },
     });
-    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    if (!repo)
+      return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
     const gh = await resolveTokenForRepo(repo.id);
     let reran: { runId: number | null; note: string } | null = null;
     if (gh.ok) {

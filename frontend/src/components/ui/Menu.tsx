@@ -12,7 +12,13 @@ export interface MenuProps {
   width?: number;
 }
 
-export function Menu({ trigger, children, align = "end", side = "bottom", width = 220 }: MenuProps) {
+export function Menu({
+  trigger,
+  children,
+  align = "end",
+  side = "bottom",
+  width = 220,
+}: MenuProps) {
   return (
     <DM.Root>
       <DM.Trigger asChild>{trigger}</DM.Trigger>

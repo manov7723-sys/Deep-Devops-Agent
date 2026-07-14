@@ -18,19 +18,27 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   if (!repoFullName) return NextResponse.json({ ok: false, branches: [] });
 
   const repo = await prisma.repo.findFirst({
-    where: { fullName: repoFullName, deletedAt: null, projectRepos: { some: { projectId: gate.access.project.id } } },
+    where: {
+      fullName: repoFullName,
+      deletedAt: null,
+      projectRepos: { some: { projectId: gate.access.project.id } },
+    },
     select: { id: true, defaultBranch: true },
   });
   if (!repo) return NextResponse.json({ ok: false, branches: [] });
 
   const fallback = repo.defaultBranch ? [repo.defaultBranch] : [];
   const tok = await resolveTokenForRepo(repo.id);
-  if (!tok.ok) return NextResponse.json({ ok: true, branches: fallback, defaultBranch: repo.defaultBranch });
+  if (!tok.ok)
+    return NextResponse.json({ ok: true, branches: fallback, defaultBranch: repo.defaultBranch });
 
   const branches: string[] = [];
   try {
     const res = await fetch(`https://api.github.com/repos/${repoFullName}/branches?per_page=100`, {
-      headers: { Authorization: `Bearer ${tok.accessToken}`, Accept: "application/vnd.github+json" },
+      headers: {
+        Authorization: `Bearer ${tok.accessToken}`,
+        Accept: "application/vnd.github+json",
+      },
       cache: "no-store",
     });
     if (res.ok) {

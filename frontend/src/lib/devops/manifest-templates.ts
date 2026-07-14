@@ -48,13 +48,17 @@ export function parseKeyValues(raw: string): Array<[string, string]> {
     .filter(Boolean)
     .map((l) => {
       const i = l.indexOf("=");
-      return i === -1 ? ([l, ""] as [string, string]) : ([l.slice(0, i).trim(), l.slice(i + 1).trim()] as [string, string]);
+      return i === -1
+        ? ([l, ""] as [string, string])
+        : ([l.slice(0, i).trim(), l.slice(i + 1).trim()] as [string, string]);
     })
     .filter(([k]) => k.length > 0);
 }
 
 function stdLabels(app: string): string {
-  return [`app.kubernetes.io/name: ${q(app)}`, `app.kubernetes.io/managed-by: deepagent`].join("\n");
+  return [`app.kubernetes.io/name: ${q(app)}`, `app.kubernetes.io/managed-by: deepagent`].join(
+    "\n",
+  );
 }
 
 const get = (v: Record<string, string>, k: string, d = "") => (v[k] ?? "").trim() || d;
@@ -87,15 +91,33 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
     apiVersion: "apps/v1",
     namespaced: true,
     fields: [
-      { name: "image", label: "Container image", type: "text", required: true, placeholder: "nginx:1.27", hint: "image:tag" },
+      {
+        name: "image",
+        label: "Container image",
+        type: "text",
+        required: true,
+        placeholder: "nginx:1.27",
+        hint: "image:tag",
+      },
       { name: "replicas", label: "Replicas", type: "number", default: "2" },
       { name: "containerPort", label: "Container port", type: "number", default: "8080" },
       { name: "cpuRequest", label: "CPU request", type: "text", default: "100m" },
       { name: "cpuLimit", label: "CPU limit", type: "text", default: "500m" },
       { name: "memRequest", label: "Memory request", type: "text", default: "128Mi" },
       { name: "memLimit", label: "Memory limit", type: "text", default: "512Mi" },
-      { name: "probePath", label: "Health probe path", type: "text", default: "/healthz", hint: "HTTP path for liveness/readiness" },
-      { name: "env", label: "Environment variables", type: "keyvalue", hint: "One KEY=VALUE per line" },
+      {
+        name: "probePath",
+        label: "Health probe path",
+        type: "text",
+        default: "/healthz",
+        hint: "HTTP path for liveness/readiness",
+      },
+      {
+        name: "env",
+        label: "Environment variables",
+        type: "keyvalue",
+        hint: "One KEY=VALUE per line",
+      },
       {
         name: "volumeType",
         label: "Volume",
@@ -104,8 +126,20 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
         options: ["none", "emptyDir", "configMap", "secret", "persistentVolumeClaim"],
         hint: "Attach a volume to the container. 'none' = no volume.",
       },
-      { name: "volumeName", label: "Volume name", type: "text", default: "data", hint: "Used when a volume is selected." },
-      { name: "mountPath", label: "Mount path", type: "text", default: "/data", hint: "Where the volume is mounted in the container." },
+      {
+        name: "volumeName",
+        label: "Volume name",
+        type: "text",
+        default: "data",
+        hint: "Used when a volume is selected.",
+      },
+      {
+        name: "mountPath",
+        label: "Mount path",
+        type: "text",
+        default: "/data",
+        hint: "Where the volume is mounted in the container.",
+      },
       {
         name: "volumeSource",
         label: "Volume source name",
@@ -123,7 +157,10 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
       const envs = parseKeyValues(v.env ?? "");
       // Container-level env (correctly indented as a container field).
       const envBlock = envs.length
-        ? `\n          env:\n` + envs.map(([k, val]) => `            - name: ${q(k)}\n              value: ${q(val)}`).join("\n")
+        ? `\n          env:\n` +
+          envs
+            .map(([k, val]) => `            - name: ${q(k)}\n              value: ${q(val)}`)
+            .join("\n")
         : "";
 
       // Optional volume: a container volumeMount + a pod-spec volume source.
@@ -137,10 +174,15 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
         : "";
       let volSourceLines = "";
       if (volType === "emptyDir") volSourceLines = `          emptyDir: {}`;
-      else if (volType === "configMap") volSourceLines = `          configMap:\n            name: ${q(volSrc)}`;
-      else if (volType === "secret") volSourceLines = `          secret:\n            secretName: ${q(volSrc)}`;
-      else if (volType === "persistentVolumeClaim") volSourceLines = `          persistentVolumeClaim:\n            claimName: ${q(volSrc)}`;
-      const volumesBlock = hasVol ? `\n      volumes:\n        - name: ${q(volName)}\n${volSourceLines}` : "";
+      else if (volType === "configMap")
+        volSourceLines = `          configMap:\n            name: ${q(volSrc)}`;
+      else if (volType === "secret")
+        volSourceLines = `          secret:\n            secretName: ${q(volSrc)}`;
+      else if (volType === "persistentVolumeClaim")
+        volSourceLines = `          persistentVolumeClaim:\n            claimName: ${q(volSrc)}`;
+      const volumesBlock = hasVol
+        ? `\n      volumes:\n        - name: ${q(volName)}\n${volSourceLines}`
+        : "";
 
       return [
         `apiVersion: ${m.apiVersion}`,
@@ -210,10 +252,22 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
     apiVersion: "v1",
     namespaced: true,
     fields: [
-      { name: "type", label: "Service type", type: "select", default: "ClusterIP", options: ["ClusterIP", "NodePort", "LoadBalancer"] },
+      {
+        name: "type",
+        label: "Service type",
+        type: "select",
+        default: "ClusterIP",
+        options: ["ClusterIP", "NodePort", "LoadBalancer"],
+      },
       { name: "port", label: "Service port", type: "number", default: "80" },
       { name: "targetPort", label: "Target (container) port", type: "number", default: "8080" },
-      { name: "selectorApp", label: "Selector app name", type: "text", hint: "Matches the Deployment's app.kubernetes.io/name", required: true },
+      {
+        name: "selectorApp",
+        label: "Selector app name",
+        type: "text",
+        hint: "Matches the Deployment's app.kubernetes.io/name",
+        required: true,
+      },
     ],
     generate: (v, m) => {
       const name = get(v, "name", "my-svc");
@@ -270,8 +324,19 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
     apiVersion: "v1",
     namespaced: true,
     fields: [
-      { name: "secretType", label: "Secret type", type: "select", default: "Opaque", options: ["Opaque", "kubernetes.io/dockerconfigjson", "kubernetes.io/tls"] },
-      { name: "data", label: "String data", type: "keyvalue", hint: "One KEY=VALUE per line (stored as stringData — k8s encodes it)" },
+      {
+        name: "secretType",
+        label: "Secret type",
+        type: "select",
+        default: "Opaque",
+        options: ["Opaque", "kubernetes.io/dockerconfigjson", "kubernetes.io/tls"],
+      },
+      {
+        name: "data",
+        label: "String data",
+        type: "keyvalue",
+        hint: "One KEY=VALUE per line (stored as stringData — k8s encodes it)",
+      },
     ],
     generate: (v, m) => {
       const name = get(v, "name", "my-secret");
@@ -347,7 +412,13 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
     apiVersion: "autoscaling/v2",
     namespaced: true,
     fields: [
-      { name: "targetKind", label: "Target kind", type: "select", default: "Deployment", options: ["Deployment", "StatefulSet", "ReplicaSet"] },
+      {
+        name: "targetKind",
+        label: "Target kind",
+        type: "select",
+        default: "Deployment",
+        options: ["Deployment", "StatefulSet", "ReplicaSet"],
+      },
       { name: "targetName", label: "Target name", type: "text", required: true },
       { name: "minReplicas", label: "Min replicas", type: "number", default: "2" },
       { name: "maxReplicas", label: "Max replicas", type: "number", default: "10" },
@@ -408,8 +479,19 @@ export const MANIFEST_KINDS: Record<string, ManifestKind> = {
     namespaced: true,
     fields: [
       { name: "size", label: "Storage size", type: "text", default: "1Gi", hint: "e.g. 1Gi, 10Gi" },
-      { name: "accessMode", label: "Access mode", type: "select", default: "ReadWriteOnce", options: ["ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"] },
-      { name: "storageClass", label: "Storage class", type: "text", hint: "Optional, e.g. gp3. Blank = cluster default." },
+      {
+        name: "accessMode",
+        label: "Access mode",
+        type: "select",
+        default: "ReadWriteOnce",
+        options: ["ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"],
+      },
+      {
+        name: "storageClass",
+        label: "Storage class",
+        type: "text",
+        hint: "Optional, e.g. gp3. Blank = cluster default.",
+      },
     ],
     generate: (v, m) => {
       const name = get(v, "name", "my-pvc");
@@ -441,10 +523,22 @@ export const CURATED_KIND_NAMES = Object.keys(MANIFEST_KINDS);
 /** Implicit fields every kind needs (rendered before the curated fields). */
 export function baseFields(namespaced: boolean): ManifestField[] {
   const f: ManifestField[] = [
-    { name: "name", label: "Name (metadata.name)", type: "text", required: true, placeholder: "my-app" },
+    {
+      name: "name",
+      label: "Name (metadata.name)",
+      type: "text",
+      required: true,
+      placeholder: "my-app",
+    },
   ];
   if (namespaced) {
-    f.push({ name: "namespace", label: "Namespace", type: "text", required: true, default: "default" });
+    f.push({
+      name: "namespace",
+      label: "Namespace",
+      type: "text",
+      required: true,
+      default: "default",
+    });
   }
   return f;
 }
@@ -456,7 +550,12 @@ export function getManifestKind(kind: string): ManifestKind | null {
 /** Generic skeleton for any kind we don't have a curated template for. */
 function genericManifest(values: Record<string, string>, meta: ManifestMeta): string {
   const name = get(values, "name", "my-resource");
-  const lines = [`apiVersion: ${meta.apiVersion}`, `kind: ${meta.kind}`, `metadata:`, `  name: ${q(name)}`];
+  const lines = [
+    `apiVersion: ${meta.apiVersion}`,
+    `kind: ${meta.kind}`,
+    `metadata:`,
+    `  name: ${q(name)}`,
+  ];
   if (meta.namespaced) lines.push(`  namespace: ${q(get(values, "namespace", "default"))}`);
   lines.push(`  labels:`, indent(stdLabels(name), 4), `spec: {}`, ``);
   return lines.join("\n");
@@ -494,5 +593,10 @@ export const FALLBACK_RESOURCES: ApiResource[] = [
   { kind: "Job", apiVersion: "batch/v1", namespaced: true, name: "jobs" },
   { kind: "CronJob", apiVersion: "batch/v1", namespaced: true, name: "cronjobs" },
   { kind: "Ingress", apiVersion: "networking.k8s.io/v1", namespaced: true, name: "ingresses" },
-  { kind: "HorizontalPodAutoscaler", apiVersion: "autoscaling/v2", namespaced: true, name: "horizontalpodautoscalers" },
+  {
+    kind: "HorizontalPodAutoscaler",
+    apiVersion: "autoscaling/v2",
+    namespaced: true,
+    name: "horizontalpodautoscalers",
+  },
 ];

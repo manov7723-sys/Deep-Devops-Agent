@@ -33,7 +33,12 @@ type GitHubRow = {
  * then uses it). Upserts the Repo row (`POST /repos`) then replaces the
  * project's repo set (`PUT /projects/<slug>/repos`).
  */
-export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullName }: ChangeRepoModalProps) {
+export function ChangeRepoModal({
+  open,
+  onOpenChange,
+  projectSlug,
+  currentFullName,
+}: ChangeRepoModalProps) {
   const qc = useQueryClient();
   const accountsQuery = useConnectedOAuthAccounts();
   const allAccounts = accountsQuery.data ?? [];
@@ -65,25 +70,33 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
   const change = useMutation({
     mutationFn: async (r: GitHubRow) => {
       // Step 1: upsert the Repo row (idempotent on ownerId+fullName).
-      const create = await api.post<{ ok: boolean; repo?: { id: string }; code?: string }>("/repos", {
-        fullName: r.fullName,
-        description: "",
-        lang: r.lang,
-        kind: "Service",
-        defaultBranch: r.defaultBranch,
-        visibility: r.kind,
-        oauthAccountId: effectiveAccountId ?? undefined,
-        provider,
-        providerRepoId: r.providerRepoId,
-      });
+      const create = await api.post<{ ok: boolean; repo?: { id: string }; code?: string }>(
+        "/repos",
+        {
+          fullName: r.fullName,
+          description: "",
+          lang: r.lang,
+          kind: "Service",
+          defaultBranch: r.defaultBranch,
+          visibility: r.kind,
+          oauthAccountId: effectiveAccountId ?? undefined,
+          provider,
+          providerRepoId: r.providerRepoId,
+        },
+      );
       let repoId = create.repo?.id ?? null;
       if (!repoId) {
-        const all = await api.get<Array<{ id: string; fullName: string; provider?: GitProvider }>>("/repos");
-        repoId = all.find((x) => x.fullName === r.fullName && (x.provider ?? "github") === provider)?.id ?? null;
+        const all =
+          await api.get<Array<{ id: string; fullName: string; provider?: GitProvider }>>("/repos");
+        repoId =
+          all.find((x) => x.fullName === r.fullName && (x.provider ?? "github") === provider)?.id ??
+          null;
       }
       if (!repoId) throw new Error("Couldn't resolve the repository. Try again.");
       // Step 2: make it the project's single repo.
-      const res = await api.put<{ ok: boolean; code?: string }>(`/projects/${projectSlug}/repos`, { repoId });
+      const res = await api.put<{ ok: boolean; code?: string }>(`/projects/${projectSlug}/repos`, {
+        repoId,
+      });
       if (!res.ok) throw new Error(res.code || "Could not set the project repository.");
       return r.fullName;
     },
@@ -97,7 +110,8 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
 
   const ghError = ghQuery.error;
   const ghCode =
-    (ghError as { details?: unknown } | null)?.details && typeof (ghError as { details?: unknown }).details === "string"
+    (ghError as { details?: unknown } | null)?.details &&
+    typeof (ghError as { details?: unknown }).details === "string"
       ? (() => {
           try {
             const j = JSON.parse((ghError as { details: string }).details);
@@ -117,7 +131,9 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
       width={620}
       footer={
         <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
+          <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Btn>
           <Btn
             variant="primary"
             icon={provider}
@@ -128,7 +144,9 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
               if (picked) change.mutate(picked);
             }}
           >
-            {picked && picked.fullName === currentFullName ? "Already the project repo" : "Use this repo"}
+            {picked && picked.fullName === currentFullName
+              ? "Already the project repo"
+              : "Use this repo"}
           </Btn>
         </>
       }
@@ -142,7 +160,11 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
                 type="button"
                 className={`chip ${provider === p ? "active" : ""}`}
                 style={{ height: 34 }}
-                onClick={() => { setProvider(p); setAccountId(null); setPickedId(null); }}
+                onClick={() => {
+                  setProvider(p);
+                  setAccountId(null);
+                  setPickedId(null);
+                }}
               >
                 <Icon name={p} size={14} /> {PROVIDER_LABEL[p]}
               </button>
@@ -170,9 +192,19 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
 
       <Field label="Repository" hint={picked ? picked.fullName : "Select one"}>
         {ghQuery.isLoading ? (
-          <span className="muted" style={{ fontSize: 13 }}>Loading your {label} repositories…</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Loading your {label} repositories…
+          </span>
         ) : ghError ? (
-          <div className="col gap-2" style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 12, fontSize: 13 }}>
+          <div
+            className="col gap-2"
+            style={{
+              border: "1px dashed var(--border)",
+              borderRadius: 8,
+              padding: 12,
+              fontSize: 13,
+            }}
+          >
             <span style={{ fontWeight: 600 }}>
               {ghCode?.endsWith("_not_connected")
                 ? `${label} isn't connected yet`
@@ -190,7 +222,9 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
             </a>
           </div>
         ) : repos.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>No repositories found for this account.</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            No repositories found for this account.
+          </span>
         ) : (
           <div className="col gap-2" style={{ maxHeight: 320, overflow: "auto" }}>
             {repos.map((r) => {
@@ -206,7 +240,10 @@ export function ChangeRepoModal({ open, onOpenChange, projectSlug, currentFullNa
                 >
                   <div className="row gap-3" style={{ minWidth: 0 }}>
                     <Icon name={provider} size={17} />
-                    <div className="col" style={{ lineHeight: 1.3, minWidth: 0, textAlign: "left" }}>
+                    <div
+                      className="col"
+                      style={{ lineHeight: 1.3, minWidth: 0, textAlign: "left" }}
+                    >
                       <span className="row gap-2" style={{ alignItems: "center" }}>
                         <span style={{ fontWeight: 600, fontSize: 13 }}>{r.fullName}</span>
                         {isCurrent && <Badge tone="ok">current</Badge>}

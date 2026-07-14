@@ -39,10 +39,7 @@ export function WorkspaceSwitcher({ area, isSuperAdmin }: WorkspaceSwitcherProps
       </MenuItem>
       {firstProject && (
         <MenuItem icon="box">
-          <Link
-            href={`/p/${firstProject.slug}/dashboard` as Route}
-            style={{ color: "inherit" }}
-          >
+          <Link href={`/p/${firstProject.slug}/dashboard` as Route} style={{ color: "inherit" }}>
             Project workspace
           </Link>
         </MenuItem>

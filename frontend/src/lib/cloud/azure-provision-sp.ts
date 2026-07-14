@@ -44,10 +44,15 @@ async function graph<T = Record<string, unknown>>(
       cache: "no-store",
     });
   } catch (e) {
-    return { ok: false, error: `Network error reaching Microsoft Graph: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Microsoft Graph: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   const text = await res.text();
-  const data = text ? (JSON.parse(text) as T & { error?: { message?: string; code?: string } }) : ({} as T);
+  const data = text
+    ? (JSON.parse(text) as T & { error?: { message?: string; code?: string } })
+    : ({} as T);
   if (!res.ok) {
     const err = (data as { error?: { message?: string; code?: string } }).error;
     return { ok: false, error: err?.message || text.slice(0, 300) || `Graph HTTP ${res.status}` };
@@ -70,13 +75,22 @@ async function arm<T = Record<string, unknown>>(
       cache: "no-store",
     });
   } catch (e) {
-    return { ok: false, error: `Network error reaching Azure ARM: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Azure ARM: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   const text = await res.text();
   const data = text ? (JSON.parse(text) as T & { error?: { message?: string } }) : ({} as T);
   if (!res.ok) {
     const msg = (data as { error?: { message?: string } | string }).error;
-    return { ok: false, error: (typeof msg === "object" ? msg?.message : msg) || text.slice(0, 300) || `ARM HTTP ${res.status}` };
+    return {
+      ok: false,
+      error:
+        (typeof msg === "object" ? msg?.message : msg) ||
+        text.slice(0, 300) ||
+        `ARM HTTP ${res.status}`,
+    };
   }
   return { ok: true, data };
 }
@@ -109,7 +123,10 @@ export async function autoProvisionSpFromOAuth(args: {
   displayNameHint?: string;
 }): Promise<Res<AutoProvisionedSp>> {
   if (!azureOAuthGraphEnabled()) {
-    return { ok: false, error: "SP auto-provisioning is disabled (AZURE_OAUTH_GRAPH_ENABLED not set)." };
+    return {
+      ok: false,
+      error: "SP auto-provisioning is disabled (AZURE_OAUTH_GRAPH_ENABLED not set).",
+    };
   }
 
   // 1 — Graph token from the refresh token. This is where "admin consent not
@@ -120,7 +137,10 @@ export async function autoProvisionSpFromOAuth(args: {
   }
   const gtok = graphTok.tokens.accessToken;
 
-  const appName = (args.displayNameHint || `deepagent-${args.subscriptionId.slice(0, 8)}`).slice(0, 90);
+  const appName = (args.displayNameHint || `deepagent-${args.subscriptionId.slice(0, 8)}`).slice(
+    0,
+    90,
+  );
 
   // 2 — Find or create the app registration by displayName.
   let appObjectId: string | undefined;
@@ -141,7 +161,8 @@ export async function autoProvisionSpFromOAuth(args: {
     appObjectId = create.data.id;
     appClientId = create.data.appId;
   }
-  if (!appObjectId || !appClientId) return { ok: false, error: "AD app is missing id/appId after create." };
+  if (!appObjectId || !appClientId)
+    return { ok: false, error: "AD app is missing id/appId after create." };
 
   // 3 — Ensure a service principal exists for the app.
   let spObjectId: string | undefined;
@@ -152,8 +173,11 @@ export async function autoProvisionSpFromOAuth(args: {
   if (spSearch.ok && spSearch.data.value && spSearch.data.value[0]?.id) {
     spObjectId = spSearch.data.value[0].id;
   } else {
-    const spCreate = await graph<{ id?: string }>(gtok, "/servicePrincipals", "POST", { appId: appClientId });
-    if (!spCreate.ok) return { ok: false, error: `Creating the service principal failed: ${spCreate.error}` };
+    const spCreate = await graph<{ id?: string }>(gtok, "/servicePrincipals", "POST", {
+      appId: appClientId,
+    });
+    if (!spCreate.ok)
+      return { ok: false, error: `Creating the service principal failed: ${spCreate.error}` };
     spObjectId = spCreate.data.id;
   }
   if (!spObjectId) return { ok: false, error: "Service principal is missing id after create." };
@@ -162,18 +186,28 @@ export async function autoProvisionSpFromOAuth(args: {
   //     server-side later; long enough to avoid re-consent noise.
   const twoYears = new Date();
   twoYears.setUTCFullYear(twoYears.getUTCFullYear() + 2);
-  const addPw = await graph<{ secretText?: string }>(gtok, `/applications/${appObjectId}/addPassword`, "POST", {
-    passwordCredential: { displayName: "deepagent-auto", endDateTime: twoYears.toISOString() },
-  });
+  const addPw = await graph<{ secretText?: string }>(
+    gtok,
+    `/applications/${appObjectId}/addPassword`,
+    "POST",
+    {
+      passwordCredential: { displayName: "deepagent-auto", endDateTime: twoYears.toISOString() },
+    },
+  );
   if (!addPw.ok || !addPw.data.secretText) {
-    return { ok: false, error: `Rotating the client secret failed: ${addPw.ok ? "no secretText" : addPw.error}` };
+    return {
+      ok: false,
+      error: `Rotating the client secret failed: ${addPw.ok ? "no secretText" : addPw.error}`,
+    };
   }
   const clientSecret = addPw.data.secretText;
 
   // 5 — Grant Contributor on the subscription. Requires the OAuth USER to be
   //     Owner / User Access Administrator on the sub. Idempotent — a stable
   //     GUID for the assignment name avoids duplicate-write errors on rerun.
-  const assignmentName = await deterministicGuid(`${spObjectId}:${args.subscriptionId}:contributor`);
+  const assignmentName = await deterministicGuid(
+    `${spObjectId}:${args.subscriptionId}:contributor`,
+  );
   const roleUrl =
     `${ARM}/subscriptions/${args.subscriptionId}` +
     `/providers/Microsoft.Authorization/roleAssignments/${assignmentName}?api-version=2022-04-01`;
@@ -195,7 +229,12 @@ export async function autoProvisionSpFromOAuth(args: {
 
   return {
     ok: true,
-    data: { clientId: appClientId, clientSecret, servicePrincipalObjectId: spObjectId, appDisplayName: appName },
+    data: {
+      clientId: appClientId,
+      clientSecret,
+      servicePrincipalObjectId: spObjectId,
+      appDisplayName: appName,
+    },
   };
 }
 

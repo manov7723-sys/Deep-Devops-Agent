@@ -29,7 +29,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   const project = url.searchParams.get("project")?.trim();
   const region = toRegion(url.searchParams.get("region") ?? "");
   if (!project) {
-    return NextResponse.json({ ok: true, connected: false, networks: [], subnetworks: [], note: "Pick a GCP project first." });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      networks: [],
+      subnetworks: [],
+      note: "Pick a GCP project first.",
+    });
   }
 
   const cp = await prisma.cloudProvider.findFirst({
@@ -37,17 +43,35 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
     select: { id: true },
   });
   if (!cp) {
-    return NextResponse.json({ ok: true, connected: false, networks: [], subnetworks: [], note: "No GCP provider on this project." });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      networks: [],
+      subnetworks: [],
+      note: "No GCP provider on this project.",
+    });
   }
 
   const tok = await getGcpAccessToken(cp.id);
   if (!tok.ok) {
-    return NextResponse.json({ ok: true, connected: false, networks: [], subnetworks: [], note: tok.error });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      networks: [],
+      subnetworks: [],
+      note: tok.error,
+    });
   }
 
   const netRes = await listGcpNetworks(tok.accessToken, project);
   if (!netRes.ok) {
-    return NextResponse.json({ ok: true, connected: true, networks: [], subnetworks: [], note: netRes.error });
+    return NextResponse.json({
+      ok: true,
+      connected: true,
+      networks: [],
+      subnetworks: [],
+      note: netRes.error,
+    });
   }
   const subRes = region ? await listGcpSubnetworks(tok.accessToken, project, region) : null;
 

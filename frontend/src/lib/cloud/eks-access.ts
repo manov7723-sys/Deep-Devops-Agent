@@ -46,7 +46,12 @@ export type GrantEksAccessInput = {
 
 export type GrantEksAccessResult =
   | { ok: true; clusterName: string; roleArn: string; authenticationMode: string; steps: string[] }
-  | { ok: false; code: "cli_not_installed" | "creds_missing" | "bad_input" | "aws_error"; message: string; stderr?: string };
+  | {
+      ok: false;
+      code: "cli_not_installed" | "creds_missing" | "bad_input" | "aws_error";
+      message: string;
+      stderr?: string;
+    };
 
 /** Run one `aws` CLI invocation with the resolved creds + region (same as github-oidc.ts). */
 async function aws(
@@ -62,7 +67,8 @@ async function aws(
     env: { ...env, AWS_REGION: region, AWS_DEFAULT_REGION: region },
     timeoutMs: 60_000,
   });
-  const notInstalled = res.exitCode === -1 && (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"));
+  const notInstalled =
+    res.exitCode === -1 && (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"));
   return { ok: res.exitCode === 0, stdout: res.stdout, stderr: res.stderr, notInstalled };
 }
 
@@ -75,7 +81,9 @@ function tail(s: string): string {
  * update-kubeconfig` writes the full cluster ARN as the context/cluster name,
  * so one regex over the whole file is the reliable source of truth.
  */
-export function parseEksClusterRef(kubeconfig: string): { region: string; accountId: string; clusterName: string } | null {
+export function parseEksClusterRef(
+  kubeconfig: string,
+): { region: string; accountId: string; clusterName: string } | null {
   const m = kubeconfig.match(/arn:aws:eks:([a-z0-9-]+):(\d{12}):cluster\/([A-Za-z0-9._-]+)/);
   if (!m) return null;
   return { region: m[1], accountId: m[2], clusterName: m[3] };
@@ -83,10 +91,18 @@ export function parseEksClusterRef(kubeconfig: string): { region: string; accoun
 
 export async function grantEksAccess(input: GrantEksAccessInput): Promise<GrantEksAccessResult> {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(input.clusterName)) {
-    return { ok: false, code: "bad_input", message: `Invalid cluster name "${input.clusterName}".` };
+    return {
+      ok: false,
+      code: "bad_input",
+      message: `Invalid cluster name "${input.clusterName}".`,
+    };
   }
   if (!/^arn:aws:iam::\d{12}:role\/.+/.test(input.roleArn)) {
-    return { ok: false, code: "bad_input", message: `"${input.roleArn}" is not a valid IAM role ARN.` };
+    return {
+      ok: false,
+      code: "bad_input",
+      message: `"${input.roleArn}" is not a valid IAM role ARN.`,
+    };
   }
 
   const { awsEnv, region, clusterName, roleArn } = input;
@@ -97,40 +113,86 @@ export async function grantEksAccess(input: GrantEksAccessInput): Promise<GrantE
 
   try {
     // 1 — Authentication mode. Access Entries require API or API_AND_CONFIG_MAP.
-    const desc = await aws(["eks", "describe-cluster", "--name", clusterName], awsEnv, region, workdir);
+    const desc = await aws(
+      ["eks", "describe-cluster", "--name", clusterName],
+      awsEnv,
+      region,
+      workdir,
+    );
     if (desc.notInstalled) {
-      return { ok: false, code: "cli_not_installed", message: "The `aws` CLI isn't on the server's PATH." };
+      return {
+        ok: false,
+        code: "cli_not_installed",
+        message: "The `aws` CLI isn't on the server's PATH.",
+      };
     }
     if (!desc.ok) {
       const lower = desc.stderr.toLowerCase();
       if (lower.includes("unable to locate credentials") || lower.includes("no credentials")) {
-        return { ok: false, code: "creds_missing", message: "No usable AWS credentials for this account." };
+        return {
+          ok: false,
+          code: "creds_missing",
+          message: "No usable AWS credentials for this account.",
+        };
       }
-      return { ok: false, code: "aws_error", message: `eks describe-cluster failed for "${clusterName}".`, stderr: tail(desc.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: `eks describe-cluster failed for "${clusterName}".`,
+        stderr: tail(desc.stderr),
+      };
     }
     let authMode = "CONFIG_MAP";
     try {
-      authMode = (JSON.parse(desc.stdout) as { cluster?: { accessConfig?: { authenticationMode?: string } } }).cluster?.accessConfig?.authenticationMode ?? "CONFIG_MAP";
+      authMode =
+        (
+          JSON.parse(desc.stdout) as {
+            cluster?: { accessConfig?: { authenticationMode?: string } };
+          }
+        ).cluster?.accessConfig?.authenticationMode ?? "CONFIG_MAP";
     } catch {
       /* keep default */
     }
 
     if (authMode === "CONFIG_MAP") {
       const upd = await aws(
-        ["eks", "update-cluster-config", "--name", clusterName, "--access-config", "authenticationMode=API_AND_CONFIG_MAP"],
-        awsEnv, region, workdir,
+        [
+          "eks",
+          "update-cluster-config",
+          "--name",
+          clusterName,
+          "--access-config",
+          "authenticationMode=API_AND_CONFIG_MAP",
+        ],
+        awsEnv,
+        region,
+        workdir,
       );
       if (!upd.ok) {
-        return { ok: false, code: "aws_error", message: "Couldn't enable EKS access entries (update authentication mode) — the AWS identity may lack eks:UpdateClusterConfig.", stderr: tail(upd.stderr) };
+        return {
+          ok: false,
+          code: "aws_error",
+          message:
+            "Couldn't enable EKS access entries (update authentication mode) — the AWS identity may lack eks:UpdateClusterConfig.",
+          stderr: tail(upd.stderr),
+        };
       }
-      steps.push("Enabled access-entry auth mode (API_AND_CONFIG_MAP) — existing aws-auth entries kept.");
+      steps.push(
+        "Enabled access-entry auth mode (API_AND_CONFIG_MAP) — existing aws-auth entries kept.",
+      );
       // update-cluster-config is async; wait for the cluster to settle before writing an entry.
       for (let i = 0; i < 25; i++) {
         await new Promise((r) => setTimeout(r, 6_000));
-        const d = await aws(["eks", "describe-cluster", "--name", clusterName], awsEnv, region, workdir);
+        const d = await aws(
+          ["eks", "describe-cluster", "--name", clusterName],
+          awsEnv,
+          region,
+          workdir,
+        );
         let status = "";
         try {
-          status = (JSON.parse(d.stdout) as { cluster?: { status?: string } }).cluster?.status ?? "";
+          status =
+            (JSON.parse(d.stdout) as { cluster?: { status?: string } }).cluster?.status ?? "";
         } catch {
           /* ignore */
         }
@@ -143,40 +205,104 @@ export async function grantEksAccess(input: GrantEksAccessInput): Promise<GrantE
 
     // 2 — Access entry for the principal (idempotent).
     const createEntry = await aws(
-      ["eks", "create-access-entry", "--cluster-name", clusterName, "--principal-arn", roleArn, "--type", "STANDARD"],
-      awsEnv, region, workdir,
+      [
+        "eks",
+        "create-access-entry",
+        "--cluster-name",
+        clusterName,
+        "--principal-arn",
+        roleArn,
+        "--type",
+        "STANDARD",
+      ],
+      awsEnv,
+      region,
+      workdir,
     );
     if (createEntry.ok) {
       steps.push(`Created access entry for ${roleArn}.`);
     } else if (createEntry.stderr.includes("ResourceInUseException")) {
       steps.push(`Access entry for ${roleArn} already existed — reused.`);
     } else {
-      return { ok: false, code: "aws_error", message: "Could not create the EKS access entry.", stderr: tail(createEntry.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: "Could not create the EKS access entry.",
+        stderr: tail(createEntry.stderr),
+      };
     }
 
     // 3 — Associate the access policy (idempotent).
     const policyArn = level === "admin" ? ADMIN_POLICY : EDIT_POLICY;
-    const scope = level === "admin" ? ["--access-scope", "type=cluster"] : ["--access-scope", `type=namespace,namespaces=${namespaces.join(",")}`];
+    const scope =
+      level === "admin"
+        ? ["--access-scope", "type=cluster"]
+        : ["--access-scope", `type=namespace,namespaces=${namespaces.join(",")}`];
     const assoc = await aws(
-      ["eks", "associate-access-policy", "--cluster-name", clusterName, "--principal-arn", roleArn, "--policy-arn", policyArn, ...scope],
-      awsEnv, region, workdir,
+      [
+        "eks",
+        "associate-access-policy",
+        "--cluster-name",
+        clusterName,
+        "--principal-arn",
+        roleArn,
+        "--policy-arn",
+        policyArn,
+        ...scope,
+      ],
+      awsEnv,
+      region,
+      workdir,
     );
     if (!assoc.ok && !assoc.stderr.includes("ResourceInUseException")) {
-      return { ok: false, code: "aws_error", message: "Could not associate the EKS access policy.", stderr: tail(assoc.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: "Could not associate the EKS access policy.",
+        stderr: tail(assoc.stderr),
+      };
     }
-    steps.push(level === "admin" ? "Associated cluster-admin access." : `Associated edit access on namespace(s): ${namespaces.join(", ")}.`);
+    steps.push(
+      level === "admin"
+        ? "Associated cluster-admin access."
+        : `Associated edit access on namespace(s): ${namespaces.join(", ")}.`,
+    );
 
     // 4 — Optional: give the role eks:DescribeCluster so its own update-kubeconfig works.
     if (input.roleName) {
       const accountId = roleArn.split(":")[4];
-      const doc = { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "eks:DescribeCluster", Resource: `arn:aws:eks:${region}:${accountId}:cluster/${clusterName}` }] };
+      const doc = {
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: "eks:DescribeCluster",
+            Resource: `arn:aws:eks:${region}:${accountId}:cluster/${clusterName}`,
+          },
+        ],
+      };
       const docPath = join(workdir, "eks-describe.json");
       await writeFile(docPath, JSON.stringify(doc), "utf8");
       const put = await aws(
-        ["iam", "put-role-policy", "--role-name", input.roleName, "--policy-name", "eks-describe", "--policy-document", `file://${docPath}`],
-        awsEnv, region, workdir,
+        [
+          "iam",
+          "put-role-policy",
+          "--role-name",
+          input.roleName,
+          "--policy-name",
+          "eks-describe",
+          "--policy-document",
+          `file://${docPath}`,
+        ],
+        awsEnv,
+        region,
+        workdir,
       );
-      steps.push(put.ok ? `Added eks:DescribeCluster permission to ${input.roleName}.` : `(warning) couldn't add eks:DescribeCluster to ${input.roleName}.`);
+      steps.push(
+        put.ok
+          ? `Added eks:DescribeCluster permission to ${input.roleName}.`
+          : `(warning) couldn't add eks:DescribeCluster to ${input.roleName}.`,
+      );
     }
 
     return { ok: true, clusterName, roleArn, authenticationMode: authMode, steps };

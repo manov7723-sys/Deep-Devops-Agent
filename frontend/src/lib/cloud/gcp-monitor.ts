@@ -18,9 +18,20 @@ const MON = "https://monitoring.googleapis.com/v3";
 // disk is omitted for GCP rather than shipping a metric that doesn't resolve.
 export type GcpMetricKey = "cpu" | "memory";
 
-export const GCP_METRICS: Record<GcpMetricKey, { label: string; metric: string; threshold: number }> = {
-  cpu: { label: "Node CPU %", metric: "kubernetes.io/node/cpu/allocatable_utilization", threshold: 0.8 },
-  memory: { label: "Node memory %", metric: "kubernetes.io/node/memory/allocatable_utilization", threshold: 0.8 },
+export const GCP_METRICS: Record<
+  GcpMetricKey,
+  { label: string; metric: string; threshold: number }
+> = {
+  cpu: {
+    label: "Node CPU %",
+    metric: "kubernetes.io/node/cpu/allocatable_utilization",
+    threshold: 0.8,
+  },
+  memory: {
+    label: "Node memory %",
+    metric: "kubernetes.io/node/memory/allocatable_utilization",
+    threshold: 0.8,
+  },
 };
 
 type Gcp = { ok: true; data: Record<string, unknown> } | { ok: false; error: string };
@@ -34,7 +45,10 @@ async function gcp(token: string, path: string, method = "GET", body?: unknown):
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    return { ok: false, error: `Network error reaching Google: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Google: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   const text = await res.text();
   let data: Record<string, unknown> = {};
@@ -44,7 +58,8 @@ async function gcp(token: string, path: string, method = "GET", body?: unknown):
     data = { raw: text };
   }
   if (!res.ok) {
-    const msg = (data?.error as { message?: string })?.message || text.slice(0, 300) || `HTTP ${res.status}`;
+    const msg =
+      (data?.error as { message?: string })?.message || text.slice(0, 300) || `HTTP ${res.status}`;
     return { ok: false, error: msg };
   }
   return { ok: true, data };
@@ -52,12 +67,17 @@ async function gcp(token: string, path: string, method = "GET", body?: unknown):
 
 /** Best-effort GKE cluster name from the env's kubeconfig (handles several formats). */
 export async function gkeClusterFromEnv(envId: string): Promise<string | null> {
-  const env = await prisma.env.findUnique({ where: { id: envId }, select: { kubeconfigRef: true } });
+  const env = await prisma.env.findUnique({
+    where: { id: envId },
+    select: { kubeconfigRef: true },
+  });
   if (!env?.kubeconfigRef) return null;
   try {
     const kc = decryptSecret(env.kubeconfigRef);
     // 1) gcloud-style context: gke_<project>_<location>_<cluster>
-    const fromCtx = (kc.match(/current-context:\s*(\S+)/)?.[1] ?? "").match(/^gke_[^_]+_[^_]+_(.+)$/)?.[1];
+    const fromCtx = (kc.match(/current-context:\s*(\S+)/)?.[1] ?? "").match(
+      /^gke_[^_]+_[^_]+_(.+)$/,
+    )?.[1];
     if (fromCtx) return fromCtx;
     // 2) any gke_..._<cluster> token anywhere (cluster/context names).
     const anyGke = kc.match(/\bgke_[^_\s]+_[^_\s]+_([A-Za-z0-9-]+)/)?.[1];
@@ -74,17 +94,32 @@ export async function gkeClusterFromEnv(envId: string): Promise<string | null> {
 }
 
 async function gcpProject(cloudProviderId: string): Promise<string | null> {
-  const cp = await prisma.cloudProvider.findUnique({ where: { id: cloudProviderId }, select: { accountRef: true } });
+  const cp = await prisma.cloudProvider.findUnique({
+    where: { id: cloudProviderId },
+    select: { accountRef: true },
+  });
   return cp?.accountRef?.trim() || null;
 }
 
 /** Find-or-create an email notification channel; returns its resource name. */
-async function ensureEmailChannel(token: string, project: string, email: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+async function ensureEmailChannel(
+  token: string,
+  project: string,
+  email: string,
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const list = await gcp(token, `/projects/${project}/notificationChannels`);
   if (list.ok) {
-    const existing = ((list.data as { notificationChannels?: Array<{ name?: string; type?: string; labels?: { email_address?: string } }> }).notificationChannels ?? []).find(
-      (c) => c.type === "email" && c.labels?.email_address === email,
-    );
+    const existing = (
+      (
+        list.data as {
+          notificationChannels?: Array<{
+            name?: string;
+            type?: string;
+            labels?: { email_address?: string };
+          }>;
+        }
+      ).notificationChannels ?? []
+    ).find((c) => c.type === "email" && c.labels?.email_address === email);
     if (existing?.name) return { ok: true, name: existing.name };
   }
   const create = await gcp(token, `/projects/${project}/notificationChannels`, "POST", {
@@ -118,14 +153,36 @@ export async function setupGkeAlarms(opts: {
   thresholdPercents?: Partial<Record<GcpMetricKey, number>>;
 }): Promise<GcpSetupResult> {
   const tok = await getGcpAccessToken(opts.cloudProviderId);
-  if (!tok.ok) return { ok: false, clusterName: opts.clusterName, emailWired: false, alarms: [], error: tok.error };
+  if (!tok.ok)
+    return {
+      ok: false,
+      clusterName: opts.clusterName,
+      emailWired: false,
+      alarms: [],
+      error: tok.error,
+    };
   const project = await gcpProject(opts.cloudProviderId);
-  if (!project) return { ok: false, clusterName: opts.clusterName, emailWired: false, alarms: [], error: "No GCP project on the cloud provider." };
+  if (!project)
+    return {
+      ok: false,
+      clusterName: opts.clusterName,
+      emailWired: false,
+      alarms: [],
+      error: "No GCP project on the cloud provider.",
+    };
 
   let channel: string | undefined;
   if (opts.email) {
     const ch = await ensureEmailChannel(tok.accessToken, project, opts.email);
-    if (!ch.ok) return { ok: false, clusterName: opts.clusterName, project, emailWired: false, alarms: [], error: `Notification channel failed: ${ch.error}` };
+    if (!ch.ok)
+      return {
+        ok: false,
+        clusterName: opts.clusterName,
+        project,
+        emailWired: false,
+        alarms: [],
+        error: `Notification channel failed: ${ch.error}`,
+      };
     channel = ch.name;
   }
 
@@ -133,7 +190,9 @@ export async function setupGkeAlarms(opts: {
   const existing = await gcp(tok.accessToken, `/projects/${project}/alertPolicies`);
   const byName = new Map<string, string>();
   if (existing.ok) {
-    for (const p of (existing.data as { alertPolicies?: Array<{ name?: string; displayName?: string }> }).alertPolicies ?? []) {
+    for (const p of (
+      existing.data as { alertPolicies?: Array<{ name?: string; displayName?: string }> }
+    ).alertPolicies ?? []) {
       if (p.displayName && p.name) byName.set(p.displayName, p.name);
     }
   }
@@ -162,23 +221,42 @@ export async function setupGkeAlarms(opts: {
             duration: "300s",
             trigger: { count: 1 },
             aggregations: [
-              { alignmentPeriod: "300s", perSeriesAligner: "ALIGN_MEAN", crossSeriesReducer: "REDUCE_MEAN", groupByFields: ['resource.label."cluster_name"'] },
+              {
+                alignmentPeriod: "300s",
+                perSeriesAligner: "ALIGN_MEAN",
+                crossSeriesReducer: "REDUCE_MEAN",
+                groupByFields: ['resource.label."cluster_name"'],
+              },
             ],
           },
         },
       ],
       notificationChannels: channel ? [channel] : [],
     });
-    alarms.push({ key, label: def.label, ok: create.ok, error: create.ok ? undefined : create.error });
+    alarms.push({
+      key,
+      label: def.label,
+      ok: create.ok,
+      error: create.ok ? undefined : create.error,
+    });
   }
 
-  return { ok: alarms.some((a) => a.ok), clusterName: opts.clusterName, project, emailWired: !!channel, alarms };
+  return {
+    ok: alarms.some((a) => a.ok),
+    clusterName: opts.clusterName,
+    project,
+    emailWired: !!channel,
+    alarms,
+  };
 }
 
 export type GcpAlarmInfo = { name: string; displayName: string };
 
 /** List this app's alert policies for a GKE cluster (for the persistent UI summary). */
-export async function listGkeAlarms(cloudProviderId: string, clusterName: string): Promise<{ ok: true; alarms: GcpAlarmInfo[] } | { ok: false; error: string }> {
+export async function listGkeAlarms(
+  cloudProviderId: string,
+  clusterName: string,
+): Promise<{ ok: true; alarms: GcpAlarmInfo[] } | { ok: false; error: string }> {
   const tok = await getGcpAccessToken(cloudProviderId);
   if (!tok.ok) return { ok: false, error: tok.error };
   const project = await gcpProject(cloudProviderId);
@@ -186,7 +264,10 @@ export async function listGkeAlarms(cloudProviderId: string, clusterName: string
   const list = await gcp(tok.accessToken, `/projects/${project}/alertPolicies`);
   if (!list.ok) return { ok: false, error: list.error };
   const prefix = `dda-gke-${clusterName}-`;
-  const alarms = ((list.data as { alertPolicies?: Array<{ name?: string; displayName?: string }> }).alertPolicies ?? [])
+  const alarms = (
+    (list.data as { alertPolicies?: Array<{ name?: string; displayName?: string }> })
+      .alertPolicies ?? []
+  )
     .filter((p) => (p.displayName ?? "").startsWith(prefix))
     .map((p) => ({ name: p.name ?? "", displayName: p.displayName ?? "" }));
   return { ok: true, alarms };

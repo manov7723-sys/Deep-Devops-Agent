@@ -17,7 +17,9 @@ export function SecurityRow({ icon, title, description, action }: SecurityRowPro
         </span>
         <div className="col" style={{ lineHeight: 1.35, minWidth: 0 }}>
           <span style={{ fontWeight: 600 }}>{title}</span>
-          <span className="faint" style={{ fontSize: 12 }}>{description}</span>
+          <span className="faint" style={{ fontSize: 12 }}>
+            {description}
+          </span>
         </div>
       </div>
       {action}

@@ -13,7 +13,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   const sp = new URL(req.url).searchParams;
   const envKey = (sp.get("envKey") || "").trim();
   const node = (sp.get("node") || "").trim();
-  if (!envKey || !node) return NextResponse.json({ ok: false, code: "invalid_request", message: "envKey and node are required." }, { status: 400 });
+  if (!envKey || !node)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: "envKey and node are required." },
+      { status: 400 },
+    );
   const res = await getNodeDetail(gate.access.project.id, envKey, node);
   if (!res.ok) return NextResponse.json({ ok: false, message: res.error }, { status: 400 });
   return NextResponse.json(res);

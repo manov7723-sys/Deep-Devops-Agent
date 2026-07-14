@@ -19,10 +19,19 @@ export async function syncCloudInventory(projectId: string, userId: string): Pro
   // Environments with a cluster connected (kubeconfig stored).
   const clusterEnvs = await prisma.env.findMany({
     where: { projectId, kubeconfigRef: { not: null } },
-    select: { id: true, key: true, region: true, cloudProviderId: true, cloudProvider: { select: { kind: true } } },
+    select: {
+      id: true,
+      key: true,
+      region: true,
+      cloudProviderId: true,
+      cloudProvider: { select: { kind: true } },
+    },
   });
   if (!clusterEnvs.length) {
-    return { ok: false, error: "No cluster is connected. Wire a kubeconfig on an environment (Clusters tab) first." };
+    return {
+      ok: false,
+      error: "No cluster is connected. Wire a kubeconfig on an environment (Clusters tab) first.",
+    };
   }
 
   const ctx = { projectId, userId };

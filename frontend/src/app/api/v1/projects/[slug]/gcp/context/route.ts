@@ -26,7 +26,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
   let authError: string | null = null;
   if (tok.ok) {
     const r = await listGcpProjects(tok.accessToken);
-    if (r.ok) projects = r.projects.map((p) => ({ projectId: p.projectId, name: p.name, lifecycleState: p.lifecycleState }));
+    if (r.ok)
+      projects = r.projects.map((p) => ({
+        projectId: p.projectId,
+        name: p.name,
+        lifecycleState: p.lifecycleState,
+      }));
     else authError = r.error;
   } else {
     authError = tok.error;
@@ -59,12 +64,14 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string 
   if (!cp) return NextResponse.json({ ok: false, code: "no_gcp" }, { status: 404 });
 
   const parsed = PatchBody.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request" }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json({ ok: false, code: "invalid_request" }, { status: 400 });
 
   const data: Record<string, string> = {};
   if (parsed.data.gcpProjectId) data.accountRef = parsed.data.gcpProjectId;
   if (parsed.data.region) data.region = parsed.data.region;
-  if (Object.keys(data).length === 0) return NextResponse.json({ ok: false, code: "nothing_to_save" }, { status: 400 });
+  if (Object.keys(data).length === 0)
+    return NextResponse.json({ ok: false, code: "nothing_to_save" }, { status: 400 });
 
   await prisma.cloudProvider.update({ where: { id: cp.id }, data });
   return NextResponse.json({ ok: true });

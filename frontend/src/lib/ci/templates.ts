@@ -45,21 +45,62 @@ export const DOCKER_STACKS: StackSpec[] = [
     detect:
       "package.json present and the app builds to static assets (vite/react-scripts/@angular/cli/vue-cli). No long-running Node server.",
     fields: [
-      { key: "buildDir", type: "string", description: "Build output dir. Vite/Vue=dist, CRA=build, Angular=dist/<name>, Next export=out.", default: "dist", options: ["dist", "build", "out"] },
-      { key: "buildCommand", type: "string", description: "Build script.", default: "npm run build" },
-      { key: "nodeVersion", type: "string", description: "Node major used for the build.", default: "20", options: ["20", "22", "18"] },
-      { key: "packageManager", type: "string", description: "Package manager.", default: "npm", options: ["npm", "yarn", "pnpm"] },
+      {
+        key: "buildDir",
+        type: "string",
+        description:
+          "Build output dir. Vite/Vue=dist, CRA=build, Angular=dist/<name>, Next export=out.",
+        default: "dist",
+        options: ["dist", "build", "out"],
+      },
+      {
+        key: "buildCommand",
+        type: "string",
+        description: "Build script.",
+        default: "npm run build",
+      },
+      {
+        key: "nodeVersion",
+        type: "string",
+        description: "Node major used for the build.",
+        default: "20",
+        options: ["20", "22", "18"],
+      },
+      {
+        key: "packageManager",
+        type: "string",
+        description: "Package manager.",
+        default: "npm",
+        options: ["npm", "yarn", "pnpm"],
+      },
     ],
   },
   {
     id: "node-service",
     title: "Long-running Node.js server (Express, Nest, Fastify, Next standalone)",
-    detect: "package.json with a server that listens on a port (a `start` script, an http server). Not a static export.",
+    detect:
+      "package.json with a server that listens on a port (a `start` script, an http server). Not a static export.",
     fields: [
       { key: "port", type: "number", description: "Port the server listens on.", default: 3000 },
-      { key: "startCommand", type: "string", description: "Production start command.", default: "node server.js" },
-      { key: "buildCommand", type: "string", description: "Build step, or empty if none (e.g. `npm run build` for TS).", default: "" },
-      { key: "nodeVersion", type: "string", description: "Node major.", default: "20", options: ["20", "22", "18"] },
+      {
+        key: "startCommand",
+        type: "string",
+        description: "Production start command.",
+        default: "node server.js",
+      },
+      {
+        key: "buildCommand",
+        type: "string",
+        description: "Build step, or empty if none (e.g. `npm run build` for TS).",
+        default: "",
+      },
+      {
+        key: "nodeVersion",
+        type: "string",
+        description: "Node major.",
+        default: "20",
+        options: ["20", "22", "18"],
+      },
     ],
   },
   {
@@ -68,8 +109,19 @@ export const DOCKER_STACKS: StackSpec[] = [
     detect: "requirements.txt or pyproject.toml present with a WSGI/ASGI app.",
     fields: [
       { key: "port", type: "number", description: "Port the app listens on.", default: 8000 },
-      { key: "startCommand", type: "string", description: "Production start command (gunicorn/uvicorn).", default: "gunicorn -b 0.0.0.0:8000 app:app" },
-      { key: "pythonVersion", type: "string", description: "Python version.", default: "3.12", options: ["3.12", "3.11", "3.10"] },
+      {
+        key: "startCommand",
+        type: "string",
+        description: "Production start command (gunicorn/uvicorn).",
+        default: "gunicorn -b 0.0.0.0:8000 app:app",
+      },
+      {
+        key: "pythonVersion",
+        type: "string",
+        description: "Python version.",
+        default: "3.12",
+        options: ["3.12", "3.11", "3.10"],
+      },
     ],
   },
   {
@@ -79,7 +131,13 @@ export const DOCKER_STACKS: StackSpec[] = [
     fields: [
       { key: "port", type: "number", description: "Port the service listens on.", default: 8080 },
       { key: "mainPath", type: "string", description: "Package path to build.", default: "./..." },
-      { key: "goVersion", type: "string", description: "Go version.", default: "1.23", options: ["1.23", "1.22"] },
+      {
+        key: "goVersion",
+        type: "string",
+        description: "Go version.",
+        default: "1.23",
+        options: ["1.23", "1.22"],
+      },
     ],
   },
 ];
@@ -276,10 +334,18 @@ export function generateDockerArtifacts(args: {
 
   let dockerfile: string;
   switch (stack.id) {
-    case "static-spa": dockerfile = staticSpaDockerfile(p); break;
-    case "node-service": dockerfile = nodeServiceDockerfile(p); break;
-    case "python": dockerfile = pythonDockerfile(p); break;
-    case "go": dockerfile = goDockerfile(p); break;
+    case "static-spa":
+      dockerfile = staticSpaDockerfile(p);
+      break;
+    case "node-service":
+      dockerfile = nodeServiceDockerfile(p);
+      break;
+    case "python":
+      dockerfile = pythonDockerfile(p);
+      break;
+    case "go":
+      dockerfile = goDockerfile(p);
+      break;
   }
 
   const port = runtimePort(stack.id, p);

@@ -55,8 +55,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
       // ENOENT comes back through error events with exit code -1 + an
       // [exec] suffix in stderr. Detect that for a friendlier error.
       const probablyMissing =
-        res.exitCode === -1 &&
-        (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"));
+        res.exitCode === -1 && (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"));
       await audit({
         userId: gate.access.session.userId,
         projectId: gate.access.project.id,
@@ -96,7 +95,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
         const ready = n.status?.conditions?.find((c) => c.type === "Ready");
         return {
           name: n.metadata?.name ?? "(unknown)",
-          status: ready?.status === "True" ? "Ready" : ready?.status ?? "Unknown",
+          status: ready?.status === "True" ? "Ready" : (ready?.status ?? "Unknown"),
           version: n.status?.nodeInfo?.kubeletVersion ?? "?",
         };
       });

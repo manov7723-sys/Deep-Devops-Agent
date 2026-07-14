@@ -38,21 +38,31 @@ export function UserDropdown({ name, email }: UserDropdownProps) {
         <Avatar name={name} size={38} />
         <div className="col" style={{ lineHeight: 1.3, minWidth: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700 }}>{name}</span>
-          <span className="faint" style={{ fontSize: 11.5 }}>{email}</span>
+          <span className="faint" style={{ fontSize: 11.5 }}>
+            {email}
+          </span>
         </div>
       </div>
       <MenuSeparator />
       <MenuItem icon="user">
-        <Link href={"/account/profile" as Route} style={{ color: "inherit" }}>Profile</Link>
+        <Link href={"/account/profile" as Route} style={{ color: "inherit" }}>
+          Profile
+        </Link>
       </MenuItem>
       <MenuItem icon="edit">
-        <Link href={"/account/edit-profile" as Route} style={{ color: "inherit" }}>Edit profile</Link>
+        <Link href={"/account/edit-profile" as Route} style={{ color: "inherit" }}>
+          Edit profile
+        </Link>
       </MenuItem>
       <MenuItem icon="lock">
-        <Link href={"/account/change-password" as Route} style={{ color: "inherit" }}>Change password</Link>
+        <Link href={"/account/change-password" as Route} style={{ color: "inherit" }}>
+          Change password
+        </Link>
       </MenuItem>
       <MenuItem icon="shield">
-        <Link href={"/account/2fa-manage" as Route} style={{ color: "inherit" }}>Two-factor authentication</Link>
+        <Link href={"/account/2fa-manage" as Route} style={{ color: "inherit" }}>
+          Two-factor authentication
+        </Link>
       </MenuItem>
       <MenuSeparator />
       <MenuItem icon="logout" danger onSelect={() => void logout()}>

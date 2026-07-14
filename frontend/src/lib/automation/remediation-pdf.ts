@@ -22,11 +22,16 @@ const MUTED: RGB = [110, 116, 124];
 const ACCENT: RGB = [21, 101, 192];
 
 function safeName(artifact: string): string {
-  const base = (artifact.split("/").pop() || artifact).replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
+  const base = (artifact.split("/").pop() || artifact)
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "");
   return `${base || "repo"}-security-remediation.pdf`;
 }
 
-export async function downloadRemediationPdf(doc: RemediationDoc, generatedAt: string): Promise<void> {
+export async function downloadRemediationPdf(
+  doc: RemediationDoc,
+  generatedAt: string,
+): Promise<void> {
   const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
 
@@ -45,7 +50,13 @@ export async function downloadRemediationPdf(doc: RemediationDoc, generatedAt: s
 
   const para = (
     text: string,
-    opts: { size?: number; color?: RGB; style?: "normal" | "bold" | "italic"; gapAfter?: number; indent?: number } = {},
+    opts: {
+      size?: number;
+      color?: RGB;
+      style?: "normal" | "bold" | "italic";
+      gapAfter?: number;
+      indent?: number;
+    } = {},
   ) => {
     const { size = 10, color = INK, style = "normal", gapAfter = 6, indent = 0 } = opts;
     pdf.setFont("helvetica", style);
@@ -73,7 +84,11 @@ export async function downloadRemediationPdf(doc: RemediationDoc, generatedAt: s
   pdf.setTextColor(203, 213, 225);
   pdf.text(doc.artifact, M, 64);
   pdf.setFontSize(9);
-  pdf.text(`Generated ${generatedAt}${doc.aiEnriched ? "  ·  AI-assisted" : "  ·  from scan data"}`, M, 80);
+  pdf.text(
+    `Generated ${generatedAt}${doc.aiEnriched ? "  ·  AI-assisted" : "  ·  from scan data"}`,
+    M,
+    80,
+  );
   y = 92 + 24;
 
   // ── Executive summary ────────────────────────────────────────────────────
@@ -97,7 +112,11 @@ export async function downloadRemediationPdf(doc: RemediationDoc, generatedAt: s
     pdf.setTextColor(255, 255, 255);
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(11);
-    pdf.text(`${sec.severity}  —  ${sec.items.length} issue${sec.items.length === 1 ? "" : "s"}`, M + 8, y + 3);
+    pdf.text(
+      `${sec.severity}  —  ${sec.items.length} issue${sec.items.length === 1 ? "" : "s"}`,
+      M + 8,
+      y + 3,
+    );
     y += 22;
 
     para(sec.overview, { size: 9.5, color: MUTED, style: "italic", gapAfter: 8 });

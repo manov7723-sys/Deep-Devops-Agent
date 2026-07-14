@@ -34,10 +34,7 @@ export function ToggleRow({
     <div className="row between gap-3 dda-toggle-row">
       <div className="row gap-3" style={{ minWidth: 0 }}>
         {icon && (
-          <span
-            className="row center dda-toggle-icon"
-            data-active={checked ? "true" : undefined}
-          >
+          <span className="row center dda-toggle-icon" data-active={checked ? "true" : undefined}>
             <Icon name={icon} size={18} />
           </span>
         )}
@@ -56,7 +53,12 @@ export function ToggleRow({
       </div>
       <div className="row gap-3" style={{ flex: "none", alignItems: "center" }}>
         {meta}
-        <Toggle checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} ariaLabel={typeof title === "string" ? title : undefined} />
+        <Toggle
+          checked={checked}
+          onCheckedChange={onCheckedChange}
+          disabled={disabled}
+          ariaLabel={typeof title === "string" ? title : undefined}
+        />
       </div>
     </div>
   );

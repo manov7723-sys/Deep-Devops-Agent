@@ -82,8 +82,7 @@ export type PatchPipelineArgs = {
 };
 
 export type PatchResult =
-  | { ok: true; pipeline: PipelineRow }
-  | { ok: false; code: "not_found" | "already_terminal" };
+  { ok: true; pipeline: PipelineRow } | { ok: false; code: "not_found" | "already_terminal" };
 
 export async function patchPipeline(
   projectId: string,
@@ -118,7 +117,9 @@ export async function patchPipeline(
     if (patch.status !== "running") {
       const finishedAt = new Date();
       dataPipe.finishedAt = finishedAt;
-      dataPipe.durationSec = Math.round((finishedAt.getTime() - existing.startedAt.getTime()) / 1000);
+      dataPipe.durationSec = Math.round(
+        (finishedAt.getTime() - existing.startedAt.getTime()) / 1000,
+      );
       dataPipe.progressPct = 100;
     }
   }
@@ -136,8 +137,7 @@ export async function patchPipeline(
 }
 
 export type RetryResult =
-  | { ok: true; pipelineId: string }
-  | { ok: false; code: "not_found" | "still_running" };
+  { ok: true; pipelineId: string } | { ok: false; code: "not_found" | "still_running" };
 
 export async function retryPipeline(
   projectId: string,

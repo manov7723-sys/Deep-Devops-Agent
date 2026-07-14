@@ -50,25 +50,104 @@ type FieldSpec = {
 const PROVIDER_FIELDS: Record<"gcp" | "azure" | "proxmox", { fields: FieldSpec[] }> = {
   proxmox: {
     fields: [
-      { schemaColumn: "accountRef", label: "Proxmox host URL", placeholder: "https://pve.example.com:8006", hint: "The Proxmox VE API endpoint (host + port 8006).", mono: true, required: true },
-      { schemaColumn: "roleArn", label: "API token ID", placeholder: "root@pam!deepagent", hint: 'The token ID, formatted "user@realm!tokenname".', mono: true, required: true },
-      { schemaColumn: "externalId", label: "API token secret", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", hint: "Shown once when you created the token. Encrypted at rest (AES-256-GCM).", mono: true, secret: true, required: true },
+      {
+        schemaColumn: "accountRef",
+        label: "Proxmox host URL",
+        placeholder: "https://pve.example.com:8006",
+        hint: "The Proxmox VE API endpoint (host + port 8006).",
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "roleArn",
+        label: "API token ID",
+        placeholder: "root@pam!deepagent",
+        hint: 'The token ID, formatted "user@realm!tokenname".',
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "externalId",
+        label: "API token secret",
+        placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        hint: "Shown once when you created the token. Encrypted at rest (AES-256-GCM).",
+        mono: true,
+        secret: true,
+        required: true,
+      },
     ],
   },
   gcp: {
     fields: [
-      { schemaColumn: "accountRef", label: "GCP Project ID", placeholder: "northwind-prod-461298", hint: "Project ID (NOT the numeric project number).", mono: true, required: true },
-      { schemaColumn: "accountId", label: "Project number", placeholder: "461298145672", hint: "Numeric — visible at the top of the GCP console dashboard.", mono: true },
-      { schemaColumn: "roleArn", label: "Service account email", placeholder: "deep-agent@northwind-prod.iam.gserviceaccount.com", hint: "Workload-identity service account Deep Agent impersonates.", mono: true, required: true },
-      { schemaColumn: "externalId", label: "Workload-identity pool", placeholder: "projects/461298145672/locations/global/workloadIdentityPools/dda-pool/providers/dda", hint: "Optional — federated pool resource path.", mono: true, secret: true },
+      {
+        schemaColumn: "accountRef",
+        label: "GCP Project ID",
+        placeholder: "northwind-prod-461298",
+        hint: "Project ID (NOT the numeric project number).",
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "accountId",
+        label: "Project number",
+        placeholder: "461298145672",
+        hint: "Numeric — visible at the top of the GCP console dashboard.",
+        mono: true,
+      },
+      {
+        schemaColumn: "roleArn",
+        label: "Service account email",
+        placeholder: "deep-agent@northwind-prod.iam.gserviceaccount.com",
+        hint: "Workload-identity service account Deep Agent impersonates.",
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "externalId",
+        label: "Workload-identity pool",
+        placeholder:
+          "projects/461298145672/locations/global/workloadIdentityPools/dda-pool/providers/dda",
+        hint: "Optional — federated pool resource path.",
+        mono: true,
+        secret: true,
+      },
     ],
   },
   azure: {
     fields: [
-      { schemaColumn: "accountRef", label: "Subscription ID", placeholder: "00000000-0000-0000-0000-000000000000", hint: "Found in Azure Portal → Subscriptions.", mono: true, required: true },
-      { schemaColumn: "accountId", label: "Tenant ID", placeholder: "00000000-0000-0000-0000-000000000000", hint: "Microsoft Entra (Azure AD) tenant.", mono: true, required: true },
-      { schemaColumn: "roleArn", label: "App (Client) ID", placeholder: "00000000-0000-0000-0000-000000000000", hint: "Service principal / app registration that Deep Agent uses.", mono: true, required: true },
-      { schemaColumn: "externalId", label: "Client secret", placeholder: "value from App registration → Certificates & secrets", hint: "Encrypted at rest with AES-256-GCM. Rotate via Azure Portal anytime.", mono: true, secret: true, required: true },
+      {
+        schemaColumn: "accountRef",
+        label: "Subscription ID",
+        placeholder: "00000000-0000-0000-0000-000000000000",
+        hint: "Found in Azure Portal → Subscriptions.",
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "accountId",
+        label: "Tenant ID",
+        placeholder: "00000000-0000-0000-0000-000000000000",
+        hint: "Microsoft Entra (Azure AD) tenant.",
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "roleArn",
+        label: "App (Client) ID",
+        placeholder: "00000000-0000-0000-0000-000000000000",
+        hint: "Service principal / app registration that Deep Agent uses.",
+        mono: true,
+        required: true,
+      },
+      {
+        schemaColumn: "externalId",
+        label: "Client secret",
+        placeholder: "value from App registration → Certificates & secrets",
+        hint: "Encrypted at rest with AES-256-GCM. Rotate via Azure Portal anytime.",
+        mono: true,
+        secret: true,
+        required: true,
+      },
     ],
   },
 };
@@ -98,11 +177,14 @@ export function CloudConnectBox({ slug }: { slug: string }) {
       externalId?: string;
       projectSlug?: string;
     }) => {
-      const res = await api.post<{ ok: boolean; provider?: { id: string }; message?: string; code?: string }>(
-        "/cloud-providers",
-        body,
-      );
-      if (!res.ok || !res.provider) throw new Error(res.message ?? res.code ?? "Could not connect provider.");
+      const res = await api.post<{
+        ok: boolean;
+        provider?: { id: string };
+        message?: string;
+        code?: string;
+      }>("/cloud-providers", body);
+      if (!res.ok || !res.provider)
+        throw new Error(res.message ?? res.code ?? "Could not connect provider.");
       return res.provider;
     },
   });
@@ -115,11 +197,16 @@ export function CloudConnectBox({ slug }: { slug: string }) {
 
   function openOAuthPopup(provider: "azure" | "gcp") {
     setServerError(null);
-    const w = 600, h = 720;
+    const w = 600,
+      h = 720;
     const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
     const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
     const url = `/api/v1/cloud-providers/${provider}/oauth/start?popup=1&projectSlug=${encodeURIComponent(slug)}`;
-    const popup = window.open(url, `dda_${provider}_oauth`, `width=${w},height=${h},left=${left},top=${top}`);
+    const popup = window.open(
+      url,
+      `dda_${provider}_oauth`,
+      `width=${w},height=${h},left=${left},top=${top}`,
+    );
     if (!popup) {
       window.location.href = url.replace(/[?&]popup=1/, (m) => (m[0] === "?" ? "?" : ""));
       return;
@@ -152,7 +239,8 @@ export function CloudConnectBox({ slug }: { slug: string }) {
       handle(e.data as Parameters<typeof handle>[0]);
     }
     function onStorage(e: StorageEvent) {
-      if ((e.key !== "dda_azure_oauth_result" && e.key !== "dda_gcp_oauth_result") || !e.newValue) return;
+      if ((e.key !== "dda_azure_oauth_result" && e.key !== "dda_gcp_oauth_result") || !e.newValue)
+        return;
       try {
         handle(JSON.parse(e.newValue.split("|")[0]));
       } catch {
@@ -197,7 +285,9 @@ export function CloudConnectBox({ slug }: { slug: string }) {
         if (res.verified) {
           setConnected(true);
         } else {
-          setNotice(`Account saved, but the role couldn't be verified yet${res.verifyMessage ? ` — ${res.verifyMessage}` : ""}.`);
+          setNotice(
+            `Account saved, but the role couldn't be verified yet${res.verifyMessage ? ` — ${res.verifyMessage}` : ""}.`,
+          );
         }
       } catch (e) {
         setServerError(e instanceof Error ? e.message : "Could not connect AWS account.");
@@ -210,7 +300,9 @@ export function CloudConnectBox({ slug }: { slug: string }) {
       .filter((f) => f.required && !(values[f.schemaColumn] ?? "").trim())
       .map((f) => f.label);
     if (missing.length > 0) {
-      setServerError(`Missing required field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.`);
+      setServerError(
+        `Missing required field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.`,
+      );
       return;
     }
     if (!region.trim()) {
@@ -239,8 +331,10 @@ export function CloudConnectBox({ slug }: { slug: string }) {
   const helpCopy = useMemo<Record<"gcp" | "azure" | "proxmox", string>>(
     () => ({
       gcp: "Deep Agent impersonates a service account. Use workload identity federation if you can — no long-lived keys.",
-      azure: "Deep Agent signs in as a service principal in your Entra tenant. The client secret is encrypted at rest.",
-      proxmox: "Deep Agent connects to your Proxmox VE server with a scoped API token (encrypted at rest) and uses it to create VMs via Terraform.",
+      azure:
+        "Deep Agent signs in as a service principal in your Entra tenant. The client secret is encrypted at rest.",
+      proxmox:
+        "Deep Agent connects to your Proxmox VE server with a scoped API token (encrypted at rest) and uses it to create VMs via Terraform.",
     }),
     [],
   );
@@ -257,7 +351,8 @@ export function CloudConnectBox({ slug }: { slug: string }) {
         </Block.Header>
         <Block.Body>
           <span className="muted" style={{ fontSize: 13 }}>
-            {KIND_OPTIONS.find((k) => k.kind === kind)?.label} is connected. Ask the agent to create or connect a cluster next.
+            {KIND_OPTIONS.find((k) => k.kind === kind)?.label} is connected. Ask the agent to create
+            or connect a cluster next.
           </span>
         </Block.Body>
       </Block>
@@ -301,15 +396,28 @@ export function CloudConnectBox({ slug }: { slug: string }) {
 
           {!isOAuth && (
             <Field label="Display name" hint="A label for this connection.">
-              <Input placeholder={`${kind.toUpperCase()} prod`} value={name} onChange={(e) => setName(e.target.value)} />
+              <Input
+                placeholder={`${kind.toUpperCase()} prod`}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </Field>
           )}
 
           {isAws ? (
             <div className="col gap-4">
               <AwsTrustPolicyHelp enabled={isAws} />
-              <Field label="IAM role ARN" required hint="The role you created with the trust policy above. Deep Agent assumes it via STS.">
-                <Input className="mono" placeholder="arn:aws:iam::461298145672:role/deep-agent" value={awsRoleArn} onChange={(e) => setAwsRoleArn(e.target.value)} />
+              <Field
+                label="IAM role ARN"
+                required
+                hint="The role you created with the trust policy above. Deep Agent assumes it via STS."
+              >
+                <Input
+                  className="mono"
+                  placeholder="arn:aws:iam::461298145672:role/deep-agent"
+                  value={awsRoleArn}
+                  onChange={(e) => setAwsRoleArn(e.target.value)}
+                />
               </Field>
             </div>
           ) : isAzure ? (
@@ -317,10 +425,16 @@ export function CloudConnectBox({ slug }: { slug: string }) {
               <div className="row gap-2 dda-wizard-iam-note">
                 <Icon name="shield" size={16} style={{ flex: "none" }} />
                 <span style={{ fontSize: 12.5 }}>
-                  Connect with your Microsoft account — pick the account, approve access, and Deep Agent stores an encrypted refresh token (no client secret to manage).
+                  Connect with your Microsoft account — pick the account, approve access, and Deep
+                  Agent stores an encrypted refresh token (no client secret to manage).
                 </span>
               </div>
-              <Btn variant="primary" icon="cloud" loading={azureBusy} onClick={() => openOAuthPopup("azure")}>
+              <Btn
+                variant="primary"
+                icon="cloud"
+                loading={azureBusy}
+                onClick={() => openOAuthPopup("azure")}
+              >
                 Sign in with Microsoft
               </Btn>
             </div>
@@ -329,10 +443,17 @@ export function CloudConnectBox({ slug }: { slug: string }) {
               <div className="row gap-2 dda-wizard-iam-note">
                 <Icon name="shield" size={16} style={{ flex: "none" }} />
                 <span style={{ fontSize: 12.5 }}>
-                  Connect with your Google account — pick the account, approve cloud-platform access, and Deep Agent stores an encrypted refresh token (no service-account key to manage).
+                  Connect with your Google account — pick the account, approve cloud-platform
+                  access, and Deep Agent stores an encrypted refresh token (no service-account key
+                  to manage).
                 </span>
               </div>
-              <Btn variant="primary" icon="cloud" loading={azureBusy} onClick={() => openOAuthPopup("gcp")}>
+              <Btn
+                variant="primary"
+                icon="cloud"
+                loading={azureBusy}
+                onClick={() => openOAuthPopup("gcp")}
+              >
                 Sign in with Google
               </Btn>
             </div>
@@ -341,7 +462,8 @@ export function CloudConnectBox({ slug }: { slug: string }) {
               <div className="row gap-2 dda-wizard-iam-note">
                 <Icon name="shield" size={16} style={{ flex: "none" }} />
                 <span style={{ fontSize: 12.5 }}>
-                  Connect a self-hosted Proxmox VE server with an API token. The token secret is encrypted at rest; DeepAgent uses it to create VMs via Terraform.
+                  Connect a self-hosted Proxmox VE server with an API token. The token secret is
+                  encrypted at rest; DeepAgent uses it to create VMs via Terraform.
                 </span>
               </div>
               {PROVIDER_FIELDS.proxmox.fields.map((f) => (
@@ -365,14 +487,31 @@ export function CloudConnectBox({ slug }: { slug: string }) {
           )}
 
           {!isAws && (
-            <div className="row gap-2" style={{ padding: 12, background: "var(--info-soft)", borderRadius: 10, color: "var(--info)", fontSize: 12.5 }}>
+            <div
+              className="row gap-2"
+              style={{
+                padding: 12,
+                background: "var(--info-soft)",
+                borderRadius: 10,
+                color: "var(--info)",
+                fontSize: 12.5,
+              }}
+            >
               <Icon name="shield" size={16} style={{ flex: "none" }} />
               {helpCopy[kind]}
             </div>
           )}
 
-          {notice && <p style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }} role="status">{notice}</p>}
-          {serverError && <p style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">{serverError}</p>}
+          {notice && (
+            <p style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }} role="status">
+              {notice}
+            </p>
+          )}
+          {serverError && (
+            <p style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">
+              {serverError}
+            </p>
+          )}
 
           {!isOAuth && (
             <div className="row" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>

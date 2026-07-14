@@ -19,8 +19,13 @@ const PROVIDER_ID = "github-provider";
 
 type GcpResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
-async function resolveGcp(cloudProviderId: string): Promise<GcpResult<{ token: string; project: string }>> {
-  const cp = await prisma.cloudProvider.findUnique({ where: { id: cloudProviderId }, select: { kind: true, accountRef: true } });
+async function resolveGcp(
+  cloudProviderId: string,
+): Promise<GcpResult<{ token: string; project: string }>> {
+  const cp = await prisma.cloudProvider.findUnique({
+    where: { id: cloudProviderId },
+    select: { kind: true, accountRef: true },
+  });
   if (cp?.kind !== "gcp") return { ok: false, error: "Not a GCP provider." };
   const project = cp.accountRef?.trim();
   if (!project) return { ok: false, error: "GCP provider has no project id." };
@@ -43,7 +48,10 @@ async function gapi<T = Record<string, unknown>>(
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    return { ok: false, error: `Network error reaching GCP: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GCP: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   const text = await res.text();
   let data: T & { error?: { message?: string; status?: string } };
@@ -52,7 +60,8 @@ async function gapi<T = Record<string, unknown>>(
   } catch {
     // Non-JSON body (proxy/HTML error page) used to throw here and surface as a
     // bogus "unexpected response from the GCP API". Return the raw text instead.
-    if (!res.ok) return { ok: false, error: `GCP HTTP ${res.status}: ${text.slice(0, 200) || "no body"}` };
+    if (!res.ok)
+      return { ok: false, error: `GCP HTTP ${res.status}: ${text.slice(0, 200) || "no body"}` };
     return { ok: true, data: {} as T };
   }
   if (!res.ok) {
@@ -72,7 +81,10 @@ function hintGcpError(httpStatus: number, apiStatus: string | undefined, message
       "Ask your GCP admin to grant those, or reconnect with an owner account on the Cloud providers tab."
     );
   }
-  if (/api .*not been used|service_disabled|it is disabled/i.test(m) || apiStatus === "FAILED_PRECONDITION") {
+  if (
+    /api .*not been used|service_disabled|it is disabled/i.test(m) ||
+    apiStatus === "FAILED_PRECONDITION"
+  ) {
     return (
       `${message}\n\nA required Google API is disabled. Enable these in the GCP project, then retry: ` +
       "IAM (iam.googleapis.com), Security Token Service (sts.googleapis.com), IAM Credentials (iamcredentials.googleapis.com), Cloud Resource Manager (cloudresourcemanager.googleapis.com), and Artifact Registry (artifactregistry.googleapis.com)."
@@ -84,9 +96,15 @@ function hintGcpError(httpStatus: number, apiStatus: string | undefined, message
 /** Poll a long-running operation until done (pools/providers are LROs). */
 async function awaitLro(token: string, opName: string): Promise<GcpResult<true>> {
   for (let i = 0; i < 30; i++) {
-    const op = await gapi<{ done?: boolean; error?: { message?: string } }>(token, `https://iam.googleapis.com/v1/${opName}`);
+    const op = await gapi<{ done?: boolean; error?: { message?: string } }>(
+      token,
+      `https://iam.googleapis.com/v1/${opName}`,
+    );
     if (!op.ok) return op;
-    if (op.data.done) return op.data.error ? { ok: false, error: op.data.error.message ?? "operation failed" } : { ok: true, data: true };
+    if (op.data.done)
+      return op.data.error
+        ? { ok: false, error: op.data.error.message ?? "operation failed" }
+        : { ok: true, data: true };
     await new Promise((r) => setTimeout(r, 2000));
   }
   return { ok: false, error: "GCP operation timed out." };
@@ -95,7 +113,10 @@ async function awaitLro(token: string, opName: string): Promise<GcpResult<true>>
 export type ArtifactRepo = { name: string; format: string; location: string };
 
 /** List docker Artifact Registry repositories in a location. */
-export async function listArtifactRegistries(cloudProviderId: string, location: string): Promise<GcpResult<ArtifactRepo[]>> {
+export async function listArtifactRegistries(
+  cloudProviderId: string,
+  location: string,
+): Promise<GcpResult<ArtifactRepo[]>> {
   const r = await resolveGcp(cloudProviderId);
   if (!r.ok) return r;
   const { token, project } = r.data;
@@ -113,7 +134,11 @@ export async function listArtifactRegistries(cloudProviderId: string, location: 
 }
 
 /** Create a docker Artifact Registry repository (idempotent-ish: ALREADY_EXISTS is treated as success). */
-export async function createArtifactRegistry(cloudProviderId: string, location: string, repository: string): Promise<GcpResult<ArtifactRepo>> {
+export async function createArtifactRegistry(
+  cloudProviderId: string,
+  location: string,
+  repository: string,
+): Promise<GcpResult<ArtifactRepo>> {
   const r = await resolveGcp(cloudProviderId);
   if (!r.ok) return r;
   const { token, project } = r.data;
@@ -127,31 +152,47 @@ export async function createArtifactRegistry(cloudProviderId: string, location: 
   return { ok: true, data: { name: repository, format: "DOCKER", location } };
 }
 
-export type WifResult = { workloadIdentityProvider: string; serviceAccount: string; projectNumber: string };
+export type WifResult = {
+  workloadIdentityProvider: string;
+  serviceAccount: string;
+  projectNumber: string;
+};
 
 /**
  * Set up keyless GitHub→GCP auth for ONE repo. Idempotent: re-running reuses the
  * pool/provider/SA. Returns the provider resource name + SA email for the
  * workflow. The connected GCP identity needs IAM admin + Artifact Registry admin.
  */
-export async function setupGithubWif(cloudProviderId: string, repoFullName: string): Promise<GcpResult<WifResult>> {
+export async function setupGithubWif(
+  cloudProviderId: string,
+  repoFullName: string,
+): Promise<GcpResult<WifResult>> {
   const r = await resolveGcp(cloudProviderId);
   if (!r.ok) return r;
   const { token, project } = r.data;
 
   // 0 — project number (needed in the provider resource path).
-  const proj = await gapi<{ projectNumber?: string }>(token, `https://cloudresourcemanager.googleapis.com/v1/projects/${project}`);
+  const proj = await gapi<{ projectNumber?: string }>(
+    token,
+    `https://cloudresourcemanager.googleapis.com/v1/projects/${project}`,
+  );
   if (!proj.ok) return proj;
   const projectNumber = proj.data.projectNumber;
   if (!projectNumber) return { ok: false, error: "Couldn't read the GCP project number." };
 
   // 1 — Workload Identity Pool (ignore ALREADY_EXISTS).
   const poolBase = `https://iam.googleapis.com/v1/projects/${project}/locations/global/workloadIdentityPools`;
-  const poolCreate = await gapi<{ name?: string }>(token, `${poolBase}?workloadIdentityPoolId=${POOL_ID}`, "POST", {
-    displayName: "GitHub Actions",
-    description: "Keyless GitHub OIDC (DeepAgent).",
-  });
-  if (!poolCreate.ok && !/already exists/i.test(poolCreate.error)) return { ok: false, error: `Creating the workload identity pool failed. ${poolCreate.error}` };
+  const poolCreate = await gapi<{ name?: string }>(
+    token,
+    `${poolBase}?workloadIdentityPoolId=${POOL_ID}`,
+    "POST",
+    {
+      displayName: "GitHub Actions",
+      description: "Keyless GitHub OIDC (DeepAgent).",
+    },
+  );
+  if (!poolCreate.ok && !/already exists/i.test(poolCreate.error))
+    return { ok: false, error: `Creating the workload identity pool failed. ${poolCreate.error}` };
   if (poolCreate.ok && poolCreate.data.name) await awaitLro(token, poolCreate.data.name);
 
   // 2 — OIDC provider in the pool, scoped to this GitHub repo. The pool +
@@ -163,20 +204,26 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
   // OIDC tokens from this repo are accepted.
   const provBase = `${poolBase}/${POOL_ID}/providers`;
   const newRepoClause = `assertion.repository == "${repoFullName}"`;
-  const provCreate = await gapi<{ name?: string }>(token, `${provBase}?workloadIdentityPoolProviderId=${PROVIDER_ID}`, "POST", {
-    displayName: "GitHub",
-    oidc: { issuerUri: "https://token.actions.githubusercontent.com" },
-    attributeMapping: {
-      "google.subject": "assertion.sub",
-      "attribute.repository": "assertion.repository",
-      // Owner mapping isn't strictly needed for the current binding shape but
-      // keeps the provider usable for future org-wide bindings without a
-      // re-PATCH; the merge path above expects it too.
-      "attribute.repository_owner": "assertion.repository_owner",
+  const provCreate = await gapi<{ name?: string }>(
+    token,
+    `${provBase}?workloadIdentityPoolProviderId=${PROVIDER_ID}`,
+    "POST",
+    {
+      displayName: "GitHub",
+      oidc: { issuerUri: "https://token.actions.githubusercontent.com" },
+      attributeMapping: {
+        "google.subject": "assertion.sub",
+        "attribute.repository": "assertion.repository",
+        // Owner mapping isn't strictly needed for the current binding shape but
+        // keeps the provider usable for future org-wide bindings without a
+        // re-PATCH; the merge path above expects it too.
+        "attribute.repository_owner": "assertion.repository_owner",
+      },
+      attributeCondition: newRepoClause,
     },
-    attributeCondition: newRepoClause,
-  });
-  if (!provCreate.ok && !/already exists/i.test(provCreate.error)) return { ok: false, error: `Creating the OIDC provider failed. ${provCreate.error}` };
+  );
+  if (!provCreate.ok && !/already exists/i.test(provCreate.error))
+    return { ok: false, error: `Creating the OIDC provider failed. ${provCreate.error}` };
   if (provCreate.ok && provCreate.data.name) await awaitLro(token, provCreate.data.name);
 
   if (!provCreate.ok) {
@@ -192,10 +239,12 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
       attributeCondition?: string;
       attributeMapping?: Record<string, string>;
     }>(token, provUrl);
-    if (!existing.ok) return { ok: false, error: `Reading the existing OIDC provider failed. ${existing.error}` };
+    if (!existing.ok)
+      return { ok: false, error: `Reading the existing OIDC provider failed. ${existing.error}` };
     const current = (existing.data.attributeCondition ?? "").trim();
     const currentMapping = existing.data.attributeMapping ?? {};
-    const patchBody: { attributeCondition?: string; attributeMapping?: Record<string, string> } = {};
+    const patchBody: { attributeCondition?: string; attributeMapping?: Record<string, string> } =
+      {};
     const updateFields: string[] = [];
     if (!current.includes(newRepoClause)) {
       patchBody.attributeCondition = current ? `${current} || ${newRepoClause}` : newRepoClause;
@@ -220,7 +269,11 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
         "PATCH",
         patchBody,
       );
-      if (!patch.ok) return { ok: false, error: `Updating the OIDC provider (${updateFields.join(", ")}) failed. ${patch.error}` };
+      if (!patch.ok)
+        return {
+          ok: false,
+          error: `Updating the OIDC provider (${updateFields.join(", ")}) failed. ${patch.error}`,
+        };
       if (patch.data.name) await awaitLro(token, patch.data.name);
     }
   }
@@ -228,15 +281,30 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
   // 3 — Service account (ignore ALREADY_EXISTS).
   const saId = "deepagent-gha";
   const saEmail = `${saId}@${project}.iam.gserviceaccount.com`;
-  const saCreate = await gapi(token, `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts`, "POST", {
-    accountId: saId,
-    serviceAccount: { displayName: "DeepAgent GitHub Actions" },
-  });
-  if (!saCreate.ok && !/already exists/i.test(saCreate.error)) return { ok: false, error: `Creating the service account failed. ${saCreate.error}` };
+  const saCreate = await gapi(
+    token,
+    `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts`,
+    "POST",
+    {
+      accountId: saId,
+      serviceAccount: { displayName: "DeepAgent GitHub Actions" },
+    },
+  );
+  if (!saCreate.ok && !/already exists/i.test(saCreate.error))
+    return { ok: false, error: `Creating the service account failed. ${saCreate.error}` };
 
   // 4 — Grant the SA push access at the project level (read-modify-write IAM policy).
-  const grant = await addProjectBinding(token, project, `serviceAccount:${saEmail}`, "roles/artifactregistry.writer");
-  if (!grant.ok) return { ok: false, error: `Granting Artifact Registry Writer to the service account failed. ${grant.error}` };
+  const grant = await addProjectBinding(
+    token,
+    project,
+    `serviceAccount:${saEmail}`,
+    "roles/artifactregistry.writer",
+  );
+  if (!grant.ok)
+    return {
+      ok: false,
+      error: `Granting Artifact Registry Writer to the service account failed. ${grant.error}`,
+    };
 
   // 5 — Let the GitHub repo principal impersonate the SA. We grant BOTH:
   //   - roles/iam.workloadIdentityUser: canonical WIF impersonation grant,
@@ -248,10 +316,30 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
   //     'iam.serviceAccounts.getAccessToken' denied` failure the user hits
   //     even when the workloadIdentityUser binding is present.
   const principal = `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${repoFullName}`;
-  const impersonate = await addServiceAccountBinding(token, project, saEmail, principal, "roles/iam.workloadIdentityUser");
-  if (!impersonate.ok) return { ok: false, error: `Binding the GitHub repo to the service account failed. ${impersonate.error}` };
-  const tokenCreator = await addServiceAccountBinding(token, project, saEmail, principal, "roles/iam.serviceAccountTokenCreator");
-  if (!tokenCreator.ok) return { ok: false, error: `Granting tokenCreator on the service account failed. ${tokenCreator.error}` };
+  const impersonate = await addServiceAccountBinding(
+    token,
+    project,
+    saEmail,
+    principal,
+    "roles/iam.workloadIdentityUser",
+  );
+  if (!impersonate.ok)
+    return {
+      ok: false,
+      error: `Binding the GitHub repo to the service account failed. ${impersonate.error}`,
+    };
+  const tokenCreator = await addServiceAccountBinding(
+    token,
+    project,
+    saEmail,
+    principal,
+    "roles/iam.serviceAccountTokenCreator",
+  );
+  if (!tokenCreator.ok)
+    return {
+      ok: false,
+      error: `Granting tokenCreator on the service account failed. ${tokenCreator.error}`,
+    };
 
   // Verify the binding is actually visible on the SA policy — protects against
   // "setIamPolicy returned 200 but read-after-write shows stale state" cases
@@ -285,7 +373,9 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
 }
 
 /** Parse a GKE kubeconfig's `gke_<project>_<location>_<cluster>` context. */
-export function parseGkeClusterRef(kubeconfig: string): { projectId: string; location: string; clusterName: string } | null {
+export function parseGkeClusterRef(
+  kubeconfig: string,
+): { projectId: string; location: string; clusterName: string } | null {
   const tok = kubeconfig.match(/gke_[a-z0-9-]+_[a-z0-9-]+_[A-Za-z0-9-]+/)?.[0];
   if (!tok) return null;
   const parts = tok.split("_"); // [gke, project, location, cluster]
@@ -325,8 +415,17 @@ export async function setupGcpDeployRegistry(
   if (!wif.ok) return wif;
 
   // The CD workflow deploys to GKE as this SA — needs container.developer.
-  const grant = await addProjectBinding(token, project, `serviceAccount:${wif.data.serviceAccount}`, "roles/container.developer");
-  if (!grant.ok) return { ok: false, error: `Granting GKE deploy access to the service account failed. ${grant.error}` };
+  const grant = await addProjectBinding(
+    token,
+    project,
+    `serviceAccount:${wif.data.serviceAccount}`,
+    "roles/container.developer",
+  );
+  if (!grant.ok)
+    return {
+      ok: false,
+      error: `Granting GKE deploy access to the service account failed. ${grant.error}`,
+    };
 
   return {
     ok: true,
@@ -341,9 +440,19 @@ export async function setupGcpDeployRegistry(
 }
 
 /** Add a member→role binding on the PROJECT IAM policy (read-modify-write). */
-async function addProjectBinding(token: string, project: string, member: string, role: string): Promise<GcpResult<true>> {
+async function addProjectBinding(
+  token: string,
+  project: string,
+  member: string,
+  role: string,
+): Promise<GcpResult<true>> {
   const url = `https://cloudresourcemanager.googleapis.com/v1/projects/${project}`;
-  const get = await gapi<{ bindings?: Array<{ role: string; members: string[] }> }>(token, `${url}:getIamPolicy`, "POST", {});
+  const get = await gapi<{ bindings?: Array<{ role: string; members: string[] }> }>(
+    token,
+    `${url}:getIamPolicy`,
+    "POST",
+    {},
+  );
   if (!get.ok) return get;
   const policy = get.data;
   const bindings = policy.bindings ?? [];
@@ -359,10 +468,21 @@ async function addProjectBinding(token: string, project: string, member: string,
 }
 
 /** Add a member→role binding on a SERVICE ACCOUNT's IAM policy. */
-async function addServiceAccountBinding(token: string, project: string, saEmail: string, member: string, role: string): Promise<GcpResult<true>> {
+async function addServiceAccountBinding(
+  token: string,
+  project: string,
+  saEmail: string,
+  member: string,
+  role: string,
+): Promise<GcpResult<true>> {
   const url = `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts/${saEmail}`;
   // getIamPolicy on a service account is a POST endpoint (GET returns a 404 HTML page).
-  const get = await gapi<{ bindings?: Array<{ role: string; members: string[] }> }>(token, `${url}:getIamPolicy`, "POST", {});
+  const get = await gapi<{ bindings?: Array<{ role: string; members: string[] }> }>(
+    token,
+    `${url}:getIamPolicy`,
+    "POST",
+    {},
+  );
   if (!get.ok) return get;
   const policy = get.data;
   const bindings = policy.bindings ?? [];

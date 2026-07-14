@@ -10,7 +10,12 @@ import { prisma } from "@/lib/db/prisma";
 import { createApproval } from "./approvals";
 import { sanitizeAppName, type DeploySpec } from "./deploy-manifest";
 
-export type DeployApprovalTarget = { envKey: string; envId: string; namespace: string; isProduction?: boolean };
+export type DeployApprovalTarget = {
+  envKey: string;
+  envId: string;
+  namespace: string;
+  isProduction?: boolean;
+};
 
 export async function createDeployApproval(
   projectId: string,
@@ -32,8 +37,13 @@ export async function createDeployApproval(
     diff: [
       { kind: "add", text: `Deploy ${app} → ${target.envKey} (namespace ${spec.namespace})` },
       { kind: "comment", text: `🖼️ image: ${spec.image}` },
-      { kind: "comment", text: `⚙️ ${replicaLbl} · port ${spec.containerPort}${spec.expose ? ` · exposed${spec.host ? ` (${spec.host})` : ""}` : ""}` },
-      ...(target.isProduction ? [{ kind: "comment" as const, text: "⚠️ PRODUCTION environment" }] : []),
+      {
+        kind: "comment",
+        text: `⚙️ ${replicaLbl} · port ${spec.containerPort}${spec.expose ? ` · exposed${spec.host ? ` (${spec.host})` : ""}` : ""}`,
+      },
+      ...(target.isProduction
+        ? [{ kind: "comment" as const, text: "⚠️ PRODUCTION environment" }]
+        : []),
     ],
     kind: "deploy",
     payloadJson: {
@@ -76,11 +86,20 @@ export async function createScheduledDeployApproval(
       { kind: "add", text: `Deploy ${app} → ${target.envKey} (namespace ${spec.namespace})` },
       { kind: "comment", text: `🕐 scheduled to run at ${when}` },
       { kind: "comment", text: `🖼️ image: ${spec.image}` },
-      { kind: "comment", text: `⚙️ ${spec.replicas} replica${spec.replicas === 1 ? "" : "s"} · port ${spec.containerPort}` },
-      ...(target.isProduction ? [{ kind: "comment" as const, text: "⚠️ PRODUCTION environment" }] : []),
+      {
+        kind: "comment",
+        text: `⚙️ ${spec.replicas} replica${spec.replicas === 1 ? "" : "s"} · port ${spec.containerPort}`,
+      },
+      ...(target.isProduction
+        ? [{ kind: "comment" as const, text: "⚠️ PRODUCTION environment" }]
+        : []),
     ],
     kind: "scheduled_deploy",
-    payloadJson: { type: "scheduled_deploy", scheduledDeployId, runAt: when } as unknown as Prisma.InputJsonValue,
+    payloadJson: {
+      type: "scheduled_deploy",
+      scheduledDeployId,
+      runAt: when,
+    } as unknown as Prisma.InputJsonValue,
   });
 
   return { approvalId: approval.id, risk };
@@ -91,15 +110,29 @@ export async function createScheduledDeployApproval(
  * approved=true (scheduler may run it at runAt). Reject → cancelled. No-op for
  * non-scheduled approvals. Called from the decision route for BOTH decisions.
  */
-export async function syncScheduledApproval(projectId: string, approvalId: string, decision: "approve" | "reject"): Promise<void> {
-  const a = await prisma.approval.findFirst({ where: { id: approvalId, projectId }, select: { kind: true, payloadJson: true } });
+export async function syncScheduledApproval(
+  projectId: string,
+  approvalId: string,
+  decision: "approve" | "reject",
+): Promise<void> {
+  const a = await prisma.approval.findFirst({
+    where: { id: approvalId, projectId },
+    select: { kind: true, payloadJson: true },
+  });
   if (!a || a.kind !== "scheduled_deploy" || !a.payloadJson) return;
   const p = a.payloadJson as unknown as { scheduledDeployId?: string };
   const sid = p.scheduledDeployId;
   if (!sid) return;
   if (decision === "approve") {
-    await prisma.scheduledDeploy.updateMany({ where: { id: sid, projectId, status: "pending" }, data: { approved: true } }).catch(() => {});
+    await prisma.scheduledDeploy
+      .updateMany({ where: { id: sid, projectId, status: "pending" }, data: { approved: true } })
+      .catch(() => {});
   } else {
-    await prisma.scheduledDeploy.updateMany({ where: { id: sid, projectId, status: "pending" }, data: { status: "cancelled" } }).catch(() => {});
+    await prisma.scheduledDeploy
+      .updateMany({
+        where: { id: sid, projectId, status: "pending" },
+        data: { status: "cancelled" },
+      })
+      .catch(() => {});
   }
 }

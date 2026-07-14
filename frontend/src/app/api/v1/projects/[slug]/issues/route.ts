@@ -5,7 +5,8 @@ import { requireProjectAccess } from "@/lib/projects/permissions";
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const gate = await requireProjectAccess(slug, "viewer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
   const rows = await prisma.issue.findMany({
     where: { projectId: gate.access.project.id },
     orderBy: [{ state: "asc" }, { updatedAt: "desc" }],

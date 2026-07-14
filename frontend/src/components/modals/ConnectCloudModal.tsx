@@ -114,7 +114,8 @@ const PROVIDER_FIELDS: Record<"gcp" | "azure" | "proxmox", { fields: FieldSpec[]
       {
         schemaColumn: "externalId",
         label: "Workload-identity pool",
-        placeholder: "projects/461298145672/locations/global/workloadIdentityPools/dda-pool/providers/dda",
+        placeholder:
+          "projects/461298145672/locations/global/workloadIdentityPools/dda-pool/providers/dda",
         hint: "Optional — federated pool resource path.",
         mono: true,
         secret: true,
@@ -168,7 +169,13 @@ type EnvRow = {
   cloudProviderId: string | null;
 };
 
-export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind, lockedKind }: ConnectCloudModalProps) {
+export function ConnectCloudModal({
+  open,
+  onOpenChange,
+  projectSlug,
+  initialKind,
+  lockedKind,
+}: ConnectCloudModalProps) {
   const qc = useQueryClient();
   const [kind, setKind] = useState<CloudKind>("aws");
   const [name, setName] = useState("");
@@ -216,11 +223,14 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
       externalId?: string;
       projectSlug?: string;
     }) => {
-      const res = await api.post<{ ok: boolean; provider?: { id: string }; message?: string; code?: string }>(
-        "/cloud-providers",
-        body,
-      );
-      if (!res.ok || !res.provider) throw new Error(res.message ?? res.code ?? "Could not connect provider.");
+      const res = await api.post<{
+        ok: boolean;
+        provider?: { id: string };
+        message?: string;
+        code?: string;
+      }>("/cloud-providers", body);
+      if (!res.ok || !res.provider)
+        throw new Error(res.message ?? res.code ?? "Could not connect provider.");
       return res.provider;
     },
   });
@@ -235,11 +245,16 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
   // callback creates the provider and signals back (postMessage + localStorage).
   function openOAuthPopup(provider: "azure" | "gcp") {
     setServerError(null);
-    const w = 600, h = 720;
+    const w = 600,
+      h = 720;
     const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
     const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
     const url = `/api/v1/cloud-providers/${provider}/oauth/start?popup=1${projectSlug ? `&projectSlug=${encodeURIComponent(projectSlug)}` : ""}`;
-    const popup = window.open(url, `dda_${provider}_oauth`, `width=${w},height=${h},left=${left},top=${top}`);
+    const popup = window.open(
+      url,
+      `dda_${provider}_oauth`,
+      `width=${w},height=${h},left=${left},top=${top}`,
+    );
     if (!popup) {
       window.location.href = url.replace(/[?&]popup=1/, (m) => (m[0] === "?" ? "?" : ""));
       return;
@@ -275,7 +290,8 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
     // localStorage 'storage' event = COOP-proof fallback (Next 16 can sever
     // window.opener, dropping postMessage). The callbacks write a result key.
     function onStorage(e: StorageEvent) {
-      if ((e.key !== "dda_azure_oauth_result" && e.key !== "dda_gcp_oauth_result") || !e.newValue) return;
+      if ((e.key !== "dda_azure_oauth_result" && e.key !== "dda_gcp_oauth_result") || !e.newValue)
+        return;
       try {
         handle(JSON.parse(e.newValue.split("|")[0]));
       } catch {
@@ -307,7 +323,9 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
     const targets = (envsQuery.data ?? []).filter((e) => bindEnvs.has(e.id));
     for (const env of targets) {
       await api
-        .patch<{ ok: boolean }>(`/projects/${projectSlug}/envs/${env.key}`, { cloudProviderId: providerId })
+        .patch<{ ok: boolean }>(`/projects/${projectSlug}/envs/${env.key}`, {
+          cloudProviderId: providerId,
+        })
         .catch(() => {});
     }
   }
@@ -354,7 +372,9 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
       .filter((f) => f.required && !(values[f.schemaColumn] ?? "").trim())
       .map((f) => f.label);
     if (missing.length > 0) {
-      setServerError(`Missing required field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.`);
+      setServerError(
+        `Missing required field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.`,
+      );
       return;
     }
     if (!region.trim()) {
@@ -393,8 +413,10 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
   const helpCopy = useMemo<Record<"gcp" | "azure" | "proxmox", string>>(
     () => ({
       gcp: "Deep Agent impersonates a service account. Use workload identity federation if you can — no long-lived keys.",
-      azure: "Deep Agent signs in as a service principal in your Entra tenant. The client secret is encrypted at rest.",
-      proxmox: "Deep Agent connects to your Proxmox VE server with a scoped API token (encrypted at rest) and uses it to create VMs via Terraform.",
+      azure:
+        "Deep Agent signs in as a service principal in your Entra tenant. The client secret is encrypted at rest.",
+      proxmox:
+        "Deep Agent connects to your Proxmox VE server with a scoped API token (encrypted at rest) and uses it to create VMs via Terraform.",
     }),
     [],
   );
@@ -481,11 +503,16 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
             <div className="row gap-2 dda-wizard-iam-note">
               <Icon name="shield" size={16} style={{ flex: "none" }} />
               <span style={{ fontSize: 12.5 }}>
-                Connect with your Microsoft account — pick the account, approve access, and Deep Agent
-                stores an encrypted refresh token (no client secret to manage).
+                Connect with your Microsoft account — pick the account, approve access, and Deep
+                Agent stores an encrypted refresh token (no client secret to manage).
               </span>
             </div>
-            <Btn variant="primary" icon="cloud" loading={azureBusy} onClick={() => openOAuthPopup("azure")}>
+            <Btn
+              variant="primary"
+              icon="cloud"
+              loading={azureBusy}
+              onClick={() => openOAuthPopup("azure")}
+            >
               Sign in with Microsoft
             </Btn>
           </div>
@@ -496,11 +523,16 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
             <div className="row gap-2 dda-wizard-iam-note">
               <Icon name="shield" size={16} style={{ flex: "none" }} />
               <span style={{ fontSize: 12.5 }}>
-                Connect with your Google account — pick the account, approve cloud-platform access, and Deep
-                Agent stores an encrypted refresh token (no service-account key to manage).
+                Connect with your Google account — pick the account, approve cloud-platform access,
+                and Deep Agent stores an encrypted refresh token (no service-account key to manage).
               </span>
             </div>
-            <Btn variant="primary" icon="cloud" loading={azureBusy} onClick={() => openOAuthPopup("gcp")}>
+            <Btn
+              variant="primary"
+              icon="cloud"
+              loading={azureBusy}
+              onClick={() => openOAuthPopup("gcp")}
+            >
               Sign in with Google
             </Btn>
           </div>
@@ -512,8 +544,8 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
             <div className="row gap-2 dda-wizard-iam-note">
               <Icon name="shield" size={16} style={{ flex: "none" }} />
               <span style={{ fontSize: 12.5 }}>
-                Connect a self-hosted Proxmox VE server with an API token. The token secret is encrypted at
-                rest; DeepAgent uses it to create VMs via Terraform.
+                Connect a self-hosted Proxmox VE server with an API token. The token secret is
+                encrypted at rest; DeepAgent uses it to create VMs via Terraform.
               </span>
             </div>
             {PROVIDER_FIELDS.proxmox.fields.map((f) => (
@@ -546,7 +578,9 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
             }
           >
             {envsQuery.isLoading ? (
-              <span className="muted" style={{ fontSize: 13 }}>Loading…</span>
+              <span className="muted" style={{ fontSize: 13 }}>
+                Loading…
+              </span>
             ) : envsQuery.data && envsQuery.data.length > 0 ? (
               <div className="row gap-2 wrap">
                 {envsQuery.data.map((env) => {
@@ -559,12 +593,21 @@ export function ConnectCloudModal({ open, onOpenChange, projectSlug, initialKind
                       key={env.id}
                       className={`chip ${on ? "active" : ""}`}
                       onClick={() => toggleEnv(env.id)}
-                      title={alreadyBound ? "Already bound to another provider — this will replace it." : ""}
+                      title={
+                        alreadyBound
+                          ? "Already bound to another provider — this will replace it."
+                          : ""
+                      }
                     >
-                      <span className={`dot ${tone}`} style={{ boxShadow: "none", width: 6, height: 6 }} />
+                      <span
+                        className={`dot ${tone}`}
+                        style={{ boxShadow: "none", width: 6, height: 6 }}
+                      />
                       {env.name}
                       {alreadyBound && (
-                        <span className="faint" style={{ marginLeft: 6, fontSize: 11 }}>· bound</span>
+                        <span className="faint" style={{ marginLeft: 6, fontSize: 11 }}>
+                          · bound
+                        </span>
                       )}
                     </button>
                   );

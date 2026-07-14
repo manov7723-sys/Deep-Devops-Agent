@@ -39,20 +39,29 @@ export function UsageClient() {
         }
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
         {METRICS.map((m) => {
           const used = u ? m.used(u) : null;
           const limit = u ? m.limit(u) : null;
           const p = used !== null ? pct(used, limit) : 0;
           return (
             <div key={m.label} className="card card-pad col gap-3">
-              <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{m.label}</span>
+              <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>
+                {m.label}
+              </span>
               <div className="row gap-1" style={{ alignItems: "baseline" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }} className="tnum">
                   {used !== null ? used.toLocaleString() : "—"}
                 </span>
                 <span className="faint">
-                  / {used !== null ? (typeof limit === "number" ? limit.toLocaleString() : "∞") : "—"}
+                  /{" "}
+                  {used !== null ? (typeof limit === "number" ? limit.toLocaleString() : "∞") : "—"}
                 </span>
               </div>
               <Progress value={p} tone={toneFor(p)} ariaLabel={`${m.label} usage`} />

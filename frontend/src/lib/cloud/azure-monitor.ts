@@ -18,7 +18,10 @@ import { listAksClusters } from "@/lib/cloud/azure-arm";
 
 /** Best-effort AKS cluster name from the env's kubeconfig (AKS current-context = cluster name). */
 export async function aksClusterFromEnv(envId: string): Promise<string | null> {
-  const env = await prisma.env.findUnique({ where: { id: envId }, select: { kubeconfigRef: true } });
+  const env = await prisma.env.findUnique({
+    where: { id: envId },
+    select: { kubeconfigRef: true },
+  });
   if (!env?.kubeconfigRef) return null;
   try {
     const kc = decryptSecret(env.kubeconfigRef);
@@ -33,7 +36,10 @@ const ARM = "https://management.azure.com";
 
 export type AzureMetricKey = "cpu" | "memory" | "disk";
 
-export const AZURE_METRICS: Record<AzureMetricKey, { label: string; metric: string; threshold: number }> = {
+export const AZURE_METRICS: Record<
+  AzureMetricKey,
+  { label: string; metric: string; threshold: number }
+> = {
   cpu: { label: "Node CPU %", metric: "node_cpu_usage_percentage", threshold: 80 },
   memory: { label: "Node memory %", metric: "node_memory_working_set_percentage", threshold: 80 },
   disk: { label: "Node disk %", metric: "node_disk_usage_percentage", threshold: 80 },
@@ -46,11 +52,18 @@ async function arm(token: string, path: string, method = "GET", body?: unknown):
   try {
     res = await fetch(`${ARM}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    return { ok: false, error: `Network error reaching Azure: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Azure: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   const text = await res.text();
   let data: Record<string, unknown> = {};
@@ -60,7 +73,8 @@ async function arm(token: string, path: string, method = "GET", body?: unknown):
     data = { raw: text };
   }
   if (!res.ok) {
-    const msg = (data?.error as { message?: string })?.message || text.slice(0, 300) || `HTTP ${res.status}`;
+    const msg =
+      (data?.error as { message?: string })?.message || text.slice(0, 300) || `HTTP ${res.status}`;
     return { ok: false, error: msg };
   }
   return { ok: true, data };
@@ -71,17 +85,27 @@ async function arm(token: string, path: string, method = "GET", body?: unknown):
  * subscription (required for action groups / metric alerts). Idempotent —
  * triggers registration if needed and waits until it's "Registered".
  */
-async function ensureInsightsRegistered(token: string, subscription: string): Promise<{ ok: boolean; error?: string }> {
+async function ensureInsightsRegistered(
+  token: string,
+  subscription: string,
+): Promise<{ ok: boolean; error?: string }> {
   const path = `/subscriptions/${subscription}/providers/Microsoft.Insights?api-version=2021-04-01`;
   const cur = await arm(token, path);
   if (!cur.ok) return { ok: false, error: cur.error };
   const state = (cur.data as { registrationState?: string }).registrationState;
   if (state === "Registered") return { ok: true };
 
-  const reg = await arm(token, `/subscriptions/${subscription}/providers/Microsoft.Insights/register?api-version=2021-04-01`, "POST");
+  const reg = await arm(
+    token,
+    `/subscriptions/${subscription}/providers/Microsoft.Insights/register?api-version=2021-04-01`,
+    "POST",
+  );
   if (!reg.ok) {
     if (/authorization|forbidden|does not have permission/i.test(reg.error)) {
-      return { ok: false, error: `Can't auto-register Microsoft.Insights — the app's identity lacks permission. Register it once in the Azure portal (Subscription → Resource providers → Microsoft.Insights → Register), or grant the SP Contributor. (${reg.error})` };
+      return {
+        ok: false,
+        error: `Can't auto-register Microsoft.Insights — the app's identity lacks permission. Register it once in the Azure portal (Subscription → Resource providers → Microsoft.Insights → Register), or grant the SP Contributor. (${reg.error})`,
+      };
     }
     return { ok: false, error: `Could not register Microsoft.Insights: ${reg.error}` };
   }
@@ -89,30 +113,57 @@ async function ensureInsightsRegistered(token: string, subscription: string): Pr
   for (let i = 0; i < 18; i++) {
     await new Promise((r) => setTimeout(r, 5_000));
     const c = await arm(token, path);
-    if (c.ok && (c.data as { registrationState?: string }).registrationState === "Registered") return { ok: true };
+    if (c.ok && (c.data as { registrationState?: string }).registrationState === "Registered")
+      return { ok: true };
   }
-  return { ok: false, error: "Microsoft.Insights is still registering — wait a minute and click Set up alarms again." };
+  return {
+    ok: false,
+    error: "Microsoft.Insights is still registering — wait a minute and click Set up alarms again.",
+  };
 }
 
 /** Resolve an env's Azure subscription + find the AKS cluster's resource group + region. */
 async function resolveAks(cloudProviderId: string, clusterName: string, resourceGroup?: string) {
   const tok = await getAzureAccessToken(cloudProviderId);
   if (!tok.ok) return { ok: false as const, error: tok.error };
-  const cp = await prisma.cloudProvider.findUnique({ where: { id: cloudProviderId }, select: { accountRef: true } });
+  const cp = await prisma.cloudProvider.findUnique({
+    where: { id: cloudProviderId },
+    select: { accountRef: true },
+  });
   const subscription = cp?.accountRef?.trim();
-  if (!subscription) return { ok: false as const, error: "No Azure subscription on the cloud provider." };
+  if (!subscription)
+    return { ok: false as const, error: "No Azure subscription on the cloud provider." };
 
   const list = await listAksClusters(tok.accessToken, subscription);
   if (!list.ok) return { ok: false as const, error: list.error };
   const cluster = list.clusters.find(
-    (c) => c.name === clusterName && (!resourceGroup || c.resourceGroup.toLowerCase() === resourceGroup.toLowerCase()),
+    (c) =>
+      c.name === clusterName &&
+      (!resourceGroup || c.resourceGroup.toLowerCase() === resourceGroup.toLowerCase()),
   );
-  if (!cluster) return { ok: false as const, error: `AKS cluster "${clusterName}" not found in subscription ${subscription}.` };
+  if (!cluster)
+    return {
+      ok: false as const,
+      error: `AKS cluster "${clusterName}" not found in subscription ${subscription}.`,
+    };
   const aksId = `/subscriptions/${subscription}/resourceGroups/${cluster.resourceGroup}/providers/Microsoft.ContainerService/managedClusters/${clusterName}`;
-  return { ok: true as const, token: tok.accessToken, subscription, resourceGroup: cluster.resourceGroup, location: cluster.location, aksId };
+  return {
+    ok: true as const,
+    token: tok.accessToken,
+    subscription,
+    resourceGroup: cluster.resourceGroup,
+    location: cluster.location,
+    aksId,
+  };
 }
 
-export type AzureAlarmResult = { key: AzureMetricKey; label: string; name: string; ok: boolean; error?: string };
+export type AzureAlarmResult = {
+  key: AzureMetricKey;
+  label: string;
+  name: string;
+  ok: boolean;
+  error?: string;
+};
 export type AzureSetupResult = {
   ok: boolean;
   clusterName: string;
@@ -134,12 +185,28 @@ export async function setupAzureAksAlarms(opts: {
   thresholdPercents?: Partial<Record<AzureMetricKey, number>>;
 }): Promise<AzureSetupResult> {
   const r = await resolveAks(opts.cloudProviderId, opts.clusterName, opts.resourceGroup);
-  if (!r.ok) return { ok: false, clusterName: opts.clusterName, emailWired: false, alarms: [], error: r.error };
+  if (!r.ok)
+    return {
+      ok: false,
+      clusterName: opts.clusterName,
+      emailWired: false,
+      alarms: [],
+      error: r.error,
+    };
   const { token, subscription, resourceGroup, aksId } = r;
 
   // Action groups + metric alerts require the Microsoft.Insights provider.
   const reg = await ensureInsightsRegistered(token, subscription);
-  if (!reg.ok) return { ok: false, clusterName: opts.clusterName, resourceGroup, subscription, emailWired: false, alarms: [], error: reg.error };
+  if (!reg.ok)
+    return {
+      ok: false,
+      clusterName: opts.clusterName,
+      resourceGroup,
+      subscription,
+      emailWired: false,
+      alarms: [],
+      error: reg.error,
+    };
 
   let actionGroupId: string | undefined;
   if (opts.email) {
@@ -157,7 +224,16 @@ export async function setupAzureAksAlarms(opts: {
         },
       },
     );
-    if (!ag.ok) return { ok: false, clusterName: opts.clusterName, resourceGroup, subscription, emailWired: false, alarms: [], error: `Action group failed: ${ag.error}` };
+    if (!ag.ok)
+      return {
+        ok: false,
+        clusterName: opts.clusterName,
+        resourceGroup,
+        subscription,
+        emailWired: false,
+        alarms: [],
+        error: `Action group failed: ${ag.error}`,
+      };
     actionGroupId = (ag.data as { id?: string }).id;
   }
 
@@ -165,7 +241,10 @@ export async function setupAzureAksAlarms(opts: {
   for (const key of opts.metrics) {
     // User-configured threshold overrides the default for this metric.
     const base = AZURE_METRICS[key];
-    const def = opts.thresholdPercents?.[key] != null ? { ...base, threshold: opts.thresholdPercents[key]! } : base;
+    const def =
+      opts.thresholdPercents?.[key] != null
+        ? { ...base, threshold: opts.thresholdPercents[key]! }
+        : base;
     const name = `dda-aks-${opts.clusterName}-${key}`.slice(0, 250);
     const put = await arm(
       token,
@@ -210,7 +289,14 @@ export async function setupAzureAksAlarms(opts: {
     alarms.push({ key, label: def.label, name, ok: put.ok, error: put.ok ? undefined : put.error });
   }
 
-  return { ok: alarms.some((a) => a.ok), clusterName: opts.clusterName, resourceGroup, subscription, emailWired: !!actionGroupId, alarms };
+  return {
+    ok: alarms.some((a) => a.ok),
+    clusterName: opts.clusterName,
+    resourceGroup,
+    subscription,
+    emailWired: !!actionGroupId,
+    alarms,
+  };
 }
 
 export type AzureAlarmInfo = { name: string; metric: string; enabled: boolean };
@@ -223,13 +309,28 @@ export async function listAzureAksAlarms(
 ): Promise<{ ok: true; alarms: AzureAlarmInfo[] } | { ok: false; error: string }> {
   const r = await resolveAks(cloudProviderId, clusterName, resourceGroup);
   if (!r.ok) return { ok: false, error: r.error };
-  const list = await arm(r.token, `/subscriptions/${r.subscription}/resourceGroups/${r.resourceGroup}/providers/microsoft.insights/metricAlerts?api-version=2018-03-01`);
+  const list = await arm(
+    r.token,
+    `/subscriptions/${r.subscription}/resourceGroups/${r.resourceGroup}/providers/microsoft.insights/metricAlerts?api-version=2018-03-01`,
+  );
   if (!list.ok) return { ok: false, error: list.error };
-  const value = ((list.data as { value?: Array<{ name?: string; properties?: { enabled?: boolean; criteria?: { allOf?: Array<{ metricName?: string }> } } }> }).value) ?? [];
+  const value =
+    (
+      list.data as {
+        value?: Array<{
+          name?: string;
+          properties?: { enabled?: boolean; criteria?: { allOf?: Array<{ metricName?: string }> } };
+        }>;
+      }
+    ).value ?? [];
   const prefix = `dda-aks-${clusterName}-`;
   const alarms = value
     .filter((a) => (a.name ?? "").startsWith(prefix))
-    .map((a) => ({ name: a.name ?? "", metric: a.properties?.criteria?.allOf?.[0]?.metricName ?? "", enabled: a.properties?.enabled ?? false }));
+    .map((a) => ({
+      name: a.name ?? "",
+      metric: a.properties?.criteria?.allOf?.[0]?.metricName ?? "",
+      enabled: a.properties?.enabled ?? false,
+    }));
   return { ok: true, alarms };
 }
 
@@ -264,10 +365,20 @@ export async function describeAksAlertStates(
   if (!rulesRes.ok) return { ok: false, error: rulesRes.error };
   const prefix = `dda-aks-${clusterName}-`;
   const rules = (
-    ((rulesRes.data as { value?: Array<{ name?: string; properties?: { criteria?: { allOf?: Array<{ metricName?: string }> } } }> }).value) ?? []
+    (
+      rulesRes.data as {
+        value?: Array<{
+          name?: string;
+          properties?: { criteria?: { allOf?: Array<{ metricName?: string }> } };
+        }>;
+      }
+    ).value ?? []
   )
     .filter((a) => (a.name ?? "").startsWith(prefix))
-    .map((a) => ({ name: a.name ?? "", metric: a.properties?.criteria?.allOf?.[0]?.metricName ?? "" }));
+    .map((a) => ({
+      name: a.name ?? "",
+      metric: a.properties?.criteria?.allOf?.[0]?.metricName ?? "",
+    }));
 
   // Currently-fired alert instances in the subscription (last day). If this
   // call fails we treat all rules as OK rather than erroring the whole sync.
@@ -278,7 +389,15 @@ export async function describeAksAlertStates(
   );
   if (firedRes.ok) {
     const alerts =
-      ((firedRes.data as { value?: Array<{ properties?: { essentials?: { alertRule?: string; monitorCondition?: string; alertState?: string } } }> }).value) ?? [];
+      (
+        firedRes.data as {
+          value?: Array<{
+            properties?: {
+              essentials?: { alertRule?: string; monitorCondition?: string; alertState?: string };
+            };
+          }>;
+        }
+      ).value ?? [];
     for (const al of alerts) {
       const e = al.properties?.essentials;
       if (e?.monitorCondition === "Fired" && e.alertState !== "Closed") {

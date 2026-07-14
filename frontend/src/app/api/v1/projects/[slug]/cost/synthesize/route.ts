@@ -33,7 +33,8 @@ const SECURITY_DIRECT_COST_CENTS = 12_000; // per CloudSecurityScope baseline
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
 
   const projectId = gate.access.project.id;
   const body = (await req.json().catch(() => ({}))) as {
@@ -119,7 +120,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     })
   )?.budgetCents;
   const budgetCents =
-    body.budgetCents ?? (previousBudget && previousBudget > total ? previousBudget : Math.round(projection * 1.2));
+    body.budgetCents ??
+    (previousBudget && previousBudget > total ? previousBudget : Math.round(projection * 1.2));
 
   const snapshot = await upsertSnapshot({
     projectId,
@@ -177,7 +179,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
  * forecast. If we're called on the 1st, just return the actual.
  */
 function projectFullMonth(mtdCents: number, periodStart: Date, now: Date): number {
-  const monthEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 1));
+  const monthEnd = new Date(
+    Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 1),
+  );
   const daysInMonth = (monthEnd.getTime() - periodStart.getTime()) / (24 * 60 * 60 * 1000);
   const daysElapsed = Math.max(
     1,

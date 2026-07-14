@@ -58,7 +58,9 @@ export function AdminAddonsClient() {
             <Avatar name={row.original.user} size={30} />
             <div className="col" style={{ lineHeight: 1.3 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>{row.original.user}</span>
-              <span className="faint" style={{ fontSize: 11.5 }}>{row.original.email}</span>
+              <span className="faint" style={{ fontSize: 11.5 }}>
+                {row.original.email}
+              </span>
             </div>
           </div>
         ),
@@ -66,7 +68,11 @@ export function AdminAddonsClient() {
       {
         id: "price",
         header: "Price",
-        cell: ({ row }) => <span className="tnum" style={{ fontWeight: 700 }}>{row.original.price}</span>,
+        cell: ({ row }) => (
+          <span className="tnum" style={{ fontWeight: 700 }}>
+            {row.original.price}
+          </span>
+        ),
       },
       {
         id: "when",

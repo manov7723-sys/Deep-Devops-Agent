@@ -55,7 +55,9 @@ export function ProjectSwitcher({ activeSlug }: ProjectSwitcherProps) {
             style={{ flex: 1, color: "inherit" }}
           >
             <ProjectAvatar name={p.name} hue={p.colorHue} />
-            <span className="grow" style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</span>
+            <span className="grow" style={{ fontSize: 13, fontWeight: 600 }}>
+              {p.name}
+            </span>
             {p.id === active.id && (
               <Icon name="check" size={15} style={{ color: "var(--accent)" }} />
             )}
@@ -64,7 +66,9 @@ export function ProjectSwitcher({ activeSlug }: ProjectSwitcherProps) {
       ))}
       <MenuSeparator />
       <MenuItem icon="plus">
-        <Link href={"/u/projects" as Route} style={{ color: "inherit" }}>New project</Link>
+        <Link href={"/u/projects" as Route} style={{ color: "inherit" }}>
+          New project
+        </Link>
       </MenuItem>
     </Menu>
   );

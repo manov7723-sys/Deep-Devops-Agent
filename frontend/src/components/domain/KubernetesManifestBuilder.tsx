@@ -64,7 +64,9 @@ export function KubernetesManifestBuilder({ slug }: { slug: string }) {
   }, [resources, apiVersion]);
 
   const namespaced = useMemo(() => {
-    const r = resources.find((x) => x.kind === kind && (!apiVersion || x.apiVersion === apiVersion));
+    const r = resources.find(
+      (x) => x.kind === kind && (!apiVersion || x.apiVersion === apiVersion),
+    );
     if (r) return r.namespaced;
     return getManifestKind(kind)?.namespaced ?? true;
   }, [resources, kind, apiVersion]);
@@ -80,7 +82,8 @@ export function KubernetesManifestBuilder({ slug }: { slug: string }) {
     if (!kind) return;
     setValues((prev) => {
       const next = { ...prev };
-      for (const f of fields) if (next[f.name] === undefined && f.default !== undefined) next[f.name] = f.default;
+      for (const f of fields)
+        if (next[f.name] === undefined && f.default !== undefined) next[f.name] = f.default;
       return next;
     });
   }, [kind, fields]);
@@ -108,7 +111,9 @@ export function KubernetesManifestBuilder({ slug }: { slug: string }) {
   const [path, setPath] = useState("");
   const [branch, setBranch] = useState("");
   const [message, setMessage] = useState("");
-  const [touched, setTouched] = useState<{ path?: boolean; branch?: boolean; message?: boolean }>({});
+  const [touched, setTouched] = useState<{ path?: boolean; branch?: boolean; message?: boolean }>(
+    {},
+  );
   const [result, setResult] = useState<{ ok: boolean; message: string; url?: string } | null>(null);
 
   useEffect(() => {
@@ -127,9 +132,17 @@ export function KubernetesManifestBuilder({ slug }: { slug: string }) {
 
   // Required-field validation for the chosen kind.
   // When the YAML is hand-edited, trust it over the form's required-field check.
-  const missing = yamlEdited ? [] : fields.filter((f) => f.required && !(values[f.name] ?? "").trim()).map((f) => f.label);
+  const missing = yamlEdited
+    ? []
+    : fields.filter((f) => f.required && !(values[f.name] ?? "").trim()).map((f) => f.label);
   const canCommit =
-    !!repoFullName && !!path.trim() && !!branch.trim() && !!message.trim() && !!yaml.trim() && missing.length === 0 && !commit.isPending;
+    !!repoFullName &&
+    !!path.trim() &&
+    !!branch.trim() &&
+    !!message.trim() &&
+    !!yaml.trim() &&
+    missing.length === 0 &&
+    !commit.isPending;
 
   async function runCommit() {
     setResult(null);
@@ -167,170 +180,275 @@ export function KubernetesManifestBuilder({ slug }: { slug: string }) {
       </Block.Header>
 
       <Block.Body>
-      {!envs || envs.length === 0 ? (
-        <span className="muted" style={{ fontSize: 13 }}>Create an environment first to target a cluster.</span>
-      ) : (
-        <div className="col gap-4">
-          {/* Row: env + apiVersion + kind */}
-          <div className="row gap-3 wrap">
-            <div style={{ minWidth: 180 }}>
-              <Field label="Environment" required hint="Cluster to read kinds from.">
-                <Select value={envKey} onValueChange={(v) => { setEnvKey(v); }} ariaLabel="Environment"
-                  options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))} />
-              </Field>
-            </div>
-            <div style={{ minWidth: 200 }}>
-              <Field
-                label="API version"
-                required
-                hint={versionsQ.data?.source === "builtin" ? "Built-in list (cluster not reachable)." : "Live from cluster."}
-              >
-                <Select
-                  value={apiVersion}
-                  onValueChange={(v) => { setApiVersion(v); setKind(""); setYamlEdited(false); }}
-                  ariaLabel="API version"
-                  options={[
-                    { value: "", label: versionsQ.isLoading ? "Loading…" : "Select…" },
-                    ...apiVersions.map((a) => ({ value: a, label: a })),
-                  ]}
-                />
-              </Field>
-            </div>
-            <div style={{ minWidth: 200 }}>
-              <Field
-                label="Kind"
-                required
-                hint={resourcesQ.data?.source === "builtin" ? "Built-in list (cluster not reachable)." : "Live from cluster."}
-              >
-                <Select
-                  value={kind}
-                  onValueChange={(v) => { setKind(v); setResult(null); setYamlEdited(false); }}
-                  ariaLabel="Kind"
-                  options={[
-                    { value: "", label: !apiVersion ? "Pick API version first" : resourcesQ.isLoading ? "Loading…" : "Select…" },
-                    ...kindsForVersion.map((r) => ({ value: r.kind, label: r.kind })),
-                  ]}
-                />
-              </Field>
-            </div>
-          </div>
-
-          {/* Per-kind fields */}
-          {kind && (
-            <div className="col gap-3">
-              <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Badge tone="info">{apiVersion}/{kind}</Badge>
-                <Badge tone={namespaced ? "default" : "warn"}>{namespaced ? "namespaced" : "cluster-scoped"}</Badge>
-                {!getManifestKind(kind) && (
-                  <span className="faint" style={{ fontSize: 12 }}>No curated template — generating a minimal skeleton.</span>
-                )}
+        {!envs || envs.length === 0 ? (
+          <span className="muted" style={{ fontSize: 13 }}>
+            Create an environment first to target a cluster.
+          </span>
+        ) : (
+          <div className="col gap-4">
+            {/* Row: env + apiVersion + kind */}
+            <div className="row gap-3 wrap">
+              <div style={{ minWidth: 180 }}>
+                <Field label="Environment" required hint="Cluster to read kinds from.">
+                  <Select
+                    value={envKey}
+                    onValueChange={(v) => {
+                      setEnvKey(v);
+                    }}
+                    ariaLabel="Environment"
+                    options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))}
+                  />
+                </Field>
               </div>
-              <div className="row gap-3 wrap">
-                {fields.map((f) => (
-                  <div key={f.name} style={{ minWidth: f.type === "keyvalue" ? 360 : 220, flex: f.type === "keyvalue" ? "1 1 360px" : "0 1 240px" }}>
-                    <ManifestFieldInput field={f} value={values[f.name] ?? ""} onChange={(v) => setVal(f.name, v)} />
-                  </div>
-                ))}
+              <div style={{ minWidth: 200 }}>
+                <Field
+                  label="API version"
+                  required
+                  hint={
+                    versionsQ.data?.source === "builtin"
+                      ? "Built-in list (cluster not reachable)."
+                      : "Live from cluster."
+                  }
+                >
+                  <Select
+                    value={apiVersion}
+                    onValueChange={(v) => {
+                      setApiVersion(v);
+                      setKind("");
+                      setYamlEdited(false);
+                    }}
+                    ariaLabel="API version"
+                    options={[
+                      { value: "", label: versionsQ.isLoading ? "Loading…" : "Select…" },
+                      ...apiVersions.map((a) => ({ value: a, label: a })),
+                    ]}
+                  />
+                </Field>
+              </div>
+              <div style={{ minWidth: 200 }}>
+                <Field
+                  label="Kind"
+                  required
+                  hint={
+                    resourcesQ.data?.source === "builtin"
+                      ? "Built-in list (cluster not reachable)."
+                      : "Live from cluster."
+                  }
+                >
+                  <Select
+                    value={kind}
+                    onValueChange={(v) => {
+                      setKind(v);
+                      setResult(null);
+                      setYamlEdited(false);
+                    }}
+                    ariaLabel="Kind"
+                    options={[
+                      {
+                        value: "",
+                        label: !apiVersion
+                          ? "Pick API version first"
+                          : resourcesQ.isLoading
+                            ? "Loading…"
+                            : "Select…",
+                      },
+                      ...kindsForVersion.map((r) => ({ value: r.kind, label: r.kind })),
+                    ]}
+                  />
+                </Field>
               </div>
             </div>
-          )}
 
-          {/* Editable YAML — starts from the template, fully editable before commit */}
-          {(generated || yaml) && (
-            <Field
-              label="Manifest (editable)"
-              hint={
-                yamlEdited
-                  ? "You've edited the YAML — field changes above won't overwrite it. Reset to re-sync."
-                  : "Production-style YAML. Edit it freely; it commits exactly as shown."
-              }
-            >
-              <div className="col gap-2">
-                <Textarea
-                  className="mono"
-                  rows={18}
-                  value={yaml}
-                  spellCheck={false}
-                  onChange={(e) => { setYamlDraft(e.target.value); setYamlEdited(true); }}
-                  style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: "pre", overflowWrap: "normal", overflowX: "auto" }}
-                />
-                {yamlEdited && (
-                  <div className="row gap-2" style={{ alignItems: "center" }}>
-                    <Btn
-                      variant="ghost"
-                      size="sm"
-                      icon="refresh"
-                      onClick={() => { setYamlEdited(false); setYamlDraft(generated); }}
-                    >
-                      Reset to template
-                    </Btn>
-                    <span className="faint" style={{ fontSize: 11.5 }}>Discards your manual edits.</span>
-                  </div>
-                )}
-              </div>
-            </Field>
-          )}
-
-          {/* Commit target */}
-          {yaml && (
-            <div className="col gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-              <span className="text-sm" style={{ fontWeight: 600 }}>Commit &amp; open PR</span>
-              {!repos || repos.length === 0 ? (
-                <span className="muted" style={{ fontSize: 13 }}>Attach a repo to this project first (CI/CD &amp; Repos tab).</span>
-              ) : (
-                <>
-                  <div className="row gap-3 wrap">
-                    <div style={{ minWidth: 240 }}>
-                      <Field label="Repository" required>
-                        <Select value={repoFullName} onValueChange={setRepoFullName} ariaLabel="Repository"
-                          options={repos.map((r) => ({ value: r.fullName, label: r.fullName }))} />
-                      </Field>
-                    </div>
-                    <div style={{ minWidth: 240, flex: "1 1 280px" }}>
-                      <Field label="File path" required>
-                        <Input className="mono" value={path}
-                          onChange={(e) => { setPath(e.target.value); setTouched((t) => ({ ...t, path: true })); }} />
-                      </Field>
-                    </div>
-                  </div>
-                  <div className="row gap-3 wrap">
-                    <div style={{ minWidth: 240 }}>
-                      <Field label="Branch" required hint="Created from the default branch.">
-                        <Input className="mono" value={branch}
-                          onChange={(e) => { setBranch(e.target.value); setTouched((t) => ({ ...t, branch: true })); }} />
-                      </Field>
-                    </div>
-                    <div style={{ minWidth: 240, flex: "1 1 280px" }}>
-                      <Field label="Commit message" required>
-                        <Input value={message}
-                          onChange={(e) => { setMessage(e.target.value); setTouched((t) => ({ ...t, message: true })); }} />
-                      </Field>
-                    </div>
-                  </div>
-                  {missing.length > 0 && (
-                    <span style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }}>
-                      Fill required field{missing.length > 1 ? "s" : ""}: {missing.join(", ")}.
+            {/* Per-kind fields */}
+            {kind && (
+              <div className="col gap-3">
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  <Badge tone="info">
+                    {apiVersion}/{kind}
+                  </Badge>
+                  <Badge tone={namespaced ? "default" : "warn"}>
+                    {namespaced ? "namespaced" : "cluster-scoped"}
+                  </Badge>
+                  {!getManifestKind(kind) && (
+                    <span className="faint" style={{ fontSize: 12 }}>
+                      No curated template — generating a minimal skeleton.
                     </span>
                   )}
-                  <div className="row gap-2" style={{ alignItems: "center" }}>
-                    <Btn variant="primary" icon="github" loading={commit.isPending} disabled={!canCommit} onClick={runCommit}>
-                      {commit.isPending ? "Opening PR…" : "Commit & open PR"}
-                    </Btn>
-                    {result && (
-                      <span style={{ fontSize: 13, color: result.ok ? "var(--ok)" : "var(--danger)" }}>
-                        {result.ok ? "✓ " : "✗ "}{result.message}{" "}
-                        {result.url && (
-                          <a href={result.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>View PR</a>
-                        )}
+                </div>
+                <div className="row gap-3 wrap">
+                  {fields.map((f) => (
+                    <div
+                      key={f.name}
+                      style={{
+                        minWidth: f.type === "keyvalue" ? 360 : 220,
+                        flex: f.type === "keyvalue" ? "1 1 360px" : "0 1 240px",
+                      }}
+                    >
+                      <ManifestFieldInput
+                        field={f}
+                        value={values[f.name] ?? ""}
+                        onChange={(v) => setVal(f.name, v)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Editable YAML — starts from the template, fully editable before commit */}
+            {(generated || yaml) && (
+              <Field
+                label="Manifest (editable)"
+                hint={
+                  yamlEdited
+                    ? "You've edited the YAML — field changes above won't overwrite it. Reset to re-sync."
+                    : "Production-style YAML. Edit it freely; it commits exactly as shown."
+                }
+              >
+                <div className="col gap-2">
+                  <Textarea
+                    className="mono"
+                    rows={18}
+                    value={yaml}
+                    spellCheck={false}
+                    onChange={(e) => {
+                      setYamlDraft(e.target.value);
+                      setYamlEdited(true);
+                    }}
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      whiteSpace: "pre",
+                      overflowWrap: "normal",
+                      overflowX: "auto",
+                    }}
+                  />
+                  {yamlEdited && (
+                    <div className="row gap-2" style={{ alignItems: "center" }}>
+                      <Btn
+                        variant="ghost"
+                        size="sm"
+                        icon="refresh"
+                        onClick={() => {
+                          setYamlEdited(false);
+                          setYamlDraft(generated);
+                        }}
+                      >
+                        Reset to template
+                      </Btn>
+                      <span className="faint" style={{ fontSize: 11.5 }}>
+                        Discards your manual edits.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </Field>
+            )}
+
+            {/* Commit target */}
+            {yaml && (
+              <div
+                className="col gap-3"
+                style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}
+              >
+                <span className="text-sm" style={{ fontWeight: 600 }}>
+                  Commit &amp; open PR
+                </span>
+                {!repos || repos.length === 0 ? (
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    Attach a repo to this project first (CI/CD &amp; Repos tab).
+                  </span>
+                ) : (
+                  <>
+                    <div className="row gap-3 wrap">
+                      <div style={{ minWidth: 240 }}>
+                        <Field label="Repository" required>
+                          <Select
+                            value={repoFullName}
+                            onValueChange={setRepoFullName}
+                            ariaLabel="Repository"
+                            options={repos.map((r) => ({ value: r.fullName, label: r.fullName }))}
+                          />
+                        </Field>
+                      </div>
+                      <div style={{ minWidth: 240, flex: "1 1 280px" }}>
+                        <Field label="File path" required>
+                          <Input
+                            className="mono"
+                            value={path}
+                            onChange={(e) => {
+                              setPath(e.target.value);
+                              setTouched((t) => ({ ...t, path: true }));
+                            }}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                    <div className="row gap-3 wrap">
+                      <div style={{ minWidth: 240 }}>
+                        <Field label="Branch" required hint="Created from the default branch.">
+                          <Input
+                            className="mono"
+                            value={branch}
+                            onChange={(e) => {
+                              setBranch(e.target.value);
+                              setTouched((t) => ({ ...t, branch: true }));
+                            }}
+                          />
+                        </Field>
+                      </div>
+                      <div style={{ minWidth: 240, flex: "1 1 280px" }}>
+                        <Field label="Commit message" required>
+                          <Input
+                            value={message}
+                            onChange={(e) => {
+                              setMessage(e.target.value);
+                              setTouched((t) => ({ ...t, message: true }));
+                            }}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                    {missing.length > 0 && (
+                      <span style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }}>
+                        Fill required field{missing.length > 1 ? "s" : ""}: {missing.join(", ")}.
                       </span>
                     )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+                    <div className="row gap-2" style={{ alignItems: "center" }}>
+                      <Btn
+                        variant="primary"
+                        icon="github"
+                        loading={commit.isPending}
+                        disabled={!canCommit}
+                        onClick={runCommit}
+                      >
+                        {commit.isPending ? "Opening PR…" : "Commit & open PR"}
+                      </Btn>
+                      {result && (
+                        <span
+                          style={{ fontSize: 13, color: result.ok ? "var(--ok)" : "var(--danger)" }}
+                        >
+                          {result.ok ? "✓ " : "✗ "}
+                          {result.message}{" "}
+                          {result.url && (
+                            <a
+                              href={result.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: "var(--accent)" }}
+                            >
+                              View PR
+                            </a>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </Block.Body>
     </Block>
   );
@@ -360,14 +478,24 @@ function ManifestFieldInput({
   if (field.type === "toggle") {
     return (
       <Field label={field.label} hint={field.hint}>
-        <Toggle checked={(value || field.default) !== "false"} onCheckedChange={(c) => onChange(c ? "true" : "false")} ariaLabel={field.label} />
+        <Toggle
+          checked={(value || field.default) !== "false"}
+          onCheckedChange={(c) => onChange(c ? "true" : "false")}
+          ariaLabel={field.label}
+        />
       </Field>
     );
   }
   if (field.type === "keyvalue") {
     return (
       <Field label={field.label} hint={field.hint ?? "One KEY=VALUE per line"}>
-        <Textarea rows={3} className="mono" value={value} onChange={(e) => onChange(e.target.value)} placeholder={"KEY=value\nANOTHER=value"} />
+        <Textarea
+          rows={3}
+          className="mono"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={"KEY=value\nANOTHER=value"}
+        />
       </Field>
     );
   }

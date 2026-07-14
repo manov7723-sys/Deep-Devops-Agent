@@ -67,10 +67,7 @@ export async function computeAdminKpis(): Promise<AdminKpiRow> {
     }),
     prisma.subscription.count({
       where: {
-        OR: [
-          { canceledAt: null },
-          { canceledAt: { gt: now } },
-        ],
+        OR: [{ canceledAt: null }, { canceledAt: { gt: now } }],
         createdAt: { lt: cutoff30 },
       },
     }),
@@ -340,8 +337,7 @@ export async function listAdminInvoicesDisplay(): Promise<AdminInvoiceDisplayRow
 // ──────────────────────────────────────────────────────────────────
 
 export type GrantTokensResult =
-  | { ok: true; tokensGranted: number; tokensRemaining: number }
-  | { ok: false; code: "not_found" };
+  { ok: true; tokensGranted: number; tokensRemaining: number } | { ok: false; code: "not_found" };
 
 /**
  * Increment `Usage.tokensGranted` for the target user by `amount`. When no
@@ -397,7 +393,9 @@ export type AdminUserRow = {
   lastSeenAt: string | null;
 };
 
-export async function listAdminUsers(opts: { q?: string; limit?: number } = {}): Promise<AdminUserRow[]> {
+export async function listAdminUsers(
+  opts: { q?: string; limit?: number } = {},
+): Promise<AdminUserRow[]> {
   const q = opts.q?.trim();
   const rows = await prisma.user.findMany({
     where: q
@@ -489,7 +487,9 @@ export type AdminSubscriptionRow = {
   createdAt: string;
 };
 
-export async function listAdminSubscriptions(filter: { status?: SubscriptionStatus } = {}): Promise<AdminSubscriptionRow[]> {
+export async function listAdminSubscriptions(
+  filter: { status?: SubscriptionStatus } = {},
+): Promise<AdminSubscriptionRow[]> {
   const rows = await prisma.subscription.findMany({
     where: filter.status ? { status: filter.status } : {},
     orderBy: { createdAt: "desc" },
@@ -550,7 +550,11 @@ function planAccentForTier(tier: PlanTier): string {
   }
 }
 
-function formatPlanPrice(p: { priceCents: number | null; isCustomPrice: boolean; currency: string }): string {
+function formatPlanPrice(p: {
+  priceCents: number | null;
+  isCustomPrice: boolean;
+  currency: string;
+}): string {
   if (p.isCustomPrice) return "Custom";
   if (p.priceCents === null) return "—";
   if (p.priceCents === 0) return "Free";
@@ -631,7 +635,11 @@ function renewsLabel(
   if (status === "past_due") return fallback ?? "Past due";
   if (status === "canceled") return fallback ?? "Cancelled";
   if (!current) return fallback ?? "—";
-  const date = current.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const date = current.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
   return cancelAtPeriodEnd ? `Ends ${date}` : `Renews ${date}`;
 }
 

@@ -131,16 +131,18 @@ export function UserDashboardClient({ firstName }: { firstName: string }) {
             <div className="col gap-3">
               <div className="row gap-2" style={{ alignItems: "baseline" }}>
                 <span style={{ fontSize: 28, fontWeight: 800 }}>
-                  {subscription ? formatPriceCents(subscription.basePriceCents, subscription.currency) : "—"}
+                  {subscription
+                    ? formatPriceCents(subscription.basePriceCents, subscription.currency)
+                    : "—"}
                 </span>
                 <span className="muted">{subscription ? "/ month" : ""}</span>
               </div>
               <p className="muted" style={{ fontSize: 13 }}>
                 {subscription
-                  ? subscription.renewsLabel ??
+                  ? (subscription.renewsLabel ??
                     (subscription.currentPeriodEnd
                       ? `Renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
-                      : `Status: ${subscription.status}`)
+                      : `Status: ${subscription.status}`))
                   : "You're not subscribed yet. Pick a plan to unlock the full agent tier."}
               </p>
               <div className="row gap-2">

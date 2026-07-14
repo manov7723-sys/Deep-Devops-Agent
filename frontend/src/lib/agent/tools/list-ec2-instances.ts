@@ -27,7 +27,14 @@ type Output = {
   items: Ec2Item[];
 };
 
-const ALLOWED_STATES = new Set(["running", "stopped", "pending", "terminated", "stopping", "shutting-down"]);
+const ALLOWED_STATES = new Set([
+  "running",
+  "stopped",
+  "pending",
+  "terminated",
+  "stopping",
+  "shutting-down",
+]);
 
 /**
  * Find the AWS CloudProvider this project should use. Prefers a provider linked
@@ -82,7 +89,8 @@ export const listEc2InstancesTool: Tool<Input, Output> = {
     if (!providerId) {
       return {
         ok: false,
-        error: "No AWS account is connected. Connect one on the project's Cloud providers tab first.",
+        error:
+          "No AWS account is connected. Connect one on the project's Cloud providers tab first.",
       };
     }
 
@@ -92,7 +100,15 @@ export const listEc2InstancesTool: Tool<Input, Output> = {
     }
 
     const region = (input.region ?? resolved.region).trim();
-    const args = ["ec2", "describe-instances", "--region", region, "--output", "json", "--no-cli-pager"];
+    const args = [
+      "ec2",
+      "describe-instances",
+      "--region",
+      region,
+      "--output",
+      "json",
+      "--no-cli-pager",
+    ];
 
     const state = input.state?.toLowerCase().trim();
     if (state) {
@@ -115,7 +131,10 @@ export const listEc2InstancesTool: Tool<Input, Output> = {
 
     if (res.exitCode !== 0) {
       if (res.exitCode === -1 && (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"))) {
-        return { ok: false, error: "The `aws` CLI isn't installed on the server. Install it on the runner host." };
+        return {
+          ok: false,
+          error: "The `aws` CLI isn't installed on the server. Install it on the runner host.",
+        };
       }
       return { ok: false, error: `aws ec2 describe-instances failed: ${res.stderr.slice(-500)}` };
     }

@@ -31,7 +31,10 @@ async function request<T>(
       details: { path, chaos },
     } satisfies ApiError;
   }
-  const url = new URL(BASE + path, typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+  const url = new URL(
+    BASE + path,
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3000",
+  );
   if (init?.params) {
     for (const [k, v] of Object.entries(init.params)) {
       if (v !== undefined) url.searchParams.set(k, String(v));

@@ -25,9 +25,15 @@ export const setGithubSecretTool: Tool<
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'The repo as "owner/name", attached to the project.' },
+      repoFullName: {
+        type: "string",
+        description: 'The repo as "owner/name", attached to the project.',
+      },
       name: { type: "string", description: "Secret name (UPPER_SNAKE_CASE), e.g. AWS_ROLE_ARN." },
-      value: { type: "string", description: "The secret value to store (encrypted at rest by GitHub)." },
+      value: {
+        type: "string",
+        description: "The secret value to store (encrypted at rest by GitHub).",
+      },
     },
     required: ["repoFullName", "name", "value"],
     additionalProperties: false,
@@ -35,22 +41,34 @@ export const setGithubSecretTool: Tool<
   async execute(input, ctx) {
     const name = input.name.trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-      return { ok: false, error: "Secret name must be letters, digits and underscores, starting with a letter or underscore." };
+      return {
+        ok: false,
+        error:
+          "Secret name must be letters, digits and underscores, starting with a letter or underscore.",
+      };
     }
     if (!input.value?.length) return { ok: false, error: "A secret value is required." };
 
     const repo = await prisma.repo.findFirst({
-      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
       select: { id: true },
     });
-    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    if (!repo)
+      return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
 
     const tok = await resolveTokenForRepo(repo.id);
     if (!tok.ok) return { ok: false, error: tok.message };
 
     const res = await setRepoActionsSecret(tok.accessToken, input.repoFullName, name, input.value);
     if (!res.ok) {
-      return { ok: false, error: `${res.error} (the connected GitHub token needs admin/secrets write on the repo).` };
+      return {
+        ok: false,
+        error: `${res.error} (the connected GitHub token needs admin/secrets write on the repo).`,
+      };
     }
     return { ok: true, output: { name, set: true } };
   },

@@ -14,15 +14,14 @@ export function AgentRow({ agent: a, onEditPrompt, onToggle }: AgentRowProps) {
     <div className="card card-pad">
       <div className="row between wrap gap-3">
         <div className="row gap-3" style={{ minWidth: 0 }}>
-          <span
-            className="row center dda-agent-tile"
-            data-on={a.on ? "true" : undefined}
-          >
+          <span className="row center dda-agent-tile" data-on={a.on ? "true" : undefined}>
             <Icon name="bot" size={20} />
           </span>
           <div className="col" style={{ lineHeight: 1.4, minWidth: 0 }}>
             <span style={{ fontWeight: 700, fontSize: 14.5 }}>{a.name}</span>
-            <span className="faint" style={{ fontSize: 12.5 }}>{a.skill}</span>
+            <span className="faint" style={{ fontSize: 12.5 }}>
+              {a.skill}
+            </span>
           </div>
         </div>
         <div className="row gap-3">

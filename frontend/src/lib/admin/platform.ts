@@ -57,7 +57,9 @@ export type PatchPlatformArgs = Partial<{
   smtpVerifiedAt: Date | null;
 }>;
 
-export async function patchPlatformSettings(patch: PatchPlatformArgs): Promise<PlatformSettingsRow> {
+export async function patchPlatformSettings(
+  patch: PatchPlatformArgs,
+): Promise<PlatformSettingsRow> {
   const current = await getOrCreate();
   const updated = await prisma.platformSetting.update({
     where: { id: current.id },
@@ -82,23 +84,24 @@ export async function patchPlatformSettings(patch: PatchPlatformArgs): Promise<P
  * uploaded yet, the UI falls back to a checked-in SVG under /public/brand/ so
  * the admin page never renders a broken image.
  */
-const BRAND_ASSET_DEFAULTS: Record<string, { label: string; hint: string; localFallback: string }> = {
-  logo: {
-    label: "Logo",
-    hint: "Shown in the top-left nav, login screen and emails. SVG recommended.",
-    localFallback: "/brand/logo.svg",
-  },
-  favicon: {
-    label: "Favicon",
-    hint: "Browser tab icon. 32×32 PNG or .ico.",
-    localFallback: "/brand/favicon.svg",
-  },
-  og: {
-    label: "Social share card",
-    hint: "Open Graph image used by Slack / Twitter / LinkedIn previews. 1200×630 PNG/JPG.",
-    localFallback: "/brand/og.svg",
-  },
-};
+const BRAND_ASSET_DEFAULTS: Record<string, { label: string; hint: string; localFallback: string }> =
+  {
+    logo: {
+      label: "Logo",
+      hint: "Shown in the top-left nav, login screen and emails. SVG recommended.",
+      localFallback: "/brand/logo.svg",
+    },
+    favicon: {
+      label: "Favicon",
+      hint: "Browser tab icon. 32×32 PNG or .ico.",
+      localFallback: "/brand/favicon.svg",
+    },
+    og: {
+      label: "Social share card",
+      hint: "Open Graph image used by Slack / Twitter / LinkedIn previews. 1200×630 PNG/JPG.",
+      localFallback: "/brand/og.svg",
+    },
+  };
 
 export type AssetRow = {
   key: string;

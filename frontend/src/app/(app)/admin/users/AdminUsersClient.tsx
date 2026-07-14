@@ -68,7 +68,11 @@ function uiPlan(raw: string | null | undefined): AdminPlanTier {
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   } catch {
     return "—";
   }
@@ -96,7 +100,11 @@ export function AdminUsersClient() {
   const status = (sp.get("status") as StatusFilter | null) ?? "all";
   const { data: users, isLoading } = useAdminUsers(q);
 
-  const [grantTarget, setGrantTarget] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [grantTarget, setGrantTarget] = useState<{
+    id: string;
+    name: string;
+    email: string;
+  } | null>(null);
 
   const filtered = useMemo(() => {
     if (!users) return [];
@@ -126,7 +134,9 @@ export function AdminUsersClient() {
             <Avatar name={row.original.name} size={34} />
             <div className="col" style={{ lineHeight: 1.3 }}>
               <span style={{ fontWeight: 600 }}>{row.original.name}</span>
-              <span className="faint" style={{ fontSize: 12 }}>{row.original.email}</span>
+              <span className="faint" style={{ fontSize: 12 }}>
+                {row.original.email}
+              </span>
             </div>
           </div>
         ),
@@ -170,11 +180,7 @@ export function AdminUsersClient() {
         cell: ({ row }) => (
           <Menu
             trigger={
-              <Btn
-                variant="ghost"
-                size="icon"
-                aria-label={`Actions for ${row.original.name}`}
-              >
+              <Btn variant="ghost" size="icon" aria-label={`Actions for ${row.original.name}`}>
                 <Icon name="more" size={16} />
               </Btn>
             }

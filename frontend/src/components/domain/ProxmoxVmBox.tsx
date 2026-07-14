@@ -6,7 +6,11 @@
  * field script + how to turn the answers into the `/proxmox/vm` request body.
  * No LLM. Rendered on the Infra tab and inline in chat (```proxmox-vm``` fence).
  */
-import { ClusterChat, type ClusterChatConfig, type Step } from "@/components/domain/cluster-chat-engine";
+import {
+  ClusterChat,
+  type ClusterChatConfig,
+  type Step,
+} from "@/components/domain/cluster-chat-engine";
 
 const NAME_RE = /^[a-z][a-z0-9-]{1,38}$/;
 
@@ -19,19 +23,29 @@ const optsList = (opts: Record<string, unknown> | undefined, key: string): strin
 const STEPS: Step[] = [
   // ── Page 1 · VM basics ───────────────────────────────────────────────
   {
-    page: 1, kind: "select", key: "envKey", label: "Environment",
+    page: 1,
+    kind: "select",
+    key: "envKey",
+    label: "Environment",
     hint: "Provides the Proxmox API credentials for the terraform apply.",
     emptyNote: "Create an environment (and attach the Proxmox provider) first.",
     options: (c) => c.envs.map((e) => ({ value: e.key, label: e.name || e.key })),
   },
   {
-    page: 1, kind: "text", key: "name", label: "VM name",
+    page: 1,
+    kind: "text",
+    key: "name",
+    label: "VM name",
     hint: "Lowercase letters, digits, hyphens; start with a letter.",
     placeholder: "web-01",
-    validate: (v) => (NAME_RE.test(v) ? null : "Lowercase letters, digits and hyphens; start with a letter."),
+    validate: (v) =>
+      NAME_RE.test(v) ? null : "Lowercase letters, digits and hyphens; start with a letter.",
   },
   {
-    page: 1, kind: "select", key: "node", label: "Proxmox node",
+    page: 1,
+    kind: "select",
+    key: "node",
+    label: "Proxmox node",
     hint: "Loaded live from your connected Proxmox server.",
     emptyNote: "No Proxmox nodes found — check the provider on the Cloud tab.",
     // While the live query is in flight `nodes` is undefined → return [] so the
@@ -49,11 +63,35 @@ const STEPS: Step[] = [
       return Array.isArray(nodes) && nodes.length ? String((nodes as string[])[0]) : "pve";
     },
   },
-  { page: 1, kind: "number", key: "cores", label: "vCPU cores", default: () => "2", validate: (v) => (Number(v) >= 1 ? null : "At least 1 core.") },
-  { page: 1, kind: "number", key: "memoryMB", label: "Memory (MB)", default: () => "2048", validate: (v) => (Number(v) >= 128 ? null : "At least 128 MB.") },
-  { page: 1, kind: "number", key: "diskGB", label: "Disk (GB)", default: () => "20", validate: (v) => (Number(v) >= 1 ? null : "At least 1 GB.") },
   {
-    page: 1, kind: "select", key: "datastore", label: "Storage pool",
+    page: 1,
+    kind: "number",
+    key: "cores",
+    label: "vCPU cores",
+    default: () => "2",
+    validate: (v) => (Number(v) >= 1 ? null : "At least 1 core."),
+  },
+  {
+    page: 1,
+    kind: "number",
+    key: "memoryMB",
+    label: "Memory (MB)",
+    default: () => "2048",
+    validate: (v) => (Number(v) >= 128 ? null : "At least 128 MB."),
+  },
+  {
+    page: 1,
+    kind: "number",
+    key: "diskGB",
+    label: "Disk (GB)",
+    default: () => "20",
+    validate: (v) => (Number(v) >= 1 ? null : "At least 1 GB."),
+  },
+  {
+    page: 1,
+    kind: "select",
+    key: "datastore",
+    label: "Storage pool",
     hint: "Storage that holds the VM disk — read live from the node.",
     emptyNote: "No image-capable storage found on this node.",
     // [] while the live list is loading → the engine seeds the default from live
@@ -65,7 +103,10 @@ const STEPS: Step[] = [
     },
   },
   {
-    page: 1, kind: "select", key: "bridge", label: "Network bridge",
+    page: 1,
+    kind: "select",
+    key: "bridge",
+    label: "Network bridge",
     hint: "Read live from the node.",
     emptyNote: "No bridges found on this node.",
     options: (c) => (optsList(c.opts, "bridges") ?? []).map((b) => ({ value: b, label: b })),
@@ -76,12 +117,21 @@ const STEPS: Step[] = [
   },
   // ── Page 2 · Source & network ────────────────────────────────────────
   {
-    page: 2, kind: "choice", key: "source", label: "Boot source",
+    page: 2,
+    kind: "choice",
+    key: "source",
+    label: "Boot source",
     hint: "Clone an existing template (fast, cloud-init ready) or boot from an ISO.",
-    choices: [{ value: "template", label: "Clone a template" }, { value: "iso", label: "Boot from ISO" }],
+    choices: [
+      { value: "template", label: "Clone a template" },
+      { value: "iso", label: "Boot from ISO" },
+    ],
   },
   {
-    page: 2, kind: "select", key: "templateVmId", label: "Template to clone",
+    page: 2,
+    kind: "select",
+    key: "templateVmId",
+    label: "Template to clone",
     hint: "A VM template on the selected node (read live from Proxmox).",
     emptyNote: "No templates on this node — create one, or switch the boot source to ISO.",
     skip: (a) => a.source !== "template",
@@ -99,29 +149,52 @@ const STEPS: Step[] = [
     },
   },
   {
-    page: 2, kind: "text", key: "isoFile", label: "ISO file", mono: true,
+    page: 2,
+    kind: "text",
+    key: "isoFile",
+    label: "ISO file",
+    mono: true,
     placeholder: "local:iso/ubuntu-24.04-live-server-amd64.iso",
     skip: (a) => a.source !== "iso",
-    validate: (v, a) => (a.source !== "iso" || v.trim() ? null : "Enter an ISO file (e.g. local:iso/…)."),
+    validate: (v, a) =>
+      a.source !== "iso" || v.trim() ? null : "Enter an ISO file (e.g. local:iso/…).",
   },
   {
-    page: 2, kind: "text", key: "ipv4", label: "IPv4 (cloud-init)", mono: true,
-    hint: "\"dhcp\" or a CIDR like 10.0.0.50/24.", placeholder: "dhcp", default: () => "dhcp",
+    page: 2,
+    kind: "text",
+    key: "ipv4",
+    label: "IPv4 (cloud-init)",
+    mono: true,
+    hint: '"dhcp" or a CIDR like 10.0.0.50/24.',
+    placeholder: "dhcp",
+    default: () => "dhcp",
   },
   {
-    page: 2, kind: "text", key: "gateway", label: "Gateway", mono: true, optional: true,
+    page: 2,
+    kind: "text",
+    key: "gateway",
+    label: "Gateway",
+    mono: true,
+    optional: true,
     placeholder: "10.0.0.1",
     skip: (a) => !a.ipv4 || String(a.ipv4).trim() === "dhcp",
   },
   // ── Page 3 · Repository ──────────────────────────────────────────────
   {
-    page: 3, kind: "select", key: "repoFullName", label: "Repository",
+    page: 3,
+    kind: "select",
+    key: "repoFullName",
+    label: "Repository",
     hint: "The generated Terraform is committed here.",
     emptyNote: "Attach a repo on the CI/CD & Repos tab first.",
     options: (c) => c.repos.map((r) => ({ value: r.fullName, label: r.fullName })),
   },
   {
-    page: 3, kind: "text", key: "ghPath", label: "File path (folder)", mono: true,
+    page: 3,
+    kind: "text",
+    key: "ghPath",
+    label: "File path (folder)",
+    mono: true,
     placeholder: "terraform/proxmox/web-01",
     default: (c) => `terraform/proxmox/${String(c.answers.name ?? "").trim() || "vm"}`,
   },
@@ -131,7 +204,8 @@ const PROXMOX_CONFIG: ClusterChatConfig = {
   cloud: "proxmox",
   cloudLabel: "Proxmox",
   title: "Create Proxmox VM",
-  blueprintSub: "Proxmox VM via Terraform (bpg/proxmox). No LLM — generates provider.tf + vm.tf, then push → apply.",
+  blueprintSub:
+    "Proxmox VM via Terraform (bpg/proxmox). No LLM — generates provider.tf + vm.tf, then push → apply.",
   optionsPath: "proxmox/vm",
   stackPrefix: "proxmox-vm",
   ghPathPrefix: "terraform/proxmox",
@@ -149,8 +223,11 @@ const PROXMOX_CONFIG: ClusterChatConfig = {
     datastore: String(a.datastore ?? "local-lvm").trim() || "local-lvm",
     bridge: String(a.bridge ?? "vmbr0").trim() || "vmbr0",
     templateVmId:
-      a.source === "template" && String(a.templateVmId ?? "").trim() ? Number(a.templateVmId) : undefined,
-    isoFile: a.source === "iso" && String(a.isoFile ?? "").trim() ? String(a.isoFile).trim() : undefined,
+      a.source === "template" && String(a.templateVmId ?? "").trim()
+        ? Number(a.templateVmId)
+        : undefined,
+    isoFile:
+      a.source === "iso" && String(a.isoFile ?? "").trim() ? String(a.isoFile).trim() : undefined,
     ipv4: String(a.ipv4 ?? "").trim() || undefined,
     gateway:
       a.ipv4 && String(a.ipv4).trim() !== "dhcp" && String(a.gateway ?? "").trim()

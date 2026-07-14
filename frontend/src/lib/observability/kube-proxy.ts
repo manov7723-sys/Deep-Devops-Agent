@@ -63,7 +63,10 @@ async function kill(envId: string) {
 }
 
 async function start(envId: string): Promise<Entry> {
-  const env = await prisma.env.findUnique({ where: { id: envId }, select: { cloudProviderId: true } });
+  const env = await prisma.env.findUnique({
+    where: { id: envId },
+    select: { cloudProviderId: true },
+  });
   const kcfg = await getKubeconfigForEnv(envId);
   if (!kcfg.ok) throw new Error(kcfg.message);
 
@@ -84,7 +87,10 @@ async function start(envId: string): Promise<Entry> {
     ) as Proc;
 
     const port = await new Promise<number>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("kubectl port-forward did not start in time.")), START_TIMEOUT_MS);
+      const timer = setTimeout(
+        () => reject(new Error("kubectl port-forward did not start in time.")),
+        START_TIMEOUT_MS,
+      );
       let buf = "";
       const onData = (chunk: Buffer) => {
         buf += chunk.toString();
@@ -106,7 +112,9 @@ async function start(envId: string): Promise<Entry> {
       });
       proc.on("error", (e) => {
         clearTimeout(timer);
-        reject(e.message.includes("ENOENT") ? new Error("`kubectl` isn't installed on the server.") : e);
+        reject(
+          e.message.includes("ENOENT") ? new Error("`kubectl` isn't installed on the server.") : e,
+        );
       });
       proc.on("exit", (code) => {
         clearTimeout(timer);

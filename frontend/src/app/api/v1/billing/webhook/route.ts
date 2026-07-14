@@ -117,7 +117,9 @@ async function handleSubscription(event: StripeEvent): Promise<void> {
     basePriceCents: item?.price.unit_amount ?? plan.priceCents ?? 0,
     currency: sub.currency ?? plan.currency,
     cancelAtPeriodEnd: !!sub.cancel_at_period_end,
-    currentPeriodStart: sub.current_period_start ? new Date(sub.current_period_start * 1000) : undefined,
+    currentPeriodStart: sub.current_period_start
+      ? new Date(sub.current_period_start * 1000)
+      : undefined,
     currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000) : undefined,
     trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : undefined,
     canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : undefined,

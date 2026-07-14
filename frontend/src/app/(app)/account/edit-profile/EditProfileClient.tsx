@@ -51,12 +51,15 @@ export function EditProfileClient() {
     return (
       <div className="col gap-5" style={{ maxWidth: 680 }}>
         <PageHead title="Edit profile" sub="Update your personal information." />
-        <Block><Block.Loading /></Block>
+        <Block>
+          <Block.Loading />
+        </Block>
       </div>
     );
   }
 
-  const fullName = `${form.state.values.firstName} ${form.state.values.lastName}`.trim() || profile.email;
+  const fullName =
+    `${form.state.values.firstName} ${form.state.values.lastName}`.trim() || profile.email;
 
   return (
     <div className="col gap-5" style={{ maxWidth: 680 }}>
@@ -73,14 +76,21 @@ export function EditProfileClient() {
             <div className="row gap-4" style={{ alignItems: "center", flexWrap: "wrap" }}>
               <Avatar name={fullName} size={68} />
               <div className="row gap-2">
-                <Btn type="button" variant="outline" icon="download">Upload photo</Btn>
-                <Btn type="button" variant="ghost">Remove</Btn>
+                <Btn type="button" variant="outline" icon="download">
+                  Upload photo
+                </Btn>
+                <Btn type="button" variant="ghost">
+                  Remove
+                </Btn>
               </div>
             </div>
             <div className="divider" />
             <div className="row gap-3 wrap">
               <div className="grow" style={{ minWidth: 200 }}>
-                <form.Field name="firstName" validators={{ onChange: ({ value }) => (!value ? "Required" : undefined) }}>
+                <form.Field
+                  name="firstName"
+                  validators={{ onChange: ({ value }) => (!value ? "Required" : undefined) }}
+                >
                   {(field) => (
                     <Field label="First name" required error={field.state.meta.errors[0]}>
                       <Input
@@ -157,7 +167,9 @@ export function EditProfileClient() {
             </form.Field>
 
             {serverError && (
-              <p style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">{serverError}</p>
+              <p style={{ fontSize: 12.5, color: "var(--danger)" }} role="alert">
+                {serverError}
+              </p>
             )}
 
             <div className="row gap-2 between">
@@ -166,7 +178,13 @@ export function EditProfileClient() {
               </Btn>
               <form.Subscribe selector={(s) => [s.canSubmit, s.isSubmitting] as const}>
                 {([canSubmit, isSubmitting]) => (
-                  <Btn type="submit" variant="primary" icon="check" disabled={!canSubmit} loading={isSubmitting}>
+                  <Btn
+                    type="submit"
+                    variant="primary"
+                    icon="check"
+                    disabled={!canSubmit}
+                    loading={isSubmitting}
+                  >
                     Save changes
                   </Btn>
                 )}

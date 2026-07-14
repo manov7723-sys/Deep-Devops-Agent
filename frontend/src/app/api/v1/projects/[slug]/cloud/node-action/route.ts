@@ -18,10 +18,15 @@ const Body = z.object({
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message },
+      { status: 400 },
+    );
   const { envKey, node, action } = parsed.data;
 
   const res = await nodeAction(gate.access.project.id, envKey, node, action);

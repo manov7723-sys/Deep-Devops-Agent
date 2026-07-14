@@ -74,12 +74,16 @@ export function InviteAcceptClient({
         }}
       >
         <span>
-          <span className="faint" style={{ fontSize: 11.5 }}>Project</span>
+          <span className="faint" style={{ fontSize: 11.5 }}>
+            Project
+          </span>
           <br />
           <b>{projectName}</b>
         </span>
         <span style={{ marginTop: 6 }}>
-          <span className="faint" style={{ fontSize: 11.5 }}>Role</span>
+          <span className="faint" style={{ fontSize: 11.5 }}>
+            Role
+          </span>
           <br />
           <b style={{ textTransform: "capitalize" }}>{role}</b>
         </span>

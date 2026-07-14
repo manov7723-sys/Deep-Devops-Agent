@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-  type ColumnDef,
-} from "@tanstack/react-table";
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
 import { Fragment, type ReactNode } from "react";
 import { Empty } from "./Empty";
 import type { IconName } from "./Icon";

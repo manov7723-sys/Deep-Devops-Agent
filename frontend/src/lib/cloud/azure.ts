@@ -30,16 +30,18 @@ export type AzureSpInput = {
 };
 
 export type AzureTokenResult =
-  | { ok: true; accessToken: string; expiresIn: number }
-  | { ok: false; error: string };
+  { ok: true; accessToken: string; expiresIn: number } | { ok: false; error: string };
 
 /** Get a client-credentials access token. Defaults to ARM; pass a different
  *  `scope` (e.g. the AKS AAD server app) to authenticate to other resources. */
-export async function getAzureSpToken(c: {
-  tenantId: string;
-  clientId: string;
-  clientSecret: string;
-}, scope: string = ARM_SCOPE): Promise<AzureTokenResult> {
+export async function getAzureSpToken(
+  c: {
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  },
+  scope: string = ARM_SCOPE,
+): Promise<AzureTokenResult> {
   const tenant = c.tenantId.trim();
   if (!tenant || !c.clientId.trim() || !c.clientSecret) {
     return { ok: false, error: "tenantId, clientId and clientSecret are required." };
@@ -59,7 +61,10 @@ export async function getAzureSpToken(c: {
       cache: "no-store",
     });
   } catch (err) {
-    return { ok: false, error: `Network error reaching Microsoft sign-in: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Microsoft sign-in: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   const json = (await res.json().catch(() => ({}))) as {
     access_token?: string;
@@ -69,14 +74,22 @@ export async function getAzureSpToken(c: {
   };
   if (!res.ok || !json.access_token) {
     // Surface the human-readable Microsoft error (e.g. AADSTS7000215 invalid secret).
-    const msg = (json.error_description || json.error || `token request failed (${res.status})`).split("\n")[0];
+    const msg = (
+      json.error_description ||
+      json.error ||
+      `token request failed (${res.status})`
+    ).split("\n")[0];
     return { ok: false, error: msg };
   }
   return { ok: true, accessToken: json.access_token, expiresIn: json.expires_in ?? 3600 };
 }
 
 export type AzureConnectResult =
-  | { ok: true; subscriptionId: string; subscriptions: Array<{ id: string; displayName: string; state: string }> }
+  | {
+      ok: true;
+      subscriptionId: string;
+      subscriptions: Array<{ id: string; displayName: string; state: string }>;
+    }
   | { ok: false; error: string };
 
 /**
@@ -85,7 +98,9 @@ export type AzureConnectResult =
  * subscription to use (the supplied one if visible, else the first enabled).
  * Mirrors azure_connector.connect().
  */
-export async function connectAzureServicePrincipal(input: AzureSpInput): Promise<AzureConnectResult> {
+export async function connectAzureServicePrincipal(
+  input: AzureSpInput,
+): Promise<AzureConnectResult> {
   const tok = await getAzureSpToken(input);
   if (!tok.ok) return { ok: false, error: tok.error };
 
@@ -96,20 +111,31 @@ export async function connectAzureServicePrincipal(input: AzureSpInput): Promise
       cache: "no-store",
     });
   } catch (err) {
-    return { ok: false, error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return { ok: false, error: `Azure rejected the request (${res.status}). ${body.slice(0, 160)}` };
+    return {
+      ok: false,
+      error: `Azure rejected the request (${res.status}). ${body.slice(0, 160)}`,
+    };
   }
   const data = (await res.json().catch(() => ({}))) as {
     value?: Array<{ subscriptionId: string; displayName: string; state: string }>;
   };
-  const subs = (data.value ?? []).map((s) => ({ id: s.subscriptionId, displayName: s.displayName, state: s.state }));
+  const subs = (data.value ?? []).map((s) => ({
+    id: s.subscriptionId,
+    displayName: s.displayName,
+    state: s.state,
+  }));
   if (subs.length === 0) {
     return {
       ok: false,
-      error: "Authenticated, but this service principal has no subscriptions assigned. Grant it a role (e.g. Contributor) on the subscription.",
+      error:
+        "Authenticated, but this service principal has no subscriptions assigned. Grant it a role (e.g. Contributor) on the subscription.",
     };
   }
   const wanted = input.subscriptionId?.trim();
@@ -118,7 +144,10 @@ export async function connectAzureServicePrincipal(input: AzureSpInput): Promise
     subs.find((s) => s.state === "Enabled") ||
     subs[0];
   if (wanted && !subs.find((s) => s.id === wanted)) {
-    return { ok: false, error: `Subscription ${wanted} isn't visible to this service principal. Visible: ${subs.map((s) => s.id).join(", ")}` };
+    return {
+      ok: false,
+      error: `Subscription ${wanted} isn't visible to this service principal. Visible: ${subs.map((s) => s.id).join(", ")}`,
+    };
   }
   return { ok: true, subscriptionId: chosen.id, subscriptions: subs };
 }
@@ -136,7 +165,9 @@ export type DecryptedAzureCreds =
  *  Prefers the hybrid columns (spClientId + spClientSecretEnc, populated by the
  *  OAuth callback's auto-provisioning) and falls back to the legacy columns
  *  (roleArn + externalId) for full-SP connects. */
-export async function getDecryptedAzureCreds(cloudProviderId: string): Promise<DecryptedAzureCreds> {
+export async function getDecryptedAzureCreds(
+  cloudProviderId: string,
+): Promise<DecryptedAzureCreds> {
   const cp = await prisma.cloudProvider.findUnique({
     where: { id: cloudProviderId },
     select: {
@@ -156,20 +187,42 @@ export async function getDecryptedAzureCreds(cloudProviderId: string): Promise<D
   if (cp.spClientId && cp.spClientSecretEnc) {
     try {
       const clientSecret = decryptSecret(cp.spClientSecretEnc);
-      return { ok: true, tenantId: cp.accountId, clientId: cp.spClientId, clientSecret, subscriptionId: cp.accountRef };
+      return {
+        ok: true,
+        tenantId: cp.accountId,
+        clientId: cp.spClientId,
+        clientSecret,
+        subscriptionId: cp.accountRef,
+      };
     } catch {
-      return { ok: false, error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision." };
+      return {
+        ok: false,
+        error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision.",
+      };
     }
   }
   if (cp.roleArn && cp.externalId) {
     try {
       const clientSecret = decryptSecret(cp.externalId);
-      return { ok: true, tenantId: cp.accountId, clientId: cp.roleArn, clientSecret, subscriptionId: cp.accountRef };
+      return {
+        ok: true,
+        tenantId: cp.accountId,
+        clientId: cp.roleArn,
+        clientSecret,
+        subscriptionId: cp.accountRef,
+      };
     } catch {
-      return { ok: false, error: "Could not decrypt the Azure client secret. Reconnect the provider." };
+      return {
+        ok: false,
+        error: "Could not decrypt the Azure client secret. Reconnect the provider.",
+      };
     }
   }
-  return { ok: false, error: "Azure provider has no service-principal credentials (OAuth-only). Auto-provisioning may not have run yet." };
+  return {
+    ok: false,
+    error:
+      "Azure provider has no service-principal credentials (OAuth-only). Auto-provisioning may not have run yet.",
+  };
 }
 
 // Well-known AKS Microsoft Entra **server** application — the audience a
@@ -200,10 +253,20 @@ export async function getAksAadToken(cloudProviderId: string): Promise<AzureToke
  *                     refresh token has been revoked or expired — so an OAuth
  *                     token going stale never breaks the app for hybrid rows.
  */
-export async function getAzureAccessToken(cloudProviderId: string, tenantOverride?: string): Promise<AzureTokenResult> {
+export async function getAzureAccessToken(
+  cloudProviderId: string,
+  tenantOverride?: string,
+): Promise<AzureTokenResult> {
   const cp = await prisma.cloudProvider.findUnique({
     where: { id: cloudProviderId },
-    select: { kind: true, accountId: true, roleArn: true, externalId: true, spClientId: true, spClientSecretEnc: true },
+    select: {
+      kind: true,
+      accountId: true,
+      roleArn: true,
+      externalId: true,
+      spClientId: true,
+      spClientSecretEnc: true,
+    },
   });
   if (!cp || cp.kind !== "azure") return { ok: false, error: "Not an Azure provider." };
 
@@ -213,9 +276,16 @@ export async function getAzureAccessToken(cloudProviderId: string, tenantOverrid
     try {
       secret = decryptSecret(cp.externalId);
     } catch {
-      return { ok: false, error: "Could not decrypt the stored Azure credential. Reconnect the provider." };
+      return {
+        ok: false,
+        error: "Could not decrypt the stored Azure credential. Reconnect the provider.",
+      };
     }
-    return getAzureSpToken({ tenantId: tenantOverride || cp.accountId || "", clientId: cp.roleArn, clientSecret: secret });
+    return getAzureSpToken({
+      tenantId: tenantOverride || cp.accountId || "",
+      clientId: cp.roleArn,
+      clientSecret: secret,
+    });
   }
 
   // OAuth (with or without hybrid SP). Try refresh first — delegated tokens
@@ -229,7 +299,10 @@ export async function getAzureAccessToken(cloudProviderId: string, tenantOverrid
       if (r.ok) {
         if (r.tokens.refreshToken && r.tokens.refreshToken !== secret) {
           await prisma.cloudProvider
-            .update({ where: { id: cloudProviderId }, data: { externalId: encryptSecret(r.tokens.refreshToken) } })
+            .update({
+              where: { id: cloudProviderId },
+              data: { externalId: encryptSecret(r.tokens.refreshToken) },
+            })
             .catch(() => {});
         }
         return { ok: true, accessToken: r.tokens.accessToken, expiresIn: r.tokens.expiresIn };
@@ -246,9 +319,16 @@ export async function getAzureAccessToken(cloudProviderId: string, tenantOverrid
     try {
       secret = decryptSecret(cp.spClientSecretEnc);
     } catch {
-      return { ok: false, error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision." };
+      return {
+        ok: false,
+        error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision.",
+      };
     }
-    return getAzureSpToken({ tenantId: tenantOverride || cp.accountId || "", clientId: cp.spClientId, clientSecret: secret });
+    return getAzureSpToken({
+      tenantId: tenantOverride || cp.accountId || "",
+      clientId: cp.spClientId,
+      clientSecret: secret,
+    });
   }
 
   return { ok: false, error: oauthErr || "Azure provider has no stored credentials." };

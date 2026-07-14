@@ -32,7 +32,7 @@ export function EnvFilter({ value, onChange, param = "env" }: EnvFilterProps) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
-  const urlValue = ((sp.get(param) as EnvFilterValue | null) ?? "all");
+  const urlValue = (sp.get(param) as EnvFilterValue | null) ?? "all";
 
   const current = value ?? urlValue;
 

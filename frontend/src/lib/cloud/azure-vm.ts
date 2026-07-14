@@ -18,15 +18,31 @@ const API_NETWORK = "2023-09-01";
 const API_COMPUTE = "2023-09-01";
 
 /** Friendly OS name → Azure marketplace image reference. */
-export const AZURE_VM_IMAGES: Record<string, { publisher: string; offer: string; sku: string; version: string }> = {
-  "ubuntu-22.04": { publisher: "Canonical", offer: "0001-com-ubuntu-server-jammy", sku: "22_04-lts-gen2", version: "latest" },
-  "ubuntu-24.04": { publisher: "Canonical", offer: "ubuntu-24_04-lts", sku: "server-gen1", version: "latest" },
+export const AZURE_VM_IMAGES: Record<
+  string,
+  { publisher: string; offer: string; sku: string; version: string }
+> = {
+  "ubuntu-22.04": {
+    publisher: "Canonical",
+    offer: "0001-com-ubuntu-server-jammy",
+    sku: "22_04-lts-gen2",
+    version: "latest",
+  },
+  "ubuntu-24.04": {
+    publisher: "Canonical",
+    offer: "ubuntu-24_04-lts",
+    sku: "server-gen1",
+    version: "latest",
+  },
   "debian-12": { publisher: "Debian", offer: "debian-12", sku: "12-gen2", version: "latest" },
 };
 
 /** Azure-compliant password: ≥12 chars with upper, lower, digit, symbol. */
 function generatePassword(): string {
-  const U = "ABCDEFGHJKLMNPQRSTUVWXYZ", L = "abcdefghijkmnpqrstuvwxyz", D = "23456789", S = "!@#%^*-_";
+  const U = "ABCDEFGHJKLMNPQRSTUVWXYZ",
+    L = "abcdefghijkmnpqrstuvwxyz",
+    D = "23456789",
+    S = "!@#%^*-_";
   const all = U + L + D + S;
   const bytes = randomBytes(20);
   const pick = (set: string, i: number) => set[bytes[i] % set.length];
@@ -40,10 +56,17 @@ function generatePassword(): string {
   return chars.join("");
 }
 
-type ArmResult = { ok: true; status: number; data: Record<string, unknown> } | { ok: false; status: number; error: string };
+type ArmResult =
+  | { ok: true; status: number; data: Record<string, unknown> }
+  | { ok: false; status: number; error: string };
 
 /** One ARM request via node:https (follows redirects, re-attaches auth). */
-function armRequest(token: string, method: string, path: string, body?: unknown): Promise<ArmResult> {
+function armRequest(
+  token: string,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<ArmResult> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   const doReq = (host: string, fullPath: string, hop: number): Promise<ArmResult> =>
     new Promise((resolve) => {
@@ -56,13 +79,19 @@ function armRequest(token: string, method: string, path: string, body?: unknown)
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: "application/json",
-            ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}),
+            ...(payload
+              ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+              : {}),
           },
         },
         (res) => {
           const status = res.statusCode ?? 0;
           const loc = res.headers.location as string | undefined;
-          if ((status === 301 || status === 302 || status === 307 || status === 308) && loc && hop < 4) {
+          if (
+            (status === 301 || status === 302 || status === 307 || status === 308) &&
+            loc &&
+            hop < 4
+          ) {
             res.resume();
             try {
               const u = new URL(loc);
@@ -77,17 +106,28 @@ function armRequest(token: string, method: string, path: string, body?: unknown)
           res.on("data", (c) => (data += c));
           res.on("end", () => {
             let parsed: Record<string, unknown> = {};
-            try { parsed = data ? JSON.parse(data) : {}; } catch { /* non-JSON */ }
+            try {
+              parsed = data ? JSON.parse(data) : {};
+            } catch {
+              /* non-JSON */
+            }
             if (status >= 200 && status < 300) {
               resolve({ ok: true, status, data: parsed });
             } else {
-              const err = (parsed.error as { message?: string; code?: string } | undefined);
-              resolve({ ok: false, status, error: err?.message || err?.code || `Azure returned ${status}: ${data.slice(0, 200)}` });
+              const err = parsed.error as { message?: string; code?: string } | undefined;
+              resolve({
+                ok: false,
+                status,
+                error:
+                  err?.message || err?.code || `Azure returned ${status}: ${data.slice(0, 200)}`,
+              });
             }
           });
         },
       );
-      req.on("error", (e) => resolve({ ok: false, status: 0, error: `Network error reaching Azure: ${e.message}` }));
+      req.on("error", (e) =>
+        resolve({ ok: false, status: 0, error: `Network error reaching Azure: ${e.message}` }),
+      );
       if (payload) req.write(payload);
       req.end();
     });
@@ -97,15 +137,22 @@ function armRequest(token: string, method: string, path: string, body?: unknown)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll a resource's provisioningState until Succeeded/Failed (or timeout). */
-async function waitProvisioned(token: string, idPath: string, api: string, timeoutMs: number): Promise<ArmResult> {
+async function waitProvisioned(
+  token: string,
+  idPath: string,
+  api: string,
+  timeoutMs: number,
+): Promise<ArmResult> {
   const deadline = Date.now() + timeoutMs;
   let last: ArmResult = { ok: false, status: 0, error: "no response" };
   while (Date.now() < deadline) {
     last = await armRequest(token, "GET", `${idPath}?api-version=${api}`);
     if (!last.ok) return last;
-    const state = ((last.data.properties as { provisioningState?: string } | undefined)?.provisioningState) ?? "";
+    const state =
+      (last.data.properties as { provisioningState?: string } | undefined)?.provisioningState ?? "";
     if (state === "Succeeded") return last;
-    if (state === "Failed" || state === "Canceled") return { ok: false, status: 0, error: `Provisioning ${state} for ${idPath}` };
+    if (state === "Failed" || state === "Canceled")
+      return { ok: false, status: 0, error: `Provisioning ${state} for ${idPath}` };
     await sleep(5000);
   }
   return { ok: false, status: 0, error: `Timed out waiting for ${idPath} to provision` };
@@ -121,14 +168,28 @@ export type CreateVmInput = {
 };
 
 export type CreateVmResult =
-  | { ok: true; vm: string; resourceGroup: string; location: string; vmSize: string; osImage: string; publicIp: string | null; adminUsername: string; adminPassword: string }
+  | {
+      ok: true;
+      vm: string;
+      resourceGroup: string;
+      location: string;
+      vmSize: string;
+      osImage: string;
+      publicIp: string | null;
+      adminUsername: string;
+      adminPassword: string;
+    }
   | { ok: false; error: string };
 
 /**
  * Provision a Linux VM (+ its RG, VNet, subnet, public IP, NIC) over ARM REST.
  * Returns the public IP and a generated admin password (shown once).
  */
-export async function createAzureVm(token: string, subscriptionId: string, input: CreateVmInput): Promise<CreateVmResult> {
+export async function createAzureVm(
+  token: string,
+  subscriptionId: string,
+  input: CreateVmInput,
+): Promise<CreateVmResult> {
   const rg = input.resourceGroup.trim();
   const vm = input.vmName.trim();
   const location = (input.location || "eastus").trim();
@@ -136,15 +197,28 @@ export async function createAzureVm(token: string, subscriptionId: string, input
   const osImage = (input.osImage || "ubuntu-22.04").trim();
   const adminUsername = (input.adminUsername || "azureuser").trim();
   const img = AZURE_VM_IMAGES[osImage];
-  if (!img) return { ok: false, error: `Unknown os_image '${osImage}'. Supported: ${Object.keys(AZURE_VM_IMAGES).join(", ")}` };
-  if (!/^[a-zA-Z][a-zA-Z0-9-]{0,62}$/.test(vm)) return { ok: false, error: "VM name must start with a letter and be ≤63 chars (letters, digits, hyphens)." };
+  if (!img)
+    return {
+      ok: false,
+      error: `Unknown os_image '${osImage}'. Supported: ${Object.keys(AZURE_VM_IMAGES).join(", ")}`,
+    };
+  if (!/^[a-zA-Z][a-zA-Z0-9-]{0,62}$/.test(vm))
+    return {
+      ok: false,
+      error: "VM name must start with a letter and be ≤63 chars (letters, digits, hyphens).",
+    };
 
   const password = generatePassword();
   const sub = `/subscriptions/${subscriptionId.trim()}`;
   const base = `${sub}/resourceGroups/${encodeURIComponent(rg)}/providers`;
 
   // 1 — Resource group (idempotent create).
-  const rgRes = await armRequest(token, "PUT", `${sub}/resourcegroups/${encodeURIComponent(rg)}?api-version=${API_RESOURCES}`, { location });
+  const rgRes = await armRequest(
+    token,
+    "PUT",
+    `${sub}/resourcegroups/${encodeURIComponent(rg)}?api-version=${API_RESOURCES}`,
+    { location },
+  );
   if (!rgRes.ok) return { ok: false, error: `Resource group: ${rgRes.error}` };
 
   // 2 — VNet + subnet.
@@ -159,7 +233,9 @@ export async function createAzureVm(token: string, subscriptionId: string, input
   if (!vnetRes.ok) return { ok: false, error: `VNet: ${vnetRes.error}` };
   const wv = await waitProvisioned(token, vnetPath, API_NETWORK, 120_000);
   if (!wv.ok) return { ok: false, error: `VNet: ${wv.error}` };
-  const subnetId = (((wv.data.properties as { subnets?: Array<{ id?: string }> } | undefined)?.subnets?.[0]?.id)) ?? `${vnetPath}/subnets/${vm}-subnet`;
+  const subnetId =
+    (wv.data.properties as { subnets?: Array<{ id?: string }> } | undefined)?.subnets?.[0]?.id ??
+    `${vnetPath}/subnets/${vm}-subnet`;
 
   // 3 — Public IP (Standard, static).
   const ipPath = `${base}/Microsoft.Network/publicIPAddresses/${vm}-ip`;
@@ -178,10 +254,16 @@ export async function createAzureVm(token: string, subscriptionId: string, input
   const nicRes = await armRequest(token, "PUT", `${nicPath}?api-version=${API_NETWORK}`, {
     location,
     properties: {
-      ipConfigurations: [{
-        name: `${vm}-ipcfg`,
-        properties: { subnet: { id: subnetId }, publicIPAddress: { id: publicIpId }, privateIPAllocationMethod: "Dynamic" },
-      }],
+      ipConfigurations: [
+        {
+          name: `${vm}-ipcfg`,
+          properties: {
+            subnet: { id: subnetId },
+            publicIPAddress: { id: publicIpId },
+            privateIPAllocationMethod: "Dynamic",
+          },
+        },
+      ],
     },
   });
   if (!nicRes.ok) return { ok: false, error: `NIC: ${nicRes.error}` };
@@ -212,7 +294,19 @@ export async function createAzureVm(token: string, subscriptionId: string, input
 
   // Read the public IP address that got allocated.
   const ipFinal = await armRequest(token, "GET", `${ipPath}?api-version=${API_NETWORK}`);
-  const publicIp = ipFinal.ok ? (((ipFinal.data.properties as { ipAddress?: string } | undefined)?.ipAddress) ?? null) : null;
+  const publicIp = ipFinal.ok
+    ? ((ipFinal.data.properties as { ipAddress?: string } | undefined)?.ipAddress ?? null)
+    : null;
 
-  return { ok: true, vm, resourceGroup: rg, location, vmSize, osImage, publicIp, adminUsername, adminPassword: password };
+  return {
+    ok: true,
+    vm,
+    resourceGroup: rg,
+    location,
+    vmSize,
+    osImage,
+    publicIp,
+    adminUsername,
+    adminPassword: password,
+  };
 }

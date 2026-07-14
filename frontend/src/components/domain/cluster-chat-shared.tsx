@@ -12,8 +12,7 @@ import { Icon } from "@/components/ui/Icon";
 import type { TfRun, TfStageStatus } from "@/hooks/queries/connectivity";
 
 export type Bubble =
-  | { id: string; role: "assistant"; text: string }
-  | { id: string; role: "user"; text: string };
+  { id: string; role: "assistant"; text: string } | { id: string; role: "user"; text: string };
 
 export const STAGE_SYMBOL: Record<TfStageStatus, string> = {
   pending: "○",
@@ -23,11 +22,29 @@ export const STAGE_SYMBOL: Record<TfStageStatus, string> = {
   skipped: "–",
 };
 
-export function ChatBubble({ role, children }: { role: "assistant" | "user"; children: React.ReactNode }) {
+export function ChatBubble({
+  role,
+  children,
+}: {
+  role: "assistant" | "user";
+  children: React.ReactNode;
+}) {
   const isAssistant = role === "assistant";
   return (
-    <div className="row gap-2" style={{ alignItems: "flex-start", flexDirection: isAssistant ? "row" : "row-reverse" }}>
-      <span className="row center" style={{ width: 26, height: 26, flex: "none", borderRadius: 8, background: "var(--surface-3, #00000010)" }}>
+    <div
+      className="row gap-2"
+      style={{ alignItems: "flex-start", flexDirection: isAssistant ? "row" : "row-reverse" }}
+    >
+      <span
+        className="row center"
+        style={{
+          width: 26,
+          height: 26,
+          flex: "none",
+          borderRadius: 8,
+          background: "var(--surface-3, #00000010)",
+        }}
+      >
         <Icon name={isAssistant ? "bot" : "user"} size={14} />
       </span>
       <div
@@ -38,7 +55,9 @@ export function ChatBubble({ role, children }: { role: "assistant" | "user"; chi
           borderRadius: 10,
           maxWidth: 520,
           whiteSpace: "pre-wrap",
-          background: isAssistant ? "var(--surface-2, #00000008)" : "var(--accent-soft, var(--accent, #5b8cff)22)",
+          background: isAssistant
+            ? "var(--surface-2, #00000008)"
+            : "var(--accent-soft, var(--accent, #5b8cff)22)",
           border: "1px solid var(--border, #00000014)",
         }}
       >
@@ -57,7 +76,9 @@ export function TerraformStageView({ run }: { run: TfRun }) {
         <Block.Title sub={`${run.action} · ${run.envKey}`}>
           <span className="row gap-2" style={{ alignItems: "center" }}>
             {run.name}
-            <Badge tone={tone} withDot>{run.status}</Badge>
+            <Badge tone={tone} withDot>
+              {run.status}
+            </Badge>
           </span>
         </Block.Title>
       </Block.Header>
@@ -68,28 +89,57 @@ export function TerraformStageView({ run }: { run: TfRun }) {
               <button
                 type="button"
                 className="row gap-2"
-                style={{ alignItems: "center", background: "none", border: "none", cursor: "pointer", padding: "4px 0", textAlign: "left", width: "100%" }}
+                style={{
+                  alignItems: "center",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "4px 0",
+                  textAlign: "left",
+                  width: "100%",
+                }}
                 onClick={() => setOpen((o) => (o === s.name ? null : s.name))}
               >
-                <span style={{ width: 16, textAlign: "center", color: stageColor(s.status) }}>{STAGE_SYMBOL[s.status]}</span>
-                <span className="mono" style={{ fontSize: 12.5 }}>terraform {s.name}</span>
+                <span style={{ width: 16, textAlign: "center", color: stageColor(s.status) }}>
+                  {STAGE_SYMBOL[s.status]}
+                </span>
+                <span className="mono" style={{ fontSize: 12.5 }}>
+                  terraform {s.name}
+                </span>
                 <span className="muted" style={{ fontSize: 12 }}>
-                  {s.status === "succeeded" ? `${s.name} succeeded`
-                    : s.status === "running" ? `${s.name} running…`
-                    : s.status === "failed" ? `${s.name} failed`
-                    : s.status === "skipped" ? "skipped"
-                    : "pending"}
+                  {s.status === "succeeded"
+                    ? `${s.name} succeeded`
+                    : s.status === "running"
+                      ? `${s.name} running…`
+                      : s.status === "failed"
+                        ? `${s.name} failed`
+                        : s.status === "skipped"
+                          ? "skipped"
+                          : "pending"}
                   {typeof s.exitCode === "number" ? ` · exit ${s.exitCode}` : ""}
                 </span>
               </button>
               {open === s.name && s.logs.trim() && (
-                <pre style={{ fontSize: 11.5, overflowX: "auto", whiteSpace: "pre-wrap", margin: "2px 0 6px 16px", maxHeight: 240, background: "var(--surface-2, #0000000a)", padding: 8, borderRadius: 6 }}>
+                <pre
+                  style={{
+                    fontSize: 11.5,
+                    overflowX: "auto",
+                    whiteSpace: "pre-wrap",
+                    margin: "2px 0 6px 16px",
+                    maxHeight: 240,
+                    background: "var(--surface-2, #0000000a)",
+                    padding: 8,
+                    borderRadius: 6,
+                  }}
+                >
                   {s.logs.slice(-3000)}
                 </pre>
               )}
             </div>
           ))}
-          {run.error && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>{run.error}</span>}
+          {run.error && (
+            <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>{run.error}</span>
+          )}
         </div>
       </Block.Body>
     </Block>

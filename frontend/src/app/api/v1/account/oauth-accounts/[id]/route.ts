@@ -9,10 +9,7 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  * user's *only* authentication method — i.e. they signed up via OAuth and
  * never set a password — because that would lock them out.
  */
-export async function DELETE(
-  req: Request,
-  ctx: { params: Promise<{ id: string }> },
-) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const sess = await getActiveSession();
   if (!sess) {
     return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
@@ -46,8 +43,7 @@ export async function DELETE(
       {
         ok: false,
         code: "last_auth_method",
-        message:
-          "This is your only sign-in method. Set a password first, then disconnect.",
+        message: "This is your only sign-in method. Set a password first, then disconnect.",
       },
       { status: 409 },
     );

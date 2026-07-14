@@ -21,7 +21,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
     select: { id: true, accountRef: true },
   });
   if (!cp?.accountRef) {
-    return NextResponse.json({ ok: true, connected: false, clusters: [], note: "Connect an Azure subscription on the Cloud providers page first." });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      clusters: [],
+      note: "Connect an Azure subscription on the Cloud providers page first.",
+    });
   }
 
   const tok = await getAzureAccessToken(cp.id);

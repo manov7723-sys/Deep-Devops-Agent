@@ -20,11 +20,21 @@ export const listAzureSubscriptionsTool: Tool<Input, Output> = {
     if (!c.ok) return { ok: false, error: c.error };
     const res = await armGet(c.ctx.accessToken, "/subscriptions?api-version=2020-01-01");
     if (!res.ok) return { ok: false, error: res.error };
-    const data = res.data as { value?: Array<{ subscriptionId: string; displayName: string; state: string }> };
-    const subscriptions = (data.value ?? []).map((s) => ({ subscriptionId: s.subscriptionId, displayName: s.displayName, state: s.state }));
+    const data = res.data as {
+      value?: Array<{ subscriptionId: string; displayName: string; state: string }>;
+    };
+    const subscriptions = (data.value ?? []).map((s) => ({
+      subscriptionId: s.subscriptionId,
+      displayName: s.displayName,
+      state: s.state,
+    }));
     return {
       ok: true,
-      output: { connectedSubscriptionId: c.ctx.subscriptionId, count: subscriptions.length, subscriptions },
+      output: {
+        connectedSubscriptionId: c.ctx.subscriptionId,
+        count: subscriptions.length,
+        subscriptions,
+      },
     };
   },
 };

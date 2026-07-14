@@ -24,7 +24,10 @@ export async function POST(req: Request) {
     );
   }
   if (body.password !== body.confirmPassword) {
-    return NextResponse.json({ ok: false, code: "mismatch", message: "New passwords do not match." }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "mismatch", message: "New passwords do not match." },
+      { status: 400 },
+    );
   }
   return NextResponse.json({ ok: true });
 }

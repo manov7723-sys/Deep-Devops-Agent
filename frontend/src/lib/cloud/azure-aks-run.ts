@@ -21,7 +21,12 @@ function https(method: string, urlStr: string, token: string, body?: unknown): P
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve) => {
     let u: URL;
-    try { u = new URL(urlStr); } catch { resolve({ status: 0, location: null, asyncOp: null, text: "bad url" }); return; }
+    try {
+      u = new URL(urlStr);
+    } catch {
+      resolve({ status: 0, location: null, asyncOp: null, text: "bad url" });
+      return;
+    }
     const req = httpsRequest(
       {
         hostname: u.hostname,
@@ -31,7 +36,9 @@ function https(method: string, urlStr: string, token: string, body?: unknown): P
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
-          ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}),
+          ...(payload
+            ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+            : {}),
         },
       },
       (res) => {
@@ -48,7 +55,9 @@ function https(method: string, urlStr: string, token: string, body?: unknown): P
         );
       },
     );
-    req.on("error", (e) => resolve({ status: 0, location: null, asyncOp: null, text: `network error: ${e.message}` }));
+    req.on("error", (e) =>
+      resolve({ status: 0, location: null, asyncOp: null, text: `network error: ${e.message}` }),
+    );
     if (payload) req.write(payload);
     req.end();
   });
@@ -56,12 +65,16 @@ function https(method: string, urlStr: string, token: string, body?: unknown): P
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export type AksRunResult = { ok: true; logs: string; exitCode: number } | { ok: false; error: string };
+export type AksRunResult =
+  { ok: true; logs: string; exitCode: number } | { ok: false; error: string };
 
 /** Pull a {logs, exitCode} command result out of an ARM response body, if present. */
 function parseResult(text: string): AksRunResult | null {
   try {
-    const j = JSON.parse(text) as { status?: string; properties?: { provisioningState?: string; exitCode?: number; logs?: string } };
+    const j = JSON.parse(text) as {
+      status?: string;
+      properties?: { provisioningState?: string; exitCode?: number; logs?: string };
+    };
     const p = j.properties;
     if (p && (p.provisioningState === "Succeeded" || typeof p.logs === "string")) {
       return { ok: true, logs: p.logs ?? "", exitCode: p.exitCode ?? 0 };
@@ -132,7 +145,12 @@ export async function aksRunCommand(
   // Async: poll the operation/result URL until it resolves.
   const pollUrl = post.asyncOp || post.location;
   if (!pollUrl) {
-    return parseResult(post.text) ?? { ok: false, error: "runCommand was accepted but Azure returned no result URL." };
+    return (
+      parseResult(post.text) ?? {
+        ok: false,
+        error: "runCommand was accepted but Azure returned no result URL.",
+      }
+    );
   }
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
@@ -143,11 +161,19 @@ export async function aksRunCommand(
       const r = parseResult(p.text);
       if (r) return r;
       try {
-        const j = JSON.parse(p.text) as { status?: string; properties?: { exitCode?: number; logs?: string } };
+        const j = JSON.parse(p.text) as {
+          status?: string;
+          properties?: { exitCode?: number; logs?: string };
+        };
         if (j.status === "Succeeded") {
-          return { ok: true, logs: j.properties?.logs ?? "(command succeeded; no output)", exitCode: j.properties?.exitCode ?? 0 };
+          return {
+            ok: true,
+            logs: j.properties?.logs ?? "(command succeeded; no output)",
+            exitCode: j.properties?.exitCode ?? 0,
+          };
         }
-        if (j.status === "Failed" || j.status === "Canceled") return { ok: false, error: `runCommand ${j.status}` };
+        if (j.status === "Failed" || j.status === "Canceled")
+          return { ok: false, error: `runCommand ${j.status}` };
       } catch {
         /* keep polling */
       }
@@ -174,9 +200,23 @@ export function buildAksRunMarker(m: AksRunMarker): string {
 /** Returns the marker fields if `blob` is an AKS run-command marker, else null. */
 export function parseAksRunMarker(blob: string): AksRunMarker | null {
   try {
-    const j = JSON.parse(blob) as { ddaClusterConnection?: string; subscriptionId?: string; resourceGroup?: string; clusterName?: string };
-    if (j?.ddaClusterConnection === AKS_RUNCMD_MARKER && j.subscriptionId && j.resourceGroup && j.clusterName) {
-      return { subscriptionId: j.subscriptionId, resourceGroup: j.resourceGroup, clusterName: j.clusterName };
+    const j = JSON.parse(blob) as {
+      ddaClusterConnection?: string;
+      subscriptionId?: string;
+      resourceGroup?: string;
+      clusterName?: string;
+    };
+    if (
+      j?.ddaClusterConnection === AKS_RUNCMD_MARKER &&
+      j.subscriptionId &&
+      j.resourceGroup &&
+      j.clusterName
+    ) {
+      return {
+        subscriptionId: j.subscriptionId,
+        resourceGroup: j.resourceGroup,
+        clusterName: j.clusterName,
+      };
     }
   } catch {
     /* a real kubeconfig (YAML), not a marker */

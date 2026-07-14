@@ -60,14 +60,22 @@ function isBareFence(name: string): name is BareFence {
 }
 function bareSegment(name: BareFence): Segment {
   switch (name) {
-    case "proxmox-vm": return { type: "proxmox-vm" };
-    case "cicd-setup": return { type: "cicd-setup" };
-    case "eks-create": return { type: "eks-create" };
-    case "gke-create": return { type: "gke-create" };
-    case "aks-create": return { type: "aks-create" };
-    case "cluster-connect": return { type: "cluster-connect" };
-    case "cloud-connect": return { type: "cloud-connect" };
-    case "secret-entry": return { type: "secret-entry" };
+    case "proxmox-vm":
+      return { type: "proxmox-vm" };
+    case "cicd-setup":
+      return { type: "cicd-setup" };
+    case "eks-create":
+      return { type: "eks-create" };
+    case "gke-create":
+      return { type: "gke-create" };
+    case "aks-create":
+      return { type: "aks-create" };
+    case "cluster-connect":
+      return { type: "cluster-connect" };
+    case "cloud-connect":
+      return { type: "cloud-connect" };
+    case "secret-entry":
+      return { type: "secret-entry" };
   }
 }
 
@@ -90,12 +98,24 @@ function extractBareOptions(value: string): Segment[] {
     let esc = false;
     for (let j = start; j < value.length; j++) {
       const c = value[j];
-      if (esc) { esc = false; continue; }
-      if (c === "\\") { esc = true; continue; }
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c === "\\") {
+        esc = true;
+        continue;
+      }
       if (c === '"') inStr = !inStr;
       else if (!inStr) {
         if (c === "{") depth++;
-        else if (c === "}") { depth--; if (depth === 0) { end = j; break; } }
+        else if (c === "}") {
+          depth--;
+          if (depth === 0) {
+            end = j;
+            break;
+          }
+        }
       }
     }
     if (end === -1) break;
@@ -127,7 +147,12 @@ function dedupeOptions(segs: Segment[]): Segment[] {
       const prev = out[out.length - 1];
       const prevPrev = out[out.length - 2];
       if (prev?.type === "options" && JSON.stringify(prev.data) === key) continue;
-      if (prev?.type === "text" && !prev.value.trim() && prevPrev?.type === "options" && JSON.stringify(prevPrev.data) === key) {
+      if (
+        prev?.type === "text" &&
+        !prev.value.trim() &&
+        prevPrev?.type === "options" &&
+        JSON.stringify(prevPrev.data) === key
+      ) {
         out.pop();
         continue;
       }
@@ -144,7 +169,8 @@ function dedupeOptions(segs: Segment[]): Segment[] {
  */
 function parseSegments(text: string): Segment[] {
   const segs: Segment[] = [];
-  const re = /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
+  const re =
+    /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
@@ -154,7 +180,8 @@ function parseSegments(text: string): Segment[] {
     } else if (m[1] === "approval-card") {
       try {
         const data = JSON.parse(m[2].trim()) as ApprovalCardData;
-        if (data && typeof data.approvalId === "string" && data.approvalId) segs.push({ type: "approval-card", data });
+        if (data && typeof data.approvalId === "string" && data.approvalId)
+          segs.push({ type: "approval-card", data });
         else segs.push({ type: "text", value: m[0] });
       } catch {
         segs.push({ type: "text", value: m[0] });
@@ -167,7 +194,11 @@ function parseSegments(text: string): Segment[] {
           Array.isArray(data.questions) &&
           data.questions.length > 0 &&
           data.questions.every(
-            (q) => typeof q?.key === "string" && typeof q?.question === "string" && Array.isArray(q?.options) && q.options.length > 0,
+            (q) =>
+              typeof q?.key === "string" &&
+              typeof q?.question === "string" &&
+              Array.isArray(q?.options) &&
+              q.options.length > 0,
           );
         if (questionsOk) segs.push({ type: "options-form", data });
         else segs.push({ type: "text", value: m[0] });
@@ -177,7 +208,8 @@ function parseSegments(text: string): Segment[] {
     } else {
       try {
         const data = JSON.parse(m[2].trim()) as OptionsData;
-        if (data && Array.isArray(data.options) && data.options.length > 0) segs.push({ type: "options", data });
+        if (data && Array.isArray(data.options) && data.options.length > 0)
+          segs.push({ type: "options", data });
         else segs.push({ type: "text", value: m[0] });
       } catch {
         segs.push({ type: "text", value: m[0] }); // not valid JSON — show raw
@@ -225,7 +257,15 @@ function OptionsBlock({
  * Agent messages render left with optional plan steps card, code block w/ copy,
  * and a PR action row.
  */
-export function ChatMsg({ message: m, authorName = "You", onApprove, onRefine, interactive = false, onOption, slug }: ChatMsgProps) {
+export function ChatMsg({
+  message: m,
+  authorName = "You",
+  onApprove,
+  onRefine,
+  interactive = false,
+  onOption,
+  slug,
+}: ChatMsgProps) {
   if (m.role === "user") {
     return (
       <div className="row gap-3 dda-chat-row" style={{ flexDirection: "row-reverse" }}>
@@ -243,27 +283,55 @@ export function ChatMsg({ message: m, authorName = "You", onApprove, onRefine, i
         <div className="dda-chat-agent-bubble">
           {parseSegments(m.text).map((seg, i) =>
             seg.type === "options" ? (
-              <OptionsBlock key={`opt-${i}`} data={seg.data} interactive={interactive} onSelect={onOption} />
+              <OptionsBlock
+                key={`opt-${i}`}
+                data={seg.data}
+                interactive={interactive}
+                onSelect={onOption}
+              />
             ) : seg.type === "options-form" ? (
-              <OptionsFormBox key={`optform-${i}`} data={seg.data} interactive={interactive} onSubmit={onOption} />
+              <OptionsFormBox
+                key={`optform-${i}`}
+                data={seg.data}
+                interactive={interactive}
+                onSubmit={onOption}
+              />
             ) : seg.type === "proxmox-vm" ? (
-              slug ? <ProxmoxVmBox key={`pvm-${i}`} slug={slug} /> : null
+              slug ? (
+                <ProxmoxVmBox key={`pvm-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "cicd-setup" ? (
-              slug ? <CicdSetupBox key={`cicd-${i}`} slug={slug} /> : null
+              slug ? (
+                <CicdSetupBox key={`cicd-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "eks-create" ? (
-              slug ? <EksChatBox key={`eks-${i}`} slug={slug} /> : null
+              slug ? (
+                <EksChatBox key={`eks-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "gke-create" ? (
-              slug ? <GkeChatBox key={`gke-${i}`} slug={slug} /> : null
+              slug ? (
+                <GkeChatBox key={`gke-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "aks-create" ? (
-              slug ? <AksChatBox key={`aks-${i}`} slug={slug} /> : null
+              slug ? (
+                <AksChatBox key={`aks-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "cluster-connect" ? (
-              slug ? <ClusterConnectBox key={`cc-${i}`} slug={slug} /> : null
+              slug ? (
+                <ClusterConnectBox key={`cc-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "cloud-connect" ? (
-              slug ? <CloudConnectBox key={`cloud-${i}`} slug={slug} /> : null
+              slug ? (
+                <CloudConnectBox key={`cloud-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "secret-entry" ? (
-              slug ? <SecretEntryBox key={`secret-${i}`} slug={slug} /> : null
+              slug ? (
+                <SecretEntryBox key={`secret-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "approval-card" ? (
-              slug ? <ApprovalCard key={`appr-${i}`} slug={slug} approvalId={seg.data.approvalId} /> : null
+              slug ? (
+                <ApprovalCard key={`appr-${i}`} slug={slug} approvalId={seg.data.approvalId} />
+              ) : null
             ) : seg.value.trim() ? (
               <MarkdownText key={`txt-${i}`} text={seg.value} />
             ) : null,
@@ -276,7 +344,9 @@ export function ChatMsg({ message: m, authorName = "You", onApprove, onRefine, i
                 <span className="row center dda-chat-plan-icon">
                   <Icon name={p[0] as IconName} size={14} />
                 </span>
-                <span className="grow" style={{ fontSize: 12.5, fontWeight: 600 }}>{p[1]}</span>
+                <span className="grow" style={{ fontSize: 12.5, fontWeight: 600 }}>
+                  {p[1]}
+                </span>
                 <Badge>{p[2]}</Badge>
               </div>
             ))}
@@ -298,7 +368,12 @@ export function ChatMsg({ message: m, authorName = "You", onApprove, onRefine, i
         )}
         {m.pr && (
           <div className="row gap-2 wrap">
-            <Btn size="sm" variant="primary" icon="approve" onClick={() => onApprove?.(m.pr!.number)}>
+            <Btn
+              size="sm"
+              variant="primary"
+              icon="approve"
+              onClick={() => onApprove?.(m.pr!.number)}
+            >
               Approve &amp; apply
             </Btn>
             <Btn size="sm" variant="outline" icon="github">

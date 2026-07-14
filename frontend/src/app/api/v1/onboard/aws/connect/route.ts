@@ -3,11 +3,7 @@ import { z } from "zod";
 import { getActiveSession } from "@/lib/auth/session";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { createProvider } from "@/lib/cloud/providers";
-import {
-  accountIdFromRoleArn,
-  getUserExternalId,
-  verifyAssumeRole,
-} from "@/lib/cloud/aws-onboard";
+import { accountIdFromRoleArn, getUserExternalId, verifyAssumeRole } from "@/lib/cloud/aws-onboard";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
@@ -25,7 +21,10 @@ const Body = z.object({
   roleArn: z
     .string()
     .trim()
-    .regex(/^arn:aws:iam::\d{12}:role\/.+/, "Role ARN must look like arn:aws:iam::<account>:role/<name>."),
+    .regex(
+      /^arn:aws:iam::\d{12}:role\/.+/,
+      "Role ARN must look like arn:aws:iam::<account>:role/<name>.",
+    ),
   region: z.string().trim().min(1).max(40).default("us-east-1"),
   accountRef: z.string().trim().max(120).optional(),
   projectSlug: z.string().trim().optional(),
@@ -50,7 +49,8 @@ export async function POST(req: Request) {
   let projectId: string | undefined;
   if (parsed.data.projectSlug) {
     const g = await requireProjectAccess(parsed.data.projectSlug, "developer");
-    if (!g.ok) return NextResponse.json({ ok: false, code: "project_access" }, { status: g.status });
+    if (!g.ok)
+      return NextResponse.json({ ok: false, code: "project_access" }, { status: g.status });
     projectId = g.access.project.id;
   }
 

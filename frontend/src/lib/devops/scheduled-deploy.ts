@@ -21,7 +21,12 @@ export type ScheduleInput = {
   namespace?: string;
 };
 
-export async function scheduleDeploy(projectId: string, userId: string, input: ScheduleInput, runAt: Date): Promise<ScheduledDeploy> {
+export async function scheduleDeploy(
+  projectId: string,
+  userId: string,
+  input: ScheduleInput,
+  runAt: Date,
+): Promise<ScheduledDeploy> {
   const namespace = (input.namespace || "").trim() || null;
   const sd = await prisma.scheduledDeploy.create({
     data: {
@@ -43,7 +48,10 @@ export async function scheduleDeploy(projectId: string, userId: string, input: S
   });
 
   // APPROVAL GATE (upfront): the scheduler won't run it until a human approves.
-  const env = await prisma.env.findFirst({ where: { projectId, key: input.envKey }, select: { id: true, namespace: true, isProduction: true } });
+  const env = await prisma.env.findFirst({
+    where: { projectId, key: input.envKey },
+    select: { id: true, namespace: true, isProduction: true },
+  });
   if (env) {
     const spec: DeploySpec = {
       appName: input.appName,
@@ -57,32 +65,52 @@ export async function scheduleDeploy(projectId: string, userId: string, input: S
     };
     const { approvalId } = await createScheduledDeployApproval(
       projectId,
-      { envKey: input.envKey, envId: env.id, namespace: spec.namespace, isProduction: env.isProduction },
+      {
+        envKey: input.envKey,
+        envId: env.id,
+        namespace: spec.namespace,
+        isProduction: env.isProduction,
+      },
       spec,
       runAt,
       sd.id,
     );
-    await prisma.scheduledDeploy.update({ where: { id: sd.id }, data: { approvalId } }).catch(() => {});
+    await prisma.scheduledDeploy
+      .update({ where: { id: sd.id }, data: { approvalId } })
+      .catch(() => {});
   }
 
   return sd;
 }
 
 export async function listScheduledDeploys(projectId: string): Promise<ScheduledDeploy[]> {
-  return prisma.scheduledDeploy.findMany({ where: { projectId }, orderBy: { runAt: "asc" }, take: 100 });
+  return prisma.scheduledDeploy.findMany({
+    where: { projectId },
+    orderBy: { runAt: "asc" },
+    take: 100,
+  });
 }
 
 export async function cancelScheduledDeploy(projectId: string, id: string): Promise<boolean> {
-  const r = await prisma.scheduledDeploy.updateMany({ where: { projectId, id, status: "pending" }, data: { status: "cancelled" } });
+  const r = await prisma.scheduledDeploy.updateMany({
+    where: { projectId, id, status: "pending" },
+    data: { status: "cancelled" },
+  });
   return r.count > 0;
 }
 
 async function mark(id: string, status: string, result?: string): Promise<void> {
-  await prisma.scheduledDeploy.update({ where: { id }, data: { status, result: result?.slice(0, 500) ?? null, ranAt: new Date() } });
+  await prisma.scheduledDeploy.update({
+    where: { id },
+    data: { status, result: result?.slice(0, 500) ?? null, ranAt: new Date() },
+  });
 }
 
 async function executeScheduled(sd: ScheduledDeploy): Promise<void> {
-  const env = await prisma.env.findFirst({ where: { projectId: sd.projectId, key: sd.envKey }, select: { id: true, namespace: true } });
+  const env = await prisma.env.findFirst({
+    where: { projectId: sd.projectId, key: sd.envKey },
+    select: { id: true, namespace: true },
+  });
   if (!env) return mark(sd.id, "failed", `Env "${sd.envKey}" not found or no cluster connected.`);
   const namespace = (sd.namespace || "").trim() || env.namespace || "default";
   const spec: DeploySpec = {
@@ -96,7 +124,12 @@ async function executeScheduled(sd: ScheduledDeploy): Promise<void> {
     host: sd.host ?? undefined,
   };
   // runDeploy notifies (email + ChatOps) on success AND failure.
-  const res = await runDeploy({ projectId: sd.projectId, userId: sd.createdById }, { envKey: sd.envKey, envId: env.id, namespace }, spec, { source: "scheduled" });
+  const res = await runDeploy(
+    { projectId: sd.projectId, userId: sd.createdById },
+    { envKey: sd.envKey, envId: env.id, namespace },
+    spec,
+    { source: "scheduled" },
+  );
   if (res.ok) await mark(sd.id, "done", `Deployed ${sanitizeAppName(sd.appName)} → ${sd.envKey}`);
   else await mark(sd.id, "failed", res.error);
 }
@@ -105,10 +138,16 @@ async function executeScheduled(sd: ScheduledDeploy): Promise<void> {
 export async function runDueScheduledDeploys(now: Date): Promise<number> {
   // Only APPROVED scheduled deploys are eligible — unapproved ones wait (and a
   // rejected one is already status="cancelled", so it's excluded).
-  const due = await prisma.scheduledDeploy.findMany({ where: { status: "pending", approved: true, runAt: { lte: now } }, take: 20 });
+  const due = await prisma.scheduledDeploy.findMany({
+    where: { status: "pending", approved: true, runAt: { lte: now } },
+    take: 20,
+  });
   let ran = 0;
   for (const sd of due) {
-    const claimed = await prisma.scheduledDeploy.updateMany({ where: { id: sd.id, status: "pending", approved: true }, data: { status: "running" } });
+    const claimed = await prisma.scheduledDeploy.updateMany({
+      where: { id: sd.id, status: "pending", approved: true },
+      data: { status: "running" },
+    });
     if (claimed.count === 0) continue; // another tick grabbed it
     try {
       await executeScheduled(sd);

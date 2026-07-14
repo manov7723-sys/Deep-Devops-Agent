@@ -58,9 +58,9 @@ export async function getLatestSnapshot(projectId: string): Promise<CostSnapshot
   return s ? row(s) : null;
 }
 
-export async function listTrend(projectId: string): Promise<
-  Array<{ monthStart: string; amountCents: number }>
-> {
+export async function listTrend(
+  projectId: string,
+): Promise<Array<{ monthStart: string; amountCents: number }>> {
   const rows = await prisma.costTrendPoint.findMany({
     where: { projectId },
     orderBy: { monthStart: "asc" },
@@ -88,7 +88,9 @@ export async function upsertSnapshot(args: CreateSnapshotArgs): Promise<CostSnap
   // snapshot for that month so callers can re-run an ETL safely.
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.costSnapshot.findUnique({
-      where: { projectId_periodStart: { projectId: args.projectId, periodStart: args.periodStart } },
+      where: {
+        projectId_periodStart: { projectId: args.projectId, periodStart: args.periodStart },
+      },
       select: { id: true },
     });
     if (existing) {

@@ -49,13 +49,22 @@ export const generateDockerfileTool: Tool<Input, Output> = {
   },
   async execute(input) {
     if (!getStack(input.stack)) {
-      return { ok: false, error: `Unknown stack "${input.stack}". Call list_dockerfile_stacks for valid ids.` };
+      return {
+        ok: false,
+        error: `Unknown stack "${input.stack}". Call list_dockerfile_stacks for valid ids.`,
+      };
     }
     try {
-      const { files, notes } = generateDockerArtifacts({ stack: input.stack, params: input.params });
+      const { files, notes } = generateDockerArtifacts({
+        stack: input.stack,
+        params: input.params,
+      });
       return { ok: true, output: { stack: input.stack, files, notes } };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : "Failed to generate Dockerfile." };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : "Failed to generate Dockerfile.",
+      };
     }
   },
 };

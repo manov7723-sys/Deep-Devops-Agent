@@ -85,7 +85,12 @@ export function checkInfraPolicy(spec: PolicySpec): PolicyResult {
   // Public storage (structured)
   checked.push("no-public-storage");
   if (spec.publicBucket) {
-    violations.push({ rule: "no-public-storage", severity: "high", message: "Object storage is set to public — public buckets are blocked. Use private + signed URLs / CloudFront." });
+    violations.push({
+      rule: "no-public-storage",
+      severity: "high",
+      message:
+        "Object storage is set to public — public buckets are blocked. Use private + signed URLs / CloudFront.",
+    });
   }
 
   // HCL pattern scan
@@ -93,20 +98,50 @@ export function checkInfraPolicy(spec: PolicySpec): PolicyResult {
     const hcl = spec.hcl;
     checked.push("hcl-scan");
 
-    if (/acl\s*=\s*"public-read(-write)?"/i.test(hcl) || /"?Principal"?\s*[:=]\s*"?\*"?/.test(hcl)) {
-      violations.push({ rule: "no-public-storage", severity: "high", message: "Terraform grants public access (public-read ACL or Principal \"*\"). Public storage/policies are blocked." });
+    if (
+      /acl\s*=\s*"public-read(-write)?"/i.test(hcl) ||
+      /"?Principal"?\s*[:=]\s*"?\*"?/.test(hcl)
+    ) {
+      violations.push({
+        rule: "no-public-storage",
+        severity: "high",
+        message:
+          'Terraform grants public access (public-read ACL or Principal "*"). Public storage/policies are blocked.',
+      });
     }
-    if (/block_public_acls\s*=\s*false/i.test(hcl) || /restrict_public_buckets\s*=\s*false/i.test(hcl)) {
-      violations.push({ rule: "no-public-storage", severity: "high", message: "S3 public-access block is disabled (block_public_acls/restrict_public_buckets = false). Keep public access blocked." });
+    if (
+      /block_public_acls\s*=\s*false/i.test(hcl) ||
+      /restrict_public_buckets\s*=\s*false/i.test(hcl)
+    ) {
+      violations.push({
+        rule: "no-public-storage",
+        severity: "high",
+        message:
+          "S3 public-access block is disabled (block_public_acls/restrict_public_buckets = false). Keep public access blocked.",
+      });
     }
     // Admin ports open to the world
-    if (/cidr_blocks\s*=\s*\[?\s*"0\.0\.0\.0\/0"/.test(hcl) && /from_port\s*=\s*(22|3389)\b/.test(hcl)) {
-      violations.push({ rule: "no-world-open-admin", severity: "high", message: "A security group opens SSH/RDP (22/3389) to 0.0.0.0/0. Restrict admin access to known IPs / a bastion." });
+    if (
+      /cidr_blocks\s*=\s*\[?\s*"0\.0\.0\.0\/0"/.test(hcl) &&
+      /from_port\s*=\s*(22|3389)\b/.test(hcl)
+    ) {
+      violations.push({
+        rule: "no-world-open-admin",
+        severity: "high",
+        message:
+          "A security group opens SSH/RDP (22/3389) to 0.0.0.0/0. Restrict admin access to known IPs / a bastion.",
+      });
     }
     // Oversized instance declared in HCL
-    const it = hcl.match(/instance_type\s*=\s*"([^"]+)"/i)?.[1] || hcl.match(/machine_type\s*=\s*"([^"]+)"/i)?.[1];
+    const it =
+      hcl.match(/instance_type\s*=\s*"([^"]+)"/i)?.[1] ||
+      hcl.match(/machine_type\s*=\s*"([^"]+)"/i)?.[1];
     if (it && isOversized(it)) {
-      violations.push({ rule: "instance-size", severity: "high", message: `Terraform declares an oversized/GPU instance ("${it}"). Blocked by default.` });
+      violations.push({
+        rule: "instance-size",
+        severity: "high",
+        message: `Terraform declares an oversized/GPU instance ("${it}"). Blocked by default.`,
+      });
     }
   }
 

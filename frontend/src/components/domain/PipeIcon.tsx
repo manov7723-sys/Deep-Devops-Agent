@@ -29,7 +29,11 @@ export function PipeIcon({ status, size = 30 }: PipeIconProps) {
       }}
       aria-label={status}
     >
-      <Icon name={icon} size={Math.max(13, Math.round(size * 0.5))} className={status === "running" ? "spin" : undefined} />
+      <Icon
+        name={icon}
+        size={Math.max(13, Math.round(size * 0.5))}
+        className={status === "running" ? "spin" : undefined}
+      />
     </span>
   );
 }

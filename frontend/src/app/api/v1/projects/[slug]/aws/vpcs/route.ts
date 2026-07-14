@@ -25,23 +25,43 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   const url = new URL(req.url);
   const envKey = url.searchParams.get("env")?.trim();
   if (!envKey) {
-    return NextResponse.json({ ok: true, connected: false, vpcs: [], subnets: [], note: "Pick an environment first." });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      vpcs: [],
+      subnets: [],
+      note: "Pick an environment first.",
+    });
   }
 
   const env = await envBySlugAndKey(gate.access.project.id, envKey);
   if (!env?.cloudProviderId) {
-    return NextResponse.json({ ok: true, connected: false, vpcs: [], subnets: [], note: "This environment has no AWS provider." });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      vpcs: [],
+      subnets: [],
+      note: "This environment has no AWS provider.",
+    });
   }
 
   const resolved = await resolveAwsExecEnv(env.cloudProviderId);
   if (!resolved.ok) {
-    return NextResponse.json({ ok: true, connected: false, vpcs: [], subnets: [], note: resolved.message });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      vpcs: [],
+      subnets: [],
+      note: resolved.message,
+    });
   }
 
   const region = (url.searchParams.get("region")?.trim() || resolved.region).trim();
   const baseEnv = { ...resolved.env, AWS_REGION: region, AWS_DEFAULT_REGION: region };
 
-  async function awsJson(args: string[]): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
+  async function awsJson(
+    args: string[],
+  ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
     const res = await runStage({
       command: "aws",
       args: [...args, "--region", region, "--output", "json", "--no-cli-pager"],
@@ -67,13 +87,25 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
 
   const vpcRes = await awsJson(["ec2", "describe-vpcs"]);
   if (!vpcRes.ok) {
-    return NextResponse.json({ ok: true, connected: true, region, vpcs: [], subnets: [], note: vpcRes.error });
+    return NextResponse.json({
+      ok: true,
+      connected: true,
+      region,
+      vpcs: [],
+      subnets: [],
+      note: vpcRes.error,
+    });
   }
   const subnetRes = await awsJson(["ec2", "describe-subnets"]);
 
-  const vpcs: Vpc[] = (((vpcRes.data as { Vpcs?: unknown[] }).Vpcs ?? []) as Array<{
-    VpcId?: string; CidrBlock?: string; IsDefault?: boolean; Tags?: Array<{ Key?: string; Value?: string }>;
-  }>).map((v) => ({
+  const vpcs: Vpc[] = (
+    ((vpcRes.data as { Vpcs?: unknown[] }).Vpcs ?? []) as Array<{
+      VpcId?: string;
+      CidrBlock?: string;
+      IsDefault?: boolean;
+      Tags?: Array<{ Key?: string; Value?: string }>;
+    }>
+  ).map((v) => ({
     vpcId: v.VpcId ?? "(unknown)",
     name: tagName(v.Tags),
     cidr: v.CidrBlock ?? "",
@@ -81,9 +113,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   }));
 
   const subnets: Subnet[] = subnetRes.ok
-    ? (((subnetRes.data as { Subnets?: unknown[] }).Subnets ?? []) as Array<{
-        SubnetId?: string; VpcId?: string; CidrBlock?: string; AvailabilityZone?: string; Tags?: Array<{ Key?: string; Value?: string }>;
-      }>).map((s) => ({
+    ? (
+        ((subnetRes.data as { Subnets?: unknown[] }).Subnets ?? []) as Array<{
+          SubnetId?: string;
+          VpcId?: string;
+          CidrBlock?: string;
+          AvailabilityZone?: string;
+          Tags?: Array<{ Key?: string; Value?: string }>;
+        }>
+      ).map((s) => ({
         subnetId: s.SubnetId ?? "(unknown)",
         vpcId: s.VpcId ?? "",
         name: tagName(s.Tags),

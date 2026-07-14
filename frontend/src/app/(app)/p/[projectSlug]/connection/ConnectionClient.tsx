@@ -12,10 +12,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Block, Btn, Field, Input, PageHead, Select, Textarea } from "@/components/ui";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api/client";
-import { useClusterStatus, useConnectCluster, useProvisionAzureTfstate, type ConnectClusterResult } from "@/hooks/queries/connectivity";
+import {
+  useClusterStatus,
+  useConnectCluster,
+  useProvisionAzureTfstate,
+  type ConnectClusterResult,
+} from "@/hooks/queries/connectivity";
 import { useActiveEnv } from "@/hooks/useActiveEnv";
 
-type EnvRow = { id: string; key: string; name: string; cloudProviderId?: string | null; hasKubeconfig?: boolean };
+type EnvRow = {
+  id: string;
+  key: string;
+  name: string;
+  cloudProviderId?: string | null;
+  hasKubeconfig?: boolean;
+};
 type Cloud = "aws" | "azure" | "gcp";
 
 const CLOUDS: { key: Cloud; label: string; clusterLabel: string }[] = [
@@ -25,15 +36,44 @@ const CLOUDS: { key: Cloud; label: string; clusterLabel: string }[] = [
 ];
 
 const AWS_REGIONS = [
-  "us-east-1", "us-east-2", "us-west-1", "us-west-2", "eu-west-1", "eu-west-2",
-  "eu-central-1", "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ca-central-1", "sa-east-1",
+  "us-east-1",
+  "us-east-2",
+  "us-west-1",
+  "us-west-2",
+  "eu-west-1",
+  "eu-west-2",
+  "eu-central-1",
+  "ap-south-1",
+  "ap-southeast-1",
+  "ap-southeast-2",
+  "ap-northeast-1",
+  "ca-central-1",
+  "sa-east-1",
 ];
 
 // GCP regions (note: no dash before the number — unlike AWS).
 const GCP_REGIONS = [
-  "us-central1", "us-east1", "us-east4", "us-east5", "us-west1", "us-west2", "us-west3", "us-west4", "us-south1",
-  "northamerica-northeast1", "southamerica-east1", "europe-west1", "europe-west2", "europe-west3", "europe-west4",
-  "europe-north1", "asia-east1", "asia-northeast1", "asia-south1", "asia-southeast1", "australia-southeast1",
+  "us-central1",
+  "us-east1",
+  "us-east4",
+  "us-east5",
+  "us-west1",
+  "us-west2",
+  "us-west3",
+  "us-west4",
+  "us-south1",
+  "northamerica-northeast1",
+  "southamerica-east1",
+  "europe-west1",
+  "europe-west2",
+  "europe-west3",
+  "europe-west4",
+  "europe-north1",
+  "asia-east1",
+  "asia-northeast1",
+  "asia-south1",
+  "asia-southeast1",
+  "australia-southeast1",
 ];
 
 type GcpContext = { projects?: { projectId: string; name: string }[] };
@@ -86,7 +126,10 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
   // Default to the project's ACTIVE env (if it exists), else the first env.
   useEffect(() => {
     if (envKey || !envs || envs.length === 0) return;
-    const active = projectActiveEnv && envs.find((e) => e.key === projectActiveEnv) ? projectActiveEnv : envs[0].key;
+    const active =
+      projectActiveEnv && envs.find((e) => e.key === projectActiveEnv)
+        ? projectActiveEnv
+        : envs[0].key;
     setEnvKey(active);
   }, [envs, envKey, projectActiveEnv]);
 
@@ -121,14 +164,19 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
     staleTime: 60_000,
   });
   const azClusters = azClustersResp?.clusters ?? [];
-  const azResourceGroups = Array.from(new Set(azClusters.map((c) => c.resourceGroup))).filter(Boolean).sort();
+  const azResourceGroups = Array.from(new Set(azClusters.map((c) => c.resourceGroup)))
+    .filter(Boolean)
+    .sort();
   const azClustersInRg = azClusters.filter((c) => c.resourceGroup === resourceGroup);
 
   // Live EKS cluster list for the chosen AWS region — mirrors the Azure flow so
   // you pick a region → pick a cluster instead of typing the name.
   const { data: awsClustersResp, isFetching: awsClustersLoading } = useQuery<AwsClustersResp>({
     queryKey: ["p", slug, "aws-clusters", region],
-    queryFn: () => api.get<AwsClustersResp>(`/projects/${slug}/aws/clusters?region=${encodeURIComponent(region)}`),
+    queryFn: () =>
+      api.get<AwsClustersResp>(
+        `/projects/${slug}/aws/clusters?region=${encodeURIComponent(region)}`,
+      ),
     enabled: cloud === "aws" && !!region.trim(),
     staleTime: 30_000,
   });
@@ -145,7 +193,8 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
 
   // Save a pasted kubeconfig onto the selected env (the manual fallback).
   const pasteSave = useMutation({
-    mutationFn: () => api.patch(`/projects/${slug}/envs/${envKey}`, { kubeconfig: kubeText.trim() }),
+    mutationFn: () =>
+      api.patch(`/projects/${slug}/envs/${envKey}`, { kubeconfig: kubeText.trim() }),
     onSuccess: () => {
       setPasteMsg("✅ Saved — cluster connected.");
       setKubeText("");
@@ -212,11 +261,15 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
           </Block.Title>
         </Block.Header>
         {connectedEnvs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>No cluster connected yet. Connect one below.</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            No cluster connected yet. Connect one below.
+          </span>
         ) : (
           <div className="row gap-2 wrap">
             {connectedEnvs.map((e) => (
-              <Badge key={e.id} tone="ok" withDot>{e.name || e.key} · connected</Badge>
+              <Badge key={e.id} tone="ok" withDot>
+                {e.name || e.key} · connected
+              </Badge>
             ))}
           </div>
         )}
@@ -238,7 +291,9 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
         </Block.Header>
 
         {!envs || envs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>Create an environment first to store the cluster connection.</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Create an environment first to store the cluster connection.
+          </span>
         ) : (
           <div className="col gap-3" style={{ maxWidth: 520 }}>
             {/* Cloud provider pills — scoped to the project's target cloud. */}
@@ -250,7 +305,10 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
                     type="button"
                     className={`chip ${cloud === c.key ? "active" : ""}`}
                     style={{ height: 38 }}
-                    onClick={() => { setCloud(c.key); setResult(null); }}
+                    onClick={() => {
+                      setCloud(c.key);
+                      setResult(null);
+                    }}
                   >
                     <Icon name="cloud" size={15} /> {c.label}
                   </button>
@@ -258,11 +316,26 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
               </div>
             </Field>
 
-            <Field label="Environment" required hint="Where the kubeconfig (and AWS creds, for EKS) come from / are stored.">
+            <Field
+              label="Environment"
+              required
+              hint="Where the kubeconfig (and AWS creds, for EKS) come from / are stored."
+            >
               <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Select value={envKey} onValueChange={setEnvKey} ariaLabel="Environment"
-                  options={envs.map((e) => ({ value: e.key, label: `${e.name || e.key}${e.hasKubeconfig ? " · connected" : ""}` }))} />
-                {selectedEnv?.hasKubeconfig && <Badge tone="ok" withDot>connected</Badge>}
+                <Select
+                  value={envKey}
+                  onValueChange={setEnvKey}
+                  ariaLabel="Environment"
+                  options={envs.map((e) => ({
+                    value: e.key,
+                    label: `${e.name || e.key}${e.hasKubeconfig ? " · connected" : ""}`,
+                  }))}
+                />
+                {selectedEnv?.hasKubeconfig && (
+                  <Badge tone="ok" withDot>
+                    connected
+                  </Badge>
+                )}
               </div>
             </Field>
 
@@ -270,28 +343,52 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
             {selectedHasKube && (
               <div className="col gap-2" style={{ marginTop: 4 }}>
                 <div className="row gap-2" style={{ alignItems: "center" }}>
-                  <Badge tone="ok" withDot>connected</Badge>
-                  {clusterStatus.data?.cluster && <span style={{ fontWeight: 600 }}>{clusterStatus.data.cluster}</span>}
-                  <span className="muted" style={{ fontSize: 12.5 }}>kubeconfig stored on env</span>
+                  <Badge tone="ok" withDot>
+                    connected
+                  </Badge>
+                  {clusterStatus.data?.cluster && (
+                    <span style={{ fontWeight: 600 }}>{clusterStatus.data.cluster}</span>
+                  )}
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    kubeconfig stored on env
+                  </span>
                 </div>
                 {clusterStatus.isLoading ? (
-                  <span className="muted" style={{ fontSize: 12.5 }}>Checking cluster…</span>
-                ) : clusterStatus.data?.verified && clusterStatus.data.nodes && clusterStatus.data.nodes.length > 0 ? (
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    Checking cluster…
+                  </span>
+                ) : clusterStatus.data?.verified &&
+                  clusterStatus.data.nodes &&
+                  clusterStatus.data.nodes.length > 0 ? (
                   <div className="col gap-1">
-                    <span className="muted" style={{ fontSize: 12.5 }}>{clusterStatus.data.nodes.length} node(s):</span>
+                    <span className="muted" style={{ fontSize: 12.5 }}>
+                      {clusterStatus.data.nodes.length} node(s):
+                    </span>
                     {clusterStatus.data.nodes.map((n) => (
-                      <div key={n.name} className="row gap-2" style={{ alignItems: "center", fontSize: 12.5 }}>
-                        <Badge tone={n.status === "Ready" ? "ok" : "warn"} withDot>{n.status}</Badge>
+                      <div
+                        key={n.name}
+                        className="row gap-2"
+                        style={{ alignItems: "center", fontSize: 12.5 }}
+                      >
+                        <Badge tone={n.status === "Ready" ? "ok" : "warn"} withDot>
+                          {n.status}
+                        </Badge>
                         <span className="mono">{n.name}</span>
                         <span className="faint">{n.version}</span>
                       </div>
                     ))}
                   </div>
                 ) : clusterStatus.data?.verified ? (
-                  <span className="muted" style={{ fontSize: 12.5 }}>Verified — no nodes reported.</span>
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    Verified — no nodes reported.
+                  </span>
                 ) : (
                   <span className="muted" style={{ fontSize: 12.5 }}>
-                    Stored, but couldn&apos;t verify with kubectl{clusterStatus.data?.verifyError ? ` (${clusterStatus.data.verifyError.slice(0, 120)})` : ""}.
+                    Stored, but couldn&apos;t verify with kubectl
+                    {clusterStatus.data?.verifyError
+                      ? ` (${clusterStatus.data.verifyError.slice(0, 120)})`
+                      : ""}
+                    .
                   </span>
                 )}
               </div>
@@ -300,31 +397,71 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
             {/* Per-cloud locating fields */}
             {cloud === "aws" && (
               <Field label="Region" required>
-                <Select value={region} onValueChange={setRegion} ariaLabel="AWS region"
-                  options={AWS_REGIONS.map((r) => ({ value: r, label: r }))} />
+                <Select
+                  value={region}
+                  onValueChange={setRegion}
+                  ariaLabel="AWS region"
+                  options={AWS_REGIONS.map((r) => ({ value: r, label: r }))}
+                />
               </Field>
             )}
             {cloud === "azure" && (
-              <Field label="Account type" hint={azureMethod === "org" ? "Organizational (Entra) account or service principal — connects automatically." : "Personal Microsoft account that owns the subscription — connect via Cloud Shell + paste."}>
+              <Field
+                label="Account type"
+                hint={
+                  azureMethod === "org"
+                    ? "Organizational (Entra) account or service principal — connects automatically."
+                    : "Personal Microsoft account that owns the subscription — connect via Cloud Shell + paste."
+                }
+              >
                 <div className="row gap-2 wrap">
-                  <button type="button" className={`chip ${azureMethod === "org" ? "active" : ""}`} style={{ height: 38 }}
-                    onClick={() => { setAzureMethod("org"); setResult(null); }}>
+                  <button
+                    type="button"
+                    className={`chip ${azureMethod === "org" ? "active" : ""}`}
+                    style={{ height: 38 }}
+                    onClick={() => {
+                      setAzureMethod("org");
+                      setResult(null);
+                    }}
+                  >
                     Organizational account
                   </button>
-                  <button type="button" className={`chip ${azureMethod === "personal" ? "active" : ""}`} style={{ height: 38 }}
-                    onClick={() => { setAzureMethod("personal"); setResult(null); }}>
+                  <button
+                    type="button"
+                    className={`chip ${azureMethod === "personal" ? "active" : ""}`}
+                    style={{ height: 38 }}
+                    onClick={() => {
+                      setAzureMethod("personal");
+                      setResult(null);
+                    }}
+                  >
                     Personal account
                   </button>
                 </div>
               </Field>
             )}
             {cloud === "azure" && (
-              <Field label="Resource group" required hint="Resource groups that contain AKS clusters.">
+              <Field
+                label="Resource group"
+                required
+                hint="Resource groups that contain AKS clusters."
+              >
                 {azResourceGroups.length > 0 ? (
-                  <Select value={resourceGroup} onValueChange={(v) => { setResourceGroup(v); setClusterName(""); }} ariaLabel="Resource group"
-                    options={azResourceGroups.map((r) => ({ value: r, label: r }))} />
+                  <Select
+                    value={resourceGroup}
+                    onValueChange={(v) => {
+                      setResourceGroup(v);
+                      setClusterName("");
+                    }}
+                    ariaLabel="Resource group"
+                    options={azResourceGroups.map((r) => ({ value: r, label: r }))}
+                  />
                 ) : (
-                  <Input value={resourceGroup} onChange={(e) => setResourceGroup(e.target.value)} placeholder="my-resource-group" />
+                  <Input
+                    value={resourceGroup}
+                    onChange={(e) => setResourceGroup(e.target.value)}
+                    placeholder="my-resource-group"
+                  />
                 )}
               </Field>
             )}
@@ -332,15 +469,35 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
               <>
                 <Field label="Project" required hint="The GCP project ID (not the display name).">
                   {gcpProjects.length > 0 ? (
-                    <Select value={project} onValueChange={setProject} ariaLabel="GCP project"
-                      options={gcpProjects.map((p) => ({ value: p.projectId, label: p.name ? `${p.name} · ${p.projectId}` : p.projectId }))} />
+                    <Select
+                      value={project}
+                      onValueChange={setProject}
+                      ariaLabel="GCP project"
+                      options={gcpProjects.map((p) => ({
+                        value: p.projectId,
+                        label: p.name ? `${p.name} · ${p.projectId}` : p.projectId,
+                      }))}
+                    />
                   ) : (
-                    <Input className="mono" value={project} onChange={(e) => setProject(e.target.value)} placeholder="my-project-id-123456" />
+                    <Input
+                      className="mono"
+                      value={project}
+                      onChange={(e) => setProject(e.target.value)}
+                      placeholder="my-project-id-123456"
+                    />
                   )}
                 </Field>
-                <Field label="Region / location" required hint="GCP location (e.g. us-central1) — the cluster's region or zone.">
-                  <Select value={region} onValueChange={setRegion} ariaLabel="GCP location"
-                    options={GCP_REGIONS.map((r) => ({ value: r, label: r }))} />
+                <Field
+                  label="Region / location"
+                  required
+                  hint="GCP location (e.g. us-central1) — the cluster's region or zone."
+                >
+                  <Select
+                    value={region}
+                    onValueChange={setRegion}
+                    ariaLabel="GCP location"
+                    options={GCP_REGIONS.map((r) => ({ value: r, label: r }))}
+                  />
                 </Field>
               </>
             )}
@@ -348,22 +505,43 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
             <Field
               label={`${meta.clusterLabel} name`}
               required
-              hint={cloud === "aws"
-                ? (awsClustersLoading ? "Finding EKS clusters in this region…"
-                  : awsClusters.length > 0 ? `Found ${awsClusters.length} cluster${awsClusters.length === 1 ? "" : "s"} in ${region} — pick one.`
-                  : awsClustersResp?.note || "No EKS clusters found in this region — pick another region or type a name.")
-                : undefined}
+              hint={
+                cloud === "aws"
+                  ? awsClustersLoading
+                    ? "Finding EKS clusters in this region…"
+                    : awsClusters.length > 0
+                      ? `Found ${awsClusters.length} cluster${awsClusters.length === 1 ? "" : "s"} in ${region} — pick one.`
+                      : awsClustersResp?.note ||
+                        "No EKS clusters found in this region — pick another region or type a name."
+                  : undefined
+              }
             >
               {cloud === "azure" && azClusters.length > 0 ? (
-                <Select value={clusterName} onValueChange={setClusterName} ariaLabel="AKS cluster"
-                  options={azClustersInRg.map((c) => ({ value: c.name, label: c.name }))} />
+                <Select
+                  value={clusterName}
+                  onValueChange={setClusterName}
+                  ariaLabel="AKS cluster"
+                  options={azClustersInRg.map((c) => ({ value: c.name, label: c.name }))}
+                />
               ) : cloud === "aws" && awsClusters.length > 0 ? (
-                <Select value={clusterName} onValueChange={setClusterName} ariaLabel="EKS cluster"
-                  options={awsClusters.map((c) => ({ value: c.name, label: `${c.name}${c.version ? ` · v${c.version}` : ""}${c.status && c.status !== "ACTIVE" ? ` · ${c.status}` : ""}` }))} />
+                <Select
+                  value={clusterName}
+                  onValueChange={setClusterName}
+                  ariaLabel="EKS cluster"
+                  options={awsClusters.map((c) => ({
+                    value: c.name,
+                    label: `${c.name}${c.version ? ` · v${c.version}` : ""}${c.status && c.status !== "ACTIVE" ? ` · ${c.status}` : ""}`,
+                  }))}
+                />
               ) : (
-                <Input value={clusterName} onChange={(e) => setClusterName(e.target.value)}
+                <Input
+                  value={clusterName}
+                  onChange={(e) => setClusterName(e.target.value)}
                   placeholder={`type the ${meta.clusterLabel} name`}
-                  onKeyDown={(e) => { if (e.key === "Enter") run(); }} />
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") run();
+                  }}
+                />
               )}
             </Field>
 
@@ -371,7 +549,13 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
                 fetch credentials via the app and uses the guided paste below). */}
             {(cloud !== "azure" || azureMethod === "org") && (
               <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Btn variant="primary" icon="globe" loading={connect.isPending} disabled={!canConnect} onClick={run}>
+                <Btn
+                  variant="primary"
+                  icon="globe"
+                  loading={connect.isPending}
+                  disabled={!canConnect}
+                  onClick={run}
+                >
                   {connect.isPending ? "Connecting…" : `Connect ${meta.label}`}
                 </Btn>
               </div>
@@ -381,35 +565,77 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
 
             {/* Azure PERSONAL-account guided connect: pick RG + cluster above, run
                 this in Cloud Shell, paste the result below. */}
-            {cloud === "azure" && azureMethod === "personal" && !!resourceGroup.trim() && !!clusterName.trim() && (
-              <div className="col gap-2" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>Get this cluster&apos;s kubeconfig</span>
-                <span className="muted" style={{ fontSize: 12.5 }}>
-                  1. Open Azure <b>Cloud Shell</b> (the <span className="mono">&gt;_</span> icon at the top of the Azure Portal) and run:
-                </span>
-                <div className="row gap-2" style={{ alignItems: "center" }}>
-                  <code className="mono" style={{ fontSize: 12, background: "var(--surface-2, #0000000a)", padding: "6px 8px", borderRadius: 6, flex: 1, overflowX: "auto", whiteSpace: "nowrap" }}>
-                    {azCommand}
-                  </code>
-                  <Btn variant="outline" size="sm" icon="copy"
-                    onClick={() => { navigator.clipboard?.writeText(azCommand); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
-                    {copied ? "Copied" : "Copy"}
-                  </Btn>
+            {cloud === "azure" &&
+              azureMethod === "personal" &&
+              !!resourceGroup.trim() &&
+              !!clusterName.trim() && (
+                <div
+                  className="col gap-2"
+                  style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}
+                >
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>
+                    Get this cluster&apos;s kubeconfig
+                  </span>
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    1. Open Azure <b>Cloud Shell</b> (the <span className="mono">&gt;_</span> icon
+                    at the top of the Azure Portal) and run:
+                  </span>
+                  <div className="row gap-2" style={{ alignItems: "center" }}>
+                    <code
+                      className="mono"
+                      style={{
+                        fontSize: 12,
+                        background: "var(--surface-2, #0000000a)",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        flex: 1,
+                        overflowX: "auto",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {azCommand}
+                    </code>
+                    <Btn
+                      variant="outline"
+                      size="sm"
+                      icon="copy"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(azCommand);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      }}
+                    >
+                      {copied ? "Copied" : "Copy"}
+                    </Btn>
+                  </div>
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    2. Copy its full output, then paste it below and Save.
+                  </span>
                 </div>
-                <span className="muted" style={{ fontSize: 12.5 }}>
-                  2. Copy its full output, then paste it below and Save.
-                </span>
-              </div>
-            )}
+              )}
 
             {/* Manual fallback: paste a kubeconfig (for clusters/accounts the
                 API can't auto-fetch). Same result as auto-connect. */}
-            <div className="col gap-2" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+            <div
+              className="col gap-2"
+              style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}
+            >
               {!pasteOpen ? (
                 <button
                   type="button"
-                  onClick={() => { setShowPaste(true); setPasteMsg(null); }}
-                  style={{ background: "none", border: "none", padding: 0, color: "var(--accent, #5b8cff)", cursor: "pointer", fontSize: 13, textAlign: "left" }}
+                  onClick={() => {
+                    setShowPaste(true);
+                    setPasteMsg(null);
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    color: "var(--accent, #5b8cff)",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    textAlign: "left",
+                  }}
                 >
                   Can&apos;t auto-connect? Paste a kubeconfig instead →
                 </button>
@@ -435,14 +661,30 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
                       icon="check"
                       loading={pasteSave.isPending}
                       disabled={!envKey || kubeText.trim().length < 20 || pasteSave.isPending}
-                      onClick={() => { setPasteMsg(null); pasteSave.mutate(); }}
+                      onClick={() => {
+                        setPasteMsg(null);
+                        pasteSave.mutate();
+                      }}
                     >
                       Save kubeconfig
                     </Btn>
                     {!isAzurePersonal && (
-                      <Btn variant="ghost" size="sm" onClick={() => { setShowPaste(false); setPasteMsg(null); }}>Cancel</Btn>
+                      <Btn
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShowPaste(false);
+                          setPasteMsg(null);
+                        }}
+                      >
+                        Cancel
+                      </Btn>
                     )}
-                    {pasteMsg && <span className="muted" style={{ fontSize: 12.5 }}>{pasteMsg}</span>}
+                    {pasteMsg && (
+                      <span className="muted" style={{ fontSize: 12.5 }}>
+                        {pasteMsg}
+                      </span>
+                    )}
                   </div>
                 </>
               )}
@@ -559,7 +801,7 @@ function TerraformStateSection({
     : provisionAzure.error instanceof Error
       ? provisionAzure.error.message
       : provisionAzure.data && provisionAzure.data.ok === false
-        ? provisionAzure.data.message ?? "Provision failed."
+        ? (provisionAzure.data.message ?? "Provision failed.")
         : null;
 
   const saveDisabled =
@@ -587,41 +829,94 @@ function TerraformStateSection({
       </Block.Header>
       <div className="col gap-3" style={{ maxWidth: 480 }}>
         <Field label="Environment">
-          <Select value={envKey} onValueChange={setEnvKey} ariaLabel="Environment"
-            options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))} />
+          <Select
+            value={envKey}
+            onValueChange={setEnvKey}
+            ariaLabel="Environment"
+            options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))}
+          />
         </Field>
         {isGcp ? (
-          <Field label="GCS state bucket" hint="Stores this environment's Terraform state remotely. Required before applying.">
-            <Input className="mono" value={gcsBucket} placeholder="tfstate-yourorg-projectname" onChange={(e) => setGcsBucket(e.target.value)} />
+          <Field
+            label="GCS state bucket"
+            hint="Stores this environment's Terraform state remotely. Required before applying."
+          >
+            <Input
+              className="mono"
+              value={gcsBucket}
+              placeholder="tfstate-yourorg-projectname"
+              onChange={(e) => setGcsBucket(e.target.value)}
+            />
           </Field>
         ) : isAzure ? (
           <>
             <Field label="Resource group" hint="The resource group that owns the storage account.">
-              <Input className="mono" value={azResourceGroup} placeholder="tfstate-rg" onChange={(e) => setAzResourceGroup(e.target.value)} />
+              <Input
+                className="mono"
+                value={azResourceGroup}
+                placeholder="tfstate-rg"
+                onChange={(e) => setAzResourceGroup(e.target.value)}
+              />
             </Field>
             <Field label="Storage account" hint="Globally unique, 3-24 lowercase letters/digits.">
-              <Input className="mono" value={azStorageAccount} placeholder="mytfstateacct" onChange={(e) => setAzStorageAccount(e.target.value)} />
+              <Input
+                className="mono"
+                value={azStorageAccount}
+                placeholder="mytfstateacct"
+                onChange={(e) => setAzStorageAccount(e.target.value)}
+              />
             </Field>
             <Field label="Blob container" hint="Container inside the storage account. Required.">
-              <Input className="mono" value={azContainer} placeholder="tfstate" onChange={(e) => setAzContainer(e.target.value)} />
+              <Input
+                className="mono"
+                value={azContainer}
+                placeholder="tfstate"
+                onChange={(e) => setAzContainer(e.target.value)}
+              />
             </Field>
           </>
         ) : (
           <>
-            <Field label="S3 state bucket" hint="Stores this environment's Terraform state remotely. Required before applying.">
-              <Input className="mono" value={bucket} placeholder="my-project-tfstate" onChange={(e) => setBucket(e.target.value)} />
+            <Field
+              label="S3 state bucket"
+              hint="Stores this environment's Terraform state remotely. Required before applying."
+            >
+              <Input
+                className="mono"
+                value={bucket}
+                placeholder="my-project-tfstate"
+                onChange={(e) => setBucket(e.target.value)}
+              />
             </Field>
             <Field label="Bucket region">
-              <Select value={region} onValueChange={setRegion} ariaLabel="Bucket region"
-                options={AWS_REGIONS.map((r) => ({ value: r, label: r }))} />
+              <Select
+                value={region}
+                onValueChange={setRegion}
+                ariaLabel="Bucket region"
+                options={AWS_REGIONS.map((r) => ({ value: r, label: r }))}
+              />
             </Field>
-            <Field label="DynamoDB lock table" hint="Prevents concurrent applies from corrupting state. Optional.">
-              <Input className="mono" value={table} placeholder="terraform-locks" onChange={(e) => setTable(e.target.value)} />
+            <Field
+              label="DynamoDB lock table"
+              hint="Prevents concurrent applies from corrupting state. Optional."
+            >
+              <Input
+                className="mono"
+                value={table}
+                placeholder="terraform-locks"
+                onChange={(e) => setTable(e.target.value)}
+              />
             </Field>
           </>
         )}
         <div className="row gap-2 wrap" style={{ alignItems: "center" }}>
-          <Btn variant="primary" icon="check" loading={save.isPending} disabled={saveDisabled} onClick={() => save.mutate()}>
+          <Btn
+            variant="primary"
+            icon="check"
+            loading={save.isPending}
+            disabled={saveDisabled}
+            onClick={() => save.mutate()}
+          >
             Save
           </Btn>
           {isAzure && (
@@ -642,7 +937,11 @@ function TerraformStateSection({
               Provision in Azure
             </Btn>
           )}
-          {saveMsg && <span className="muted" style={{ fontSize: 12.5 }}>{saveMsg}</span>}
+          {saveMsg && (
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              {saveMsg}
+            </span>
+          )}
           {provisionMsg && (
             <span
               style={{
@@ -659,7 +958,13 @@ function TerraformStateSection({
   );
 }
 
-function ConnectResult({ result, clusterLabel }: { result: ConnectClusterResult; clusterLabel: string }) {
+function ConnectResult({
+  result,
+  clusterLabel,
+}: {
+  result: ConnectClusterResult;
+  clusterLabel: string;
+}) {
   if (!result.ok) {
     return (
       <div className="col gap-1" style={{ marginTop: 4 }}>
@@ -667,7 +972,18 @@ function ConnectResult({ result, clusterLabel }: { result: ConnectClusterResult;
           ❌ {result.message ?? "Connection failed."}
         </span>
         {result.stderr && (
-          <pre style={{ fontSize: 11.5, whiteSpace: "pre-wrap", margin: 0, maxHeight: 180, overflowY: "auto", background: "var(--surface-2, #0000000a)", padding: 8, borderRadius: 6 }}>
+          <pre
+            style={{
+              fontSize: 11.5,
+              whiteSpace: "pre-wrap",
+              margin: 0,
+              maxHeight: 180,
+              overflowY: "auto",
+              background: "var(--surface-2, #0000000a)",
+              padding: 8,
+              borderRadius: 6,
+            }}
+          >
             {result.stderr}
           </pre>
         )}
@@ -677,28 +993,44 @@ function ConnectResult({ result, clusterLabel }: { result: ConnectClusterResult;
   return (
     <div className="col gap-2" style={{ marginTop: 4 }}>
       <div className="row gap-2" style={{ alignItems: "center" }}>
-        <Badge tone="ok" withDot>connected</Badge>
+        <Badge tone="ok" withDot>
+          connected
+        </Badge>
         <span style={{ fontWeight: 600 }}>{result.cluster}</span>
-        <span className="muted" style={{ fontSize: 12.5 }}>kubeconfig stored on env</span>
+        <span className="muted" style={{ fontSize: 12.5 }}>
+          kubeconfig stored on env
+        </span>
       </div>
       {result.verified ? (
         result.nodes && result.nodes.length > 0 ? (
           <div className="col gap-1">
-            <span className="muted" style={{ fontSize: 12.5 }}>{result.nodes.length} node(s):</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              {result.nodes.length} node(s):
+            </span>
             {result.nodes.map((n) => (
-              <div key={n.name} className="row gap-2" style={{ alignItems: "center", fontSize: 12.5 }}>
-                <Badge tone={n.status === "Ready" ? "ok" : "warn"} withDot>{n.status}</Badge>
+              <div
+                key={n.name}
+                className="row gap-2"
+                style={{ alignItems: "center", fontSize: 12.5 }}
+              >
+                <Badge tone={n.status === "Ready" ? "ok" : "warn"} withDot>
+                  {n.status}
+                </Badge>
                 <span className="mono">{n.name}</span>
                 <span className="faint">{n.version}</span>
               </div>
             ))}
           </div>
         ) : (
-          <span className="muted" style={{ fontSize: 12.5 }}>Verified — no nodes reported.</span>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            Verified — no nodes reported.
+          </span>
         )
       ) : (
         <span className="muted" style={{ fontSize: 12.5 }}>
-          Stored, but couldn&apos;t verify with kubectl{result.verifyError ? ` (${result.verifyError.slice(0, 120)})` : ""}. The {clusterLabel} may be unreachable from the server.
+          Stored, but couldn&apos;t verify with kubectl
+          {result.verifyError ? ` (${result.verifyError.slice(0, 120)})` : ""}. The {clusterLabel}{" "}
+          may be unreachable from the server.
         </span>
       )}
     </div>

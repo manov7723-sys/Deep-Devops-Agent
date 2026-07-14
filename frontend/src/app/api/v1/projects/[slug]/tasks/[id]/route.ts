@@ -5,10 +5,7 @@ import { deleteTask, patchTask } from "@/lib/agentops/tasks";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
-export async function PATCH(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; id: string }> },
-) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
@@ -40,10 +37,7 @@ export async function PATCH(
   return NextResponse.json({ ok: true, task: res.task });
 }
 
-export async function DELETE(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; id: string }> },
-) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });

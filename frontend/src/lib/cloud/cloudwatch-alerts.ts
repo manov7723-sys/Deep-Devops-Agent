@@ -60,5 +60,11 @@ export async function syncEksAlarmsToAlerts(opts: {
       resolvedCount++;
     }
   }
-  return { ok: true, firing: states.alarms.filter((s) => s.state === "ALARM").length, opened, resolved: resolvedCount, alarms: states.alarms };
+  return {
+    ok: true,
+    firing: states.alarms.filter((s) => s.state === "ALARM").length,
+    opened,
+    resolved: resolvedCount,
+    alarms: states.alarms,
+  };
 }

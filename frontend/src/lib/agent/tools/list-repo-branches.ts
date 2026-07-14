@@ -23,31 +23,45 @@ export const listRepoBranchesTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'GitHub repo as "owner/name" (must be attached to this project).' },
+      repoFullName: {
+        type: "string",
+        description: 'GitHub repo as "owner/name" (must be attached to this project).',
+      },
     },
     required: ["repoFullName"],
     additionalProperties: false,
   },
   async execute(input, ctx) {
     const repo = await prisma.repo.findFirst({
-      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
       select: { id: true, defaultBranch: true },
     });
-    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    if (!repo)
+      return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
 
     const tok = await resolveTokenForRepo(repo.id);
-    const fallback: Output = { branches: repo.defaultBranch ? [repo.defaultBranch] : [], defaultBranch: repo.defaultBranch || "main" };
+    const fallback: Output = {
+      branches: repo.defaultBranch ? [repo.defaultBranch] : [],
+      defaultBranch: repo.defaultBranch || "main",
+    };
     if (!tok.ok) return { ok: true, output: fallback };
 
     try {
-      const res = await fetch(`https://api.github.com/repos/${input.repoFullName}/branches?per_page=100`, {
-        headers: {
-          Authorization: `Bearer ${tok.accessToken}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
+      const res = await fetch(
+        `https://api.github.com/repos/${input.repoFullName}/branches?per_page=100`,
+        {
+          headers: {
+            Authorization: `Bearer ${tok.accessToken}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          cache: "no-store",
         },
-        cache: "no-store",
-      });
+      );
       if (!res.ok) return { ok: true, output: fallback };
       const rows = (await res.json().catch(() => [])) as Array<{ name?: string }>;
       const branches = rows.map((b) => b.name).filter((n): n is string => !!n);

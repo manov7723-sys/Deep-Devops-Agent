@@ -66,7 +66,12 @@ export function useAwsExternalId(enabled = true) {
   });
 }
 
-export type ConnectAwsInput = { roleArn: string; region: string; accountRef?: string; projectSlug?: string };
+export type ConnectAwsInput = {
+  roleArn: string;
+  region: string;
+  accountRef?: string;
+  projectSlug?: string;
+};
 export type ConnectAwsResult = {
   ok: boolean;
   provider?: { id: string };
@@ -84,7 +89,8 @@ export function useConnectAwsAccount() {
   return useMutation({
     mutationFn: async (input: ConnectAwsInput) => {
       const res = await api.post<ConnectAwsResult>("/onboard/aws/connect", input);
-      if (!res.ok || !res.provider) throw new Error(res.message ?? "Could not connect AWS account.");
+      if (!res.ok || !res.provider)
+        throw new Error(res.message ?? "Could not connect AWS account.");
       return res;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cloud-providers"] }),
@@ -94,8 +100,18 @@ export function useConnectAwsAccount() {
 // ── Kubernetes manifest builder ───────────────────────────────────────
 import type { ApiResource } from "@/lib/devops/manifest-templates";
 
-export type ApiVersionsResponse = { ok: boolean; source: "cluster" | "builtin"; apiVersions: string[]; note?: string };
-export type ApiResourcesResponse = { ok: boolean; source: "cluster" | "builtin"; resources: ApiResource[]; note?: string };
+export type ApiVersionsResponse = {
+  ok: boolean;
+  source: "cluster" | "builtin";
+  apiVersions: string[];
+  note?: string;
+};
+export type ApiResourcesResponse = {
+  ok: boolean;
+  source: "cluster" | "builtin";
+  resources: ApiResource[];
+  note?: string;
+};
 
 /** Live apiVersions from the env's cluster (falls back to a built-in list). */
 export function useClusterApiVersions(slug: string, envKey: string, enabled = true) {
@@ -215,7 +231,10 @@ export function useCommitManifest(slug: string) {
   return useMutation({
     mutationFn: async (input: CommitManifestInput) => {
       try {
-        const res = await api.post<CommitManifestResult>(`/projects/${slug}/manifests/commit`, input);
+        const res = await api.post<CommitManifestResult>(
+          `/projects/${slug}/manifests/commit`,
+          input,
+        );
         if (!res.ok) throw new Error("Commit failed.");
         return res;
       } catch (e) {
@@ -276,7 +295,8 @@ export function useSaveVaultConfig(slug: string) {
 export function useDeleteVaultConfig(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => api.del<{ ok: boolean }>(`/vault/config?slug=${encodeURIComponent(slug)}`),
+    mutationFn: async () =>
+      api.del<{ ok: boolean }>(`/vault/config?slug=${encodeURIComponent(slug)}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vault", "config", slug] });
       qc.invalidateQueries({ queryKey: ["vault", "status", slug] });
@@ -290,9 +310,7 @@ export function useTerraformRuns(slug: string, envKey: string, enabled = true) {
     queryKey: ["terraform", "runs", slug, envKey],
     enabled: enabled && !!slug && !!envKey,
     queryFn: async () =>
-      api.get<{ ok: boolean; runs: TfRun[] }>(
-        `/projects/${slug}/envs/${envKey}/terraform`,
-      ),
+      api.get<{ ok: boolean; runs: TfRun[] }>(`/projects/${slug}/envs/${envKey}/terraform`),
     refetchInterval: (q) => {
       const runs = q.state.data?.runs ?? [];
       const active = runs.some((r) => r.status === "queued" || r.status === "running");
@@ -307,9 +325,7 @@ export function useTerraformRun(slug: string, envKey: string, runId: string | nu
     queryKey: ["terraform", "run", slug, envKey, runId],
     enabled: !!slug && !!envKey && !!runId,
     queryFn: async () =>
-      api.get<{ ok: boolean; run: TfRun }>(
-        `/projects/${slug}/envs/${envKey}/terraform/${runId}`,
-      ),
+      api.get<{ ok: boolean; run: TfRun }>(`/projects/${slug}/envs/${envKey}/terraform/${runId}`),
     refetchInterval: (q) => {
       const s = q.state.data?.run?.status;
       return s === "queued" || s === "running" ? 1_500 : false;
@@ -362,7 +378,8 @@ export function useClusterStatus(slug: string, envKey: string, enabled = true) {
     queryKey: ["p", slug, "cluster-status", envKey],
     enabled: enabled && !!slug && !!envKey,
     staleTime: 30_000,
-    queryFn: async () => api.get<ClusterStatusResult>(`/projects/${slug}/envs/${envKey}/cluster-status`),
+    queryFn: async () =>
+      api.get<ClusterStatusResult>(`/projects/${slug}/envs/${envKey}/cluster-status`),
   });
 }
 
@@ -370,10 +387,7 @@ export function useClusterStatus(slug: string, envKey: string, enabled = true) {
 export function useConnectCluster(slug: string, envKey: string) {
   return useMutation({
     mutationFn: async (input: ConnectClusterInput) =>
-      api.post<ConnectClusterResult>(
-        `/projects/${slug}/envs/${envKey}/connect-cluster`,
-        input,
-      ),
+      api.post<ConnectClusterResult>(`/projects/${slug}/envs/${envKey}/connect-cluster`, input),
   });
 }
 
@@ -386,8 +400,7 @@ export function useStartTerraformRun(slug: string, envKey: string) {
         `/projects/${slug}/envs/${envKey}/terraform`,
         input,
       ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
   });
 }
 
@@ -453,12 +466,14 @@ export function useDeleteGkeCluster(slug: string, envKey: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: DeleteGkeClusterInput) =>
-      api.post<{ ok: boolean; deleted?: boolean; alreadyGone?: boolean; code?: string; message?: string }>(
-        `/projects/${slug}/envs/${envKey}/gke-cluster-delete`,
-        input,
-      ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+      api.post<{
+        ok: boolean;
+        deleted?: boolean;
+        alreadyGone?: boolean;
+        code?: string;
+        message?: string;
+      }>(`/projects/${slug}/envs/${envKey}/gke-cluster-delete`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
   });
 }
 
@@ -476,7 +491,6 @@ export function useRerunTerraformRun(slug: string, envKey: string) {
         `/projects/${slug}/envs/${envKey}/terraform/${input.runId}/rerun`,
         input.action ? { action: input.action } : {},
       ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
   });
 }

@@ -94,7 +94,8 @@ export function CloudCredentialsModal({
   });
 
   const vaultReady = !!vault.data?.configured && !!vault.data?.reachable;
-  const canSave = vaultReady && accessKeyId.trim().length >= 16 && secretAccessKey.trim().length > 0;
+  const canSave =
+    vaultReady && accessKeyId.trim().length >= 16 && secretAccessKey.trim().length > 0;
 
   return (
     <Modal
@@ -146,7 +147,12 @@ export function CloudCredentialsModal({
         {cred.data?.hasVaultCreds && (
           <div className="row gap-2" style={{ alignItems: "center" }}>
             <Badge tone="ok">keys stored</Badge>
-            <Btn variant="danger" size="sm" loading={clear.isPending} onClick={() => clear.mutate()}>
+            <Btn
+              variant="danger"
+              size="sm"
+              loading={clear.isPending}
+              onClick={() => clear.mutate()}
+            >
               Remove keys
             </Btn>
           </div>
@@ -162,7 +168,11 @@ export function CloudCredentialsModal({
           />
         </Field>
 
-        <Field label="AWS Secret Access Key" required hint="Stored encrypted in Vault; never shown again.">
+        <Field
+          label="AWS Secret Access Key"
+          required
+          hint="Stored encrypted in Vault; never shown again."
+        >
           <Input
             type="password"
             value={secretAccessKey}
@@ -174,17 +184,30 @@ export function CloudCredentialsModal({
         </Field>
 
         <Field label="Default region" hint="Optional — defaults to the provider's region.">
-          <Input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="us-east-1" />
+          <Input
+            value={region}
+            onChange={(e) => setRegion(e.target.value)}
+            placeholder="us-east-1"
+          />
         </Field>
 
-        {serverError && <p className="text-sm" style={{ color: "var(--danger, #e5484d)" }}>{serverError}</p>}
+        {serverError && (
+          <p className="text-sm" style={{ color: "var(--danger, #e5484d)" }}>
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );
 }
 
 function errMsg(e: unknown): string {
-  if (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string") {
+  if (
+    e &&
+    typeof e === "object" &&
+    "message" in e &&
+    typeof (e as { message: unknown }).message === "string"
+  ) {
     return (e as { message: string }).message;
   }
   return "Something went wrong. Please try again.";

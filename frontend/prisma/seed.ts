@@ -81,9 +81,7 @@ type AdminSpec = {
   name?: string;
 };
 
-type PolicyCheck =
-  | { ok: true; warning?: string }
-  | { ok: false; reason: string };
+type PolicyCheck = { ok: true; warning?: string } | { ok: false; reason: string };
 
 function checkPolicy(password: string): PolicyCheck {
   if (password.length < 8) {
@@ -104,7 +102,10 @@ function checkPolicy(password: string): PolicyCheck {
   return { ok: true };
 }
 
-function splitName(full: string | undefined, emailFallback: string): {
+function splitName(
+  full: string | undefined,
+  emailFallback: string,
+): {
   firstName: string;
   lastName: string;
   display: string;
@@ -306,7 +307,13 @@ const PLAN_CATALOG: PlanDefault[] = [
     envLimit: 10,
     seatLimit: 20,
     agentTier: "All agents + custom models",
-    highlights: ["20 projects", "10 environments per project", "20 seats", "All agents + custom models", "Audit log retention"],
+    highlights: [
+      "20 projects",
+      "10 environments per project",
+      "20 seats",
+      "All agents + custom models",
+      "Audit log retention",
+    ],
   },
   {
     tier: "Enterprise",
@@ -320,7 +327,13 @@ const PLAN_CATALOG: PlanDefault[] = [
     envLimit: null,
     seatLimit: null,
     agentTier: "Custom",
-    highlights: ["Unlimited projects + envs", "Custom seats", "On-prem option", "SSO + SCIM", "Dedicated support"],
+    highlights: [
+      "Unlimited projects + envs",
+      "Custom seats",
+      "On-prem option",
+      "SSO + SCIM",
+      "Dedicated support",
+    ],
   },
 ];
 
@@ -392,7 +405,9 @@ function parsePlansJson(): PlanJsonRow[] {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`SEED_PLANS_JSON is not valid JSON: ${err instanceof Error ? err.message : err}`);
+    throw new Error(
+      `SEED_PLANS_JSON is not valid JSON: ${err instanceof Error ? err.message : err}`,
+    );
   }
   if (!Array.isArray(parsed)) {
     throw new Error("SEED_PLANS_JSON must be a JSON array.");
@@ -425,7 +440,9 @@ function parseAddonsJson(): AddonJsonRow[] {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`SEED_ADDONS_JSON is not valid JSON: ${err instanceof Error ? err.message : err}`);
+    throw new Error(
+      `SEED_ADDONS_JSON is not valid JSON: ${err instanceof Error ? err.message : err}`,
+    );
   }
   if (!Array.isArray(parsed)) {
     throw new Error("SEED_ADDONS_JSON must be a JSON array.");
@@ -472,7 +489,9 @@ async function seedPlans(): Promise<void> {
       : created.priceCents === null
         ? "—"
         : `$${(created.priceCents / 100).toFixed(2)}/${created.period}`;
-    console.log(`  ✓ ${created.tier} (“${created.name}”) ${priceLabel}${stripePriceId ? `  ${stripePriceId}` : ""}`);
+    console.log(
+      `  ✓ ${created.tier} (“${created.name}”) ${priceLabel}${stripePriceId ? `  ${stripePriceId}` : ""}`,
+    );
   }
 
   // 2) Extras from SEED_PLANS_JSON (with literal Stripe IDs in the JSON).

@@ -58,7 +58,10 @@ export async function PATCH(req: Request) {
   if (!sess) return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
   const parsed = PatchProfile.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, code: "invalid_input", issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "invalid_input", issues: parsed.error.issues },
+      { status: 400 },
+    );
   }
   const patch = parsed.data;
 

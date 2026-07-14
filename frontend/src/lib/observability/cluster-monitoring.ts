@@ -36,8 +36,16 @@ type RunResult =
   | { ok: false; error: string };
 
 /** Run a kubectl/helm command against an env's cluster using its stored kubeconfig. */
-async function runWithKubeconfig(envId: string, command: string, args: string[], timeoutMs = 30_000): Promise<RunResult> {
-  const env = await prisma.env.findUnique({ where: { id: envId }, select: { cloudProviderId: true } });
+async function runWithKubeconfig(
+  envId: string,
+  command: string,
+  args: string[],
+  timeoutMs = 30_000,
+): Promise<RunResult> {
+  const env = await prisma.env.findUnique({
+    where: { id: envId },
+    select: { cloudProviderId: true },
+  });
   const kcfg = await getKubeconfigForEnv(envId);
   if (!kcfg.ok) return { ok: false, error: kcfg.message };
   try {
@@ -46,7 +54,13 @@ async function runWithKubeconfig(envId: string, command: string, args: string[],
     if (res.exitCode === -1 && (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"))) {
       return { ok: false, error: `\`${command}\` isn't installed on the server.` };
     }
-    return { ok: true, exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr, timedOut: res.timedOut };
+    return {
+      ok: true,
+      exitCode: res.exitCode,
+      stdout: res.stdout,
+      stderr: res.stderr,
+      timedOut: res.timedOut,
+    };
   } finally {
     await kcfg.handle.cleanup();
   }
@@ -54,7 +68,10 @@ async function runWithKubeconfig(envId: string, command: string, args: string[],
 
 /** Best-effort human error from a non-zero helm/kubectl run — helm writes some
  *  failures to stdout, so fall back to it when stderr is empty. */
-function runError(res: { stdout: string; stderr: string; timedOut: boolean }, fallback: string): string {
+function runError(
+  res: { stdout: string; stderr: string; timedOut: boolean },
+  fallback: string,
+): string {
   if (res.timedOut) return `${fallback} (timed out — the cluster was slow to apply; try again).`;
   const out = (res.stderr.trim() || res.stdout.trim()).slice(-700);
   return out || fallback;
@@ -122,7 +139,7 @@ function valuesYaml(grafanaRootUrl: string, disableNodeExporter = false): string
     "  sidecar:",
     "    dashboards:",
     "      enabled: true",
-    '      label: grafana_dashboard',
+    "      label: grafana_dashboard",
     "    datasources:",
     "      enabled: true",
     "      label: grafana_datasource",
@@ -185,7 +202,12 @@ export async function installMonitoring(
 ): Promise<InstallResult> {
   // 1 — ensure the helm repo is available (idempotent).
   onStep("Preparing Helm chart repository…");
-  const add = await runWithKubeconfig(envId, "helm", ["repo", "add", "prometheus-community", HELM_REPO, "--force-update"], 60_000);
+  const add = await runWithKubeconfig(
+    envId,
+    "helm",
+    ["repo", "add", "prometheus-community", HELM_REPO, "--force-update"],
+    60_000,
+  );
   if (!add.ok) return { ok: false, error: add.error };
   await runWithKubeconfig(envId, "helm", ["repo", "update", "prometheus-community"], 60_000);
 
@@ -202,12 +224,18 @@ export async function installMonitoring(
         envId,
         "helm",
         [
-          "upgrade", "--install", RELEASE, "prometheus-community/kube-prometheus-stack",
-          "--namespace", NS, "--create-namespace",
+          "upgrade",
+          "--install",
+          RELEASE,
+          "prometheus-community/kube-prometheus-stack",
+          "--namespace",
+          NS,
+          "--create-namespace",
           // Skip the OpenAPI schema download — on slow/restricted API servers it
           // times out ("failed to download openapi: context deadline exceeded").
           "--disable-openapi-validation",
-          "-f", vp,
+          "-f",
+          vp,
         ],
         600_000,
       );
@@ -224,20 +252,33 @@ export async function installMonitoring(
     const recoverable =
       install.ok &&
       install.exitCode !== 0 &&
-      /another operation .*is in progress|pending-(install|upgrade|rollback)|kube-system/i.test(`${install.stderr}\n${install.stdout}`);
+      /another operation .*is in progress|pending-(install|upgrade|rollback)|kube-system/i.test(
+        `${install.stderr}\n${install.stdout}`,
+      );
     if (recoverable) {
       console.warn("[monitoring] clearing release and reinstalling fresh");
       onStep("Cleaning up a previous failed install…");
       // No --wait: just drop the dead release record so the retry can proceed.
       // Waiting here can hang on half-created resources with finalizers.
-      await runWithKubeconfig(envId, "helm", ["uninstall", RELEASE, "--namespace", NS, "--ignore-not-found"], 120_000);
+      await runWithKubeconfig(
+        envId,
+        "helm",
+        ["uninstall", RELEASE, "--namespace", NS, "--ignore-not-found"],
+        120_000,
+      );
       // Remove orphaned admission webhook configs from earlier (webhook-enabled)
       // attempts — a dead webhook rejects new resources and re-stalls the install.
       for (const kind of ["validatingwebhookconfiguration", "mutatingwebhookconfiguration"]) {
         await runWithKubeconfig(
           envId,
           "kubectl",
-          ["delete", kind, "-l", "app.kubernetes.io/name=kube-prometheus-stack", "--ignore-not-found"],
+          [
+            "delete",
+            kind,
+            "-l",
+            "app.kubernetes.io/name=kube-prometheus-stack",
+            "--ignore-not-found",
+          ],
           30_000,
         );
       }
@@ -251,7 +292,9 @@ export async function installMonitoring(
     if (
       install.ok &&
       install.exitCode !== 0 &&
-      /node-exporter[\s\S]*?(denied|forbidden|warden|not allowed)|(denied|warden)[\s\S]*?node-exporter|autopilot|hostPID|hostNetwork/i.test(`${install.stderr}\n${install.stdout}`)
+      /node-exporter[\s\S]*?(denied|forbidden|warden|not allowed)|(denied|warden)[\s\S]*?node-exporter|autopilot|hostPID|hostNetwork/i.test(
+        `${install.stderr}\n${install.stdout}`,
+      )
     ) {
       console.warn("[monitoring] retrying without node-exporter (GKE Autopilot)");
       onStep("Adjusting for GKE Autopilot (disabling node-exporter)…");
@@ -285,7 +328,10 @@ export async function installMonitoring(
   onStep("Installing log collection (Loki + Promtail)…");
   await installLogging(envId).catch((e) => console.error("[monitoring] loki install failed", e));
 
-  return { ok: true, message: `Monitoring installing into namespace "${NS}". Prometheus, Grafana and logs (Loki) come up over the next few minutes.` };
+  return {
+    ok: true,
+    message: `Monitoring installing into namespace "${NS}". Prometheus, Grafana and logs (Loki) come up over the next few minutes.`,
+  };
 }
 
 /**
@@ -295,7 +341,12 @@ export async function installMonitoring(
  * the app's namespace.
  */
 async function installLogging(envId: string): Promise<void> {
-  const add = await runWithKubeconfig(envId, "helm", ["repo", "add", "grafana", GRAFANA_HELM_REPO, "--force-update"], 60_000);
+  const add = await runWithKubeconfig(
+    envId,
+    "helm",
+    ["repo", "add", "grafana", GRAFANA_HELM_REPO, "--force-update"],
+    60_000,
+  );
   if (!add.ok) throw new Error(add.error);
   await runWithKubeconfig(envId, "helm", ["repo", "update", "grafana"], 60_000);
 
@@ -303,12 +354,20 @@ async function installLogging(envId: string): Promise<void> {
     envId,
     "helm",
     [
-      "upgrade", "--install", LOKI_RELEASE, "grafana/loki-stack",
-      "--namespace", NS, "--create-namespace",
+      "upgrade",
+      "--install",
+      LOKI_RELEASE,
+      "grafana/loki-stack",
+      "--namespace",
+      NS,
+      "--create-namespace",
       "--disable-openapi-validation",
-      "--set", "grafana.enabled=false",
-      "--set", "promtail.enabled=true",
-      "--set", "loki.isDefault=false",
+      "--set",
+      "grafana.enabled=false",
+      "--set",
+      "promtail.enabled=true",
+      "--set",
+      "loki.isDefault=false",
     ],
     300_000,
   );
@@ -320,7 +379,14 @@ async function installLogging(envId: string): Promise<void> {
   const datasource = {
     apiVersion: 1,
     datasources: [
-      { name: "Loki", type: "loki", uid: "loki", access: "proxy", url: `http://${LOKI_RELEASE}:3100`, jsonData: { maxLines: 1000 } },
+      {
+        name: "Loki",
+        type: "loki",
+        uid: "loki",
+        access: "proxy",
+        url: `http://${LOKI_RELEASE}:3100`,
+        jsonData: { maxLines: 1000 },
+      },
     ],
   };
   const configMap = {
@@ -348,7 +414,12 @@ async function installLogging(envId: string): Promise<void> {
 // it in the background and let the status endpoint report progress instead of
 // blocking the HTTP request. State is in-memory (per server process) — good
 // enough: pod readiness is the source of truth once helm has applied.
-export type InstallPhase = { status: "running" | "error" | "done"; error?: string; step?: string; at: number };
+export type InstallPhase = {
+  status: "running" | "error" | "done";
+  error?: string;
+  step?: string;
+  at: number;
+};
 const installs = new Map<string, InstallPhase>();
 // Safety net: never treat a "running" phase as live forever. installMonitoring
 // is bounded by per-command timeouts (~25 min absolute worst case with full
@@ -363,7 +434,8 @@ function isLiveRunning(p: InstallPhase | undefined): boolean {
 // Persist the last install outcome to disk so the error survives a dev
 // hot-reload / server restart (in-memory state alone is lost on reload).
 type Outcome = { status: "done" | "error"; error?: string; at: number };
-const outcomeFile = (envId: string) => join(tmpdir(), `dda-mon-outcome-${envId.replace(/[^a-z0-9-]/gi, "")}.json`);
+const outcomeFile = (envId: string) =>
+  join(tmpdir(), `dda-mon-outcome-${envId.replace(/[^a-z0-9-]/gi, "")}.json`);
 async function persistOutcome(envId: string, o: Outcome) {
   try {
     await writeFile(outcomeFile(envId), JSON.stringify(o));
@@ -408,12 +480,18 @@ export function beginInstallMonitoring(
   };
   void installMonitoring(envId, opts, onStep)
     .then((res) => {
-      const o: Outcome = res.ok ? { status: "done", at: Date.now() } : { status: "error", error: res.error, at: Date.now() };
+      const o: Outcome = res.ok
+        ? { status: "done", at: Date.now() }
+        : { status: "error", error: res.error, at: Date.now() };
       installs.set(envId, o);
       void persistOutcome(envId, o);
     })
     .catch((e) => {
-      const o: Outcome = { status: "error", error: e instanceof Error ? e.message : String(e), at: Date.now() };
+      const o: Outcome = {
+        status: "error",
+        error: e instanceof Error ? e.message : String(e),
+        at: Date.now(),
+      };
       installs.set(envId, o);
       void persistOutcome(envId, o);
     });
@@ -463,7 +541,10 @@ export type ScrapeTarget = {
  * /metrics endpoint. Discovery is enabled cluster-wide (see valuesYaml), so the
  * object just needs the right selector + port + path. Applied via kubectl.
  */
-export async function createScrapeTarget(envId: string, t: ScrapeTarget): Promise<{ ok: boolean; message: string }> {
+export async function createScrapeTarget(
+  envId: string,
+  t: ScrapeTarget,
+): Promise<{ ok: boolean; message: string }> {
   const numeric = /^\d+$/.test(t.port.trim());
   const portField = numeric ? { targetPort: Number(t.port) } : { port: t.port };
   const endpoint = { ...portField, path: t.path || "/metrics", interval: t.interval || "30s" };
@@ -471,7 +552,10 @@ export async function createScrapeTarget(envId: string, t: ScrapeTarget): Promis
     t.kind === "ServiceMonitor"
       ? { selector: { matchLabels: t.matchLabels }, endpoints: [endpoint] }
       : { selector: { matchLabels: t.matchLabels }, podMetricsEndpoints: [endpoint] };
-  const safeName = `dda-${t.name}`.toLowerCase().replace(/[^a-z0-9.-]/g, "-").slice(0, 63);
+  const safeName = `dda-${t.name}`
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]/g, "-")
+    .slice(0, 63);
   const crd = {
     apiVersion: "monitoring.coreos.com/v1",
     kind: t.kind,
@@ -492,11 +576,17 @@ export async function createScrapeTarget(envId: string, t: ScrapeTarget): Promis
     if (res.exitCode !== 0) {
       const err = (res.stderr.trim() || res.stdout.trim()).slice(-400);
       if (/no matches for kind|could not find/i.test(err)) {
-        return { ok: false, message: "Prometheus Operator CRDs not found — install monitoring first." };
+        return {
+          ok: false,
+          message: "Prometheus Operator CRDs not found — install monitoring first.",
+        };
       }
       return { ok: false, message: err || "kubectl apply failed." };
     }
-    return { ok: true, message: `${t.kind} "${safeName}" created in "${t.namespace}". Prometheus will start scraping within ~1 min.` };
+    return {
+      ok: true,
+      message: `${t.kind} "${safeName}" created in "${t.namespace}". Prometheus will start scraping within ~1 min.`,
+    };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -507,7 +597,10 @@ export async function createScrapeTarget(envId: string, t: ScrapeTarget): Promis
  * ServiceMonitor), entirely server-side via the env's kubeconfig — so the user
  * can SEE service metrics work without touching a terminal. Idempotent.
  */
-export async function deployDemoMetricsApp(envId: string, namespace: string): Promise<{ ok: boolean; message: string }> {
+export async function deployDemoMetricsApp(
+  envId: string,
+  namespace: string,
+): Promise<{ ok: boolean; message: string }> {
   const app = "sample-metrics-app";
   const labels = { app };
   const list = {
@@ -534,7 +627,10 @@ export async function deployDemoMetricsApp(envId: string, namespace: string): Pr
                   name: "app",
                   image: "quay.io/brancz/prometheus-example-app:v0.5.0",
                   ports: [{ name: "metrics", containerPort: 8080 }],
-                  resources: { requests: { cpu: "10m", memory: "16Mi" }, limits: { cpu: "100m", memory: "64Mi" } },
+                  resources: {
+                    requests: { cpu: "10m", memory: "16Mi" },
+                    limits: { cpu: "100m", memory: "64Mi" },
+                  },
                 },
               ],
             },
@@ -555,7 +651,11 @@ export async function deployDemoMetricsApp(envId: string, namespace: string): Pr
     await writeFile(path, JSON.stringify(list), { mode: 0o600 });
     const apply = await runWithKubeconfig(envId, "kubectl", ["apply", "-f", path], 60_000);
     if (!apply.ok) return { ok: false, message: apply.error };
-    if (apply.exitCode !== 0) return { ok: false, message: (apply.stderr.trim() || apply.stdout.trim()).slice(-400) || "deploy failed." };
+    if (apply.exitCode !== 0)
+      return {
+        ok: false,
+        message: (apply.stderr.trim() || apply.stdout.trim()).slice(-400) || "deploy failed.",
+      };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -570,8 +670,12 @@ export async function deployDemoMetricsApp(envId: string, namespace: string): Pr
     path: "/metrics",
     interval: "30s",
   });
-  if (!sm.ok) return { ok: false, message: `App deployed, but scrape wiring failed: ${sm.message}` };
-  return { ok: true, message: `Demo app deployed in "${namespace}" with a ServiceMonitor. Service metrics appear in ~1–2 min.` };
+  if (!sm.ok)
+    return { ok: false, message: `App deployed, but scrape wiring failed: ${sm.message}` };
+  return {
+    ok: true,
+    message: `Demo app deployed in "${namespace}" with a ServiceMonitor. Service metrics appear in ~1–2 min.`,
+  };
 }
 
 /**
@@ -593,12 +697,23 @@ export async function sendServiceTraffic(
   for (let i = 0; i < requests; i += batch) {
     const n = Math.min(batch, requests - i);
     const results = await Promise.all(
-      Array.from({ length: n }, () => runWithKubeconfig(envId, "kubectl", ["get", "--raw", raw], 10_000)),
+      Array.from({ length: n }, () =>
+        runWithKubeconfig(envId, "kubectl", ["get", "--raw", raw], 10_000),
+      ),
     );
     sent += results.filter((r) => r.ok && r.exitCode === 0).length;
   }
-  if (sent === 0) return { ok: false, sent, message: `Couldn't reach ${service}:${port} in "${namespace}". Is it running?` };
-  return { ok: true, sent, message: `Sent ${sent} requests to ${service}. Request-rate metrics update within ~30s.` };
+  if (sent === 0)
+    return {
+      ok: false,
+      sent,
+      message: `Couldn't reach ${service}:${port} in "${namespace}". Is it running?`,
+    };
+  return {
+    ok: true,
+    sent,
+    message: `Sent ${sent} requests to ${service}. Request-rate metrics update within ~30s.`,
+  };
 }
 
 export type AppHealth = {
@@ -614,22 +729,41 @@ export type AppHealth = {
  * (works for ANY app, even ones without /metrics). No PromQL; the non-DevOps
  * view just sees Available / Degraded / Down per app.
  */
-export async function appHealth(envId: string, namespace: string): Promise<{ ok: true; apps: AppHealth[] } | { ok: false; error: string }> {
-  const tmpl = "{range .items[*]}{.metadata.name}{'~'}{.spec.replicas}{'~'}{.status.readyReplicas}{';'}{end}";
+export async function appHealth(
+  envId: string,
+  namespace: string,
+): Promise<{ ok: true; apps: AppHealth[] } | { ok: false; error: string }> {
+  const tmpl =
+    "{range .items[*]}{.metadata.name}{'~'}{.spec.replicas}{'~'}{.status.readyReplicas}{';'}{end}";
   const out: AppHealth[] = [];
   for (const kind of ["deployments", "statefulsets"] as const) {
-    const res = await runWithKubeconfig(envId, "kubectl", ["get", kind, "-n", namespace, "-o", `jsonpath=${tmpl}`], 20_000);
+    const res = await runWithKubeconfig(
+      envId,
+      "kubectl",
+      ["get", kind, "-n", namespace, "-o", `jsonpath=${tmpl}`],
+      20_000,
+    );
     if (!res.ok) return { ok: false, error: res.error };
     if (res.exitCode !== 0) {
       if (/forbidden|not found/i.test(res.stderr)) continue;
       return { ok: false, error: (res.stderr.trim() || "list workloads failed").slice(-300) };
     }
-    for (const rec of res.stdout.split(";").map((s) => s.trim()).filter(Boolean)) {
+    for (const rec of res.stdout
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean)) {
       const [name = "", desiredStr = "0", readyStr = "0"] = rec.split("~");
       const desired = Number(desiredStr) || 0;
       const ready = Number(readyStr) || 0;
-      const status: AppHealth["status"] = ready === 0 ? "down" : ready < desired ? "degraded" : "available";
-      out.push({ name, kind: kind === "deployments" ? "Deployment" : "StatefulSet", desired, ready, status });
+      const status: AppHealth["status"] =
+        ready === 0 ? "down" : ready < desired ? "degraded" : "available";
+      out.push({
+        name,
+        kind: kind === "deployments" ? "Deployment" : "StatefulSet",
+        desired,
+        ready,
+        status,
+      });
     }
   }
   return { ok: true, apps: out };
@@ -647,11 +781,21 @@ export type ScrapeCandidate = {
 
 /** Does this response body look like Prometheus exposition format? */
 function looksLikeMetrics(body: string): boolean {
-  return /(^|\n)#\s*(HELP|TYPE)\s/.test(body) || /(^|\n)[a-zA-Z_:][\w:]*(\{[^}]*\})?\s+[-+0-9.eE]+/.test(body);
+  return (
+    /(^|\n)#\s*(HELP|TYPE)\s/.test(body) ||
+    /(^|\n)[a-zA-Z_:][\w:]*(\{[^}]*\})?\s+[-+0-9.eE]+/.test(body)
+  );
 }
 
 /** Probe a service/pod port for a real /metrics endpoint via the API-server proxy. */
-async function probeMetrics(envId: string, kindPath: "services" | "pods", namespace: string, name: string, port: string, path: string): Promise<boolean> {
+async function probeMetrics(
+  envId: string,
+  kindPath: "services" | "pods",
+  namespace: string,
+  name: string,
+  port: string,
+  path: string,
+): Promise<boolean> {
   const p = path.startsWith("/") ? path : `/${path}`;
   const raw = `/api/v1/namespaces/${namespace}/${kindPath}/${name}:${port}/proxy${p}`;
   const res = await runWithKubeconfig(envId, "kubectl", ["get", "--raw", raw], 8_000);
@@ -660,10 +804,20 @@ async function probeMetrics(envId: string, kindPath: "services" | "pods", namesp
 
 type PortRef = { name: string; num: string };
 function parsePorts(csv: string): PortRef[] {
-  return csv.split(",").filter(Boolean).map((p) => { const [name, num] = p.split(":"); return { name, num }; });
+  return csv
+    .split(",")
+    .filter(Boolean)
+    .map((p) => {
+      const [name, num] = p.split(":");
+      return { name, num };
+    });
 }
 function pickSelector(appLabel: string, k8sName: string) {
-  return appLabel ? { key: "app", value: appLabel } : k8sName ? { key: "app.kubernetes.io/name", value: k8sName } : null;
+  return appLabel
+    ? { key: "app", value: appLabel }
+    : k8sName
+      ? { key: "app.kubernetes.io/name", value: k8sName }
+      : null;
 }
 
 /**
@@ -672,7 +826,10 @@ function pickSelector(appLabel: string, k8sName: string) {
  * app already has. No YAML changes, no reliance on naming conventions. Services
  * → ServiceMonitor candidates; bare pods (no Service) → PodMonitor candidates.
  */
-export async function detectScrapeCandidates(envId: string, namespace: string): Promise<{ ok: true; candidates: ScrapeCandidate[] } | { ok: false; error: string }> {
+export async function detectScrapeCandidates(
+  envId: string,
+  namespace: string,
+): Promise<{ ok: true; candidates: ScrapeCandidate[] } | { ok: false; error: string }> {
   const candidates: ScrapeCandidate[] = [];
   const covered = new Set<string>();
 
@@ -680,11 +837,21 @@ export async function detectScrapeCandidates(envId: string, namespace: string): 
   const svcTmpl =
     "{range .items[*]}{.metadata.name}{'~'}{.metadata.labels['app']}{'~'}{.metadata.labels['app.kubernetes.io/name']}{'~'}" +
     "{range .spec.ports[*]}{.name}:{.port}{','}{end}{'~'}{.metadata.annotations['prometheus.io/port']}{'~'}{.metadata.annotations['prometheus.io/path']}{';'}{end}";
-  const svc = await runWithKubeconfig(envId, "kubectl", ["get", "services", "-n", namespace, "-o", `jsonpath=${svcTmpl}`], 20_000);
+  const svc = await runWithKubeconfig(
+    envId,
+    "kubectl",
+    ["get", "services", "-n", namespace, "-o", `jsonpath=${svcTmpl}`],
+    20_000,
+  );
   if (!svc.ok) return { ok: false, error: svc.error };
   if (svc.exitCode === 0) {
-    for (const rec of svc.stdout.split(";").map((s) => s.trim()).filter(Boolean).slice(0, 15)) {
-      const [name = "", appLabel = "", k8sName = "", portsCsv = "", promPort = "", promPath = ""] = rec.split("~");
+    for (const rec of svc.stdout
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 15)) {
+      const [name = "", appLabel = "", k8sName = "", portsCsv = "", promPort = "", promPath = ""] =
+        rec.split("~");
       const ports = parsePorts(portsCsv);
       const selector = pickSelector(appLabel, k8sName);
       if (!selector || !ports.length) continue;
@@ -693,7 +860,15 @@ export async function detectScrapeCandidates(envId: string, namespace: string): 
       for (const tp of tryPorts) {
         if (await probeMetrics(envId, "services", namespace, name, tp, path)) {
           const named = ports.find((p) => p.num === tp && p.name);
-          candidates.push({ kind: "ServiceMonitor", target: name, selectorKey: selector.key, selectorValue: selector.value, port: named?.name || tp, path, hint: "verified /metrics ✓" });
+          candidates.push({
+            kind: "ServiceMonitor",
+            target: name,
+            selectorKey: selector.key,
+            selectorValue: selector.value,
+            port: named?.name || tp,
+            path,
+            hint: "verified /metrics ✓",
+          });
           covered.add(`${selector.key}=${selector.value}`);
           break;
         }
@@ -705,12 +880,21 @@ export async function detectScrapeCandidates(envId: string, namespace: string): 
   const podTmpl =
     "{range .items[*]}{.metadata.name}{'~'}{.metadata.labels['app']}{'~'}{.metadata.labels['app.kubernetes.io/name']}{'~'}" +
     "{range .spec.containers[*].ports[*]}{.name}:{.containerPort}{','}{end}{'~'}{.metadata.annotations['prometheus.io/port']}{'~'}{.metadata.annotations['prometheus.io/path']}{';'}{end}";
-  const pods = await runWithKubeconfig(envId, "kubectl", ["get", "pods", "-n", namespace, "-o", `jsonpath=${podTmpl}`], 20_000);
+  const pods = await runWithKubeconfig(
+    envId,
+    "kubectl",
+    ["get", "pods", "-n", namespace, "-o", `jsonpath=${podTmpl}`],
+    20_000,
+  );
   if (pods.ok && pods.exitCode === 0) {
     const seen = new Set(covered);
-    for (const rec of pods.stdout.split(";").map((s) => s.trim()).filter(Boolean)) {
+    for (const rec of pods.stdout
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean)) {
       if (seen.size > 25) break;
-      const [name = "", appLabel = "", k8sName = "", portsCsv = "", promPort = "", promPath = ""] = rec.split("~");
+      const [name = "", appLabel = "", k8sName = "", portsCsv = "", promPort = "", promPath = ""] =
+        rec.split("~");
       const ports = parsePorts(portsCsv);
       const selector = pickSelector(appLabel, k8sName);
       if (!selector || !ports.length) continue;
@@ -722,7 +906,15 @@ export async function detectScrapeCandidates(envId: string, namespace: string): 
       for (const tp of tryPorts) {
         if (await probeMetrics(envId, "pods", namespace, name, tp, path)) {
           const named = ports.find((p) => p.num === tp && p.name);
-          candidates.push({ kind: "PodMonitor", target: `${selector.value} (pods)`, selectorKey: selector.key, selectorValue: selector.value, port: named?.name || tp, path, hint: "verified /metrics ✓ (no Service)" });
+          candidates.push({
+            kind: "PodMonitor",
+            target: `${selector.value} (pods)`,
+            selectorKey: selector.key,
+            selectorValue: selector.value,
+            port: named?.name || tp,
+            path,
+            hint: "verified /metrics ✓ (no Service)",
+          });
           break;
         }
       }
@@ -750,14 +942,38 @@ export async function monitoringStatus(envId: string): Promise<MonitoringStatus>
   // per pod: `name=ready,ready,;name=ready,;…`.
   const tmpl =
     '{range .items[*]}{.metadata.name}{"="}{range .status.containerStatuses[*]}{.ready}{","}{end}{";"}{end}';
-  const res = await runWithKubeconfig(envId, "kubectl", ["get", "pods", "-n", NS, "-o", `jsonpath=${tmpl}`], 20_000);
-  if (!res.ok) return { installed: false, ready: 0, total: 0, prometheusReady: false, grafanaReady: false, loggingReady: false, note: res.error };
+  const res = await runWithKubeconfig(
+    envId,
+    "kubectl",
+    ["get", "pods", "-n", NS, "-o", `jsonpath=${tmpl}`],
+    20_000,
+  );
+  if (!res.ok)
+    return {
+      installed: false,
+      ready: 0,
+      total: 0,
+      prometheusReady: false,
+      grafanaReady: false,
+      loggingReady: false,
+      note: res.error,
+    };
   if (res.exitCode !== 0) {
     // Namespace missing = not installed (not an error to surface loudly).
-    return { installed: false, ready: 0, total: 0, prometheusReady: false, grafanaReady: false, loggingReady: false };
+    return {
+      installed: false,
+      ready: 0,
+      total: 0,
+      prometheusReady: false,
+      grafanaReady: false,
+      loggingReady: false,
+    };
   }
 
-  const records = res.stdout.split(";").map((s) => s.trim()).filter(Boolean);
+  const records = res.stdout
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const pods = records.map((rec) => {
     const eq = rec.indexOf("=");
     const name = eq >= 0 ? rec.slice(0, eq) : rec;
@@ -767,16 +983,30 @@ export async function monitoringStatus(envId: string): Promise<MonitoringStatus>
   });
 
   const ready = pods.filter((p) => p.ready).length;
-  const prometheusReady = pods.some((p) => p.name.includes("prometheus-monitoring-kube-prometheus") && p.ready);
+  const prometheusReady = pods.some(
+    (p) => p.name.includes("prometheus-monitoring-kube-prometheus") && p.ready,
+  );
   const grafanaReady = pods.some((p) => p.name.includes("grafana") && p.ready);
-  const loggingReady = pods.some((p) => p.name.includes("loki") && !p.name.includes("promtail") && p.ready);
-  return { installed: pods.length > 0, ready, total: pods.length, prometheusReady, grafanaReady, loggingReady };
+  const loggingReady = pods.some(
+    (p) => p.name.includes("loki") && !p.name.includes("promtail") && p.ready,
+  );
+  return {
+    installed: pods.length > 0,
+    ready,
+    total: pods.length,
+    prometheusReady,
+    grafanaReady,
+    loggingReady,
+  };
 }
 
-export type PromSample = { metric: Record<string, string>; value?: [number, string]; values?: [number, string][] };
+export type PromSample = {
+  metric: Record<string, string>;
+  value?: [number, string];
+  values?: [number, string][];
+};
 export type ClusterPromResult =
-  | { ok: true; resultType: string; result: PromSample[] }
-  | { ok: false; error: string };
+  { ok: true; resultType: string; result: PromSample[] } | { ok: false; error: string };
 
 /** Query the in-cluster Prometheus via the kube API-server proxy (no exposed URL). */
 export async function queryClusterPrometheus(
@@ -799,14 +1029,26 @@ export async function queryClusterPrometheus(
   if (res.exitCode !== 0) {
     const stderr = res.stderr.toLowerCase();
     if (stderr.includes("not found") || stderr.includes("could not find")) {
-      return { ok: false, error: "Monitoring isn't installed in this cluster yet — click “Install monitoring”." };
+      return {
+        ok: false,
+        error: "Monitoring isn't installed in this cluster yet — click “Install monitoring”.",
+      };
     }
     return { ok: false, error: res.stderr.slice(-300) || "Prometheus proxy query failed." };
   }
   try {
-    const body = JSON.parse(res.stdout) as { status?: string; error?: string; data?: { resultType?: string; result?: PromSample[] } };
-    if (body.status !== "success") return { ok: false, error: body.error || "Prometheus returned an error." };
-    return { ok: true, resultType: body.data?.resultType ?? "vector", result: body.data?.result ?? [] };
+    const body = JSON.parse(res.stdout) as {
+      status?: string;
+      error?: string;
+      data?: { resultType?: string; result?: PromSample[] };
+    };
+    if (body.status !== "success")
+      return { ok: false, error: body.error || "Prometheus returned an error." };
+    return {
+      ok: true,
+      resultType: body.data?.resultType ?? "vector",
+      result: body.data?.result ?? [],
+    };
   } catch {
     return { ok: false, error: "Prometheus returned non-JSON output." };
   }

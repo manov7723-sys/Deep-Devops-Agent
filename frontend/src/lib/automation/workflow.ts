@@ -18,7 +18,10 @@ export type WorkflowAnalysis =
     }
   | { ok: false; error: string };
 
-export async function analyzeRepoForWorkflow(projectId: string, repoFullName: string): Promise<WorkflowAnalysis> {
+export async function analyzeRepoForWorkflow(
+  projectId: string,
+  repoFullName: string,
+): Promise<WorkflowAnalysis> {
   const det = await detectRepoStack(projectId, repoFullName);
   if (!det.ok) return det;
 

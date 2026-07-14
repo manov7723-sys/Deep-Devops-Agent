@@ -32,13 +32,7 @@ export function ChatHistoryRail({
     <aside className="dda-chat-rail" aria-label="Recent chats">
       <div className="row gap-2" style={{ padding: "12px 12px 8px", alignItems: "center" }}>
         <span style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>Recent chats</span>
-        <Btn
-          size="sm"
-          variant="primary"
-          icon="plus"
-          onClick={onNewChat}
-          disabled={disabled}
-        >
+        <Btn size="sm" variant="primary" icon="plus" onClick={onNewChat} disabled={disabled}>
           New
         </Btn>
       </div>
@@ -59,36 +53,35 @@ export function ChatHistoryRail({
             </span>
           </div>
         )}
-        {!isLoading && groups.map((group) => (
-          <section key={group.label} className="col gap-1" style={{ padding: "6px 8px 10px" }}>
-            <h4 className="dda-chat-rail-heading">{group.label}</h4>
-            {group.items.map((t) => {
-              const active = t.id === activeThreadId;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`dda-chat-rail-item${active ? " is-active" : ""}`}
-                  onClick={() => onSelect(t.id)}
-                  disabled={disabled}
-                >
-                  <span className="dda-chat-rail-item-title">
-                    {t.title || "Untitled chat"}
-                  </span>
-                  <span className="dda-chat-rail-item-meta">
-                    {formatShortDate(t.lastMessageAt ?? t.updatedAt)}
-                    {t.messageCount > 0 && (
-                      <>
-                        <span aria-hidden> · </span>
-                        {t.messageCount} msg{t.messageCount === 1 ? "" : "s"}
-                      </>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </section>
-        ))}
+        {!isLoading &&
+          groups.map((group) => (
+            <section key={group.label} className="col gap-1" style={{ padding: "6px 8px 10px" }}>
+              <h4 className="dda-chat-rail-heading">{group.label}</h4>
+              {group.items.map((t) => {
+                const active = t.id === activeThreadId;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`dda-chat-rail-item${active ? " is-active" : ""}`}
+                    onClick={() => onSelect(t.id)}
+                    disabled={disabled}
+                  >
+                    <span className="dda-chat-rail-item-title">{t.title || "Untitled chat"}</span>
+                    <span className="dda-chat-rail-item-meta">
+                      {formatShortDate(t.lastMessageAt ?? t.updatedAt)}
+                      {t.messageCount > 0 && (
+                        <>
+                          <span aria-hidden> · </span>
+                          {t.messageCount} msg{t.messageCount === 1 ? "" : "s"}
+                        </>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </section>
+          ))}
       </div>
     </aside>
   );

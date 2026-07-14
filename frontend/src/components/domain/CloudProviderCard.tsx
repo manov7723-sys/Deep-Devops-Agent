@@ -77,7 +77,12 @@ export function CloudProviderCard({ provider, statsHref, projectSlug }: CloudPro
 
   async function onDisconnect() {
     if (!provider.providerId || disconnect.isPending) return;
-    if (!window.confirm(`Disconnect ${provider.name}? Its stored credentials are removed. You can reconnect anytime.`)) return;
+    if (
+      !window.confirm(
+        `Disconnect ${provider.name}? Its stored credentials are removed. You can reconnect anytime.`,
+      )
+    )
+      return;
     setError(null);
     try {
       await disconnect.mutateAsync(false);
@@ -105,26 +110,35 @@ export function CloudProviderCard({ provider, statsHref, projectSlug }: CloudPro
     <div className="card card-pad col gap-3">
       <div className="row between">
         <div className="row gap-3" style={{ minWidth: 0 }}>
-          <span className="row center dda-provider-tile" style={{ background: PROVIDER_BG[provider.id] }}>
+          <span
+            className="row center dda-provider-tile"
+            style={{ background: PROVIDER_BG[provider.id] }}
+          >
             {provider.id.toUpperCase()}
           </span>
           <div className="col" style={{ lineHeight: 1.3, minWidth: 0 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>{provider.name}</span>
-            <span className="faint mono" style={{ fontSize: 11.5 }}>{provider.account}</span>
+            <span className="faint mono" style={{ fontSize: 11.5 }}>
+              {provider.account}
+            </span>
           </div>
         </div>
         <StatusDot tone={provider.status} pulse={provider.status === "ok"} />
       </div>
       <div className="row gap-2 wrap">
         {(provider.envs as ReadonlyArray<keyof typeof ENV_TONE>).map((env) => (
-          <Badge key={env} tone={ENV_TONE[env] ?? "default"}>{env}</Badge>
+          <Badge key={env} tone={ENV_TONE[env] ?? "default"}>
+            {env}
+          </Badge>
         ))}
       </div>
       <div className="divider" />
       <div className="row between" style={{ fontSize: 12.5 }}>
         <div className="col">
           <span className="faint">Region</span>
-          <b className="mono" style={{ fontSize: 12 }}>{provider.region}</b>
+          <b className="mono" style={{ fontSize: 12 }}>
+            {provider.region}
+          </b>
         </div>
         <div className="col">
           <span className="faint">Services</span>
@@ -168,9 +182,7 @@ export function CloudProviderCard({ provider, statsHref, projectSlug }: CloudPro
         )}
       </div>
 
-      {error && (
-        <span style={{ color: "var(--danger, #e5484d)", fontSize: 12 }}>{error}</span>
-      )}
+      {error && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12 }}>{error}</span>}
 
       {canEdit && (
         <EditCloudProviderModal

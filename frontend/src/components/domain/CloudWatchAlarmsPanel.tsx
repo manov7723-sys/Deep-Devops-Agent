@@ -40,13 +40,20 @@ export function CloudWatchAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
   const envList = useMemo(() => envs ?? [], [envs]);
   const activeKey = useMemo(() => {
     if (env !== "all" && envList.some((e) => e.key === env)) return env;
-    return envList.find((e) => e.cloudKind === "aws")?.key ?? envList.find((e) => e.cloudProviderId)?.key ?? envList[0]?.key ?? null;
+    return (
+      envList.find((e) => e.cloudKind === "aws")?.key ??
+      envList.find((e) => e.cloudProviderId)?.key ??
+      envList[0]?.key ??
+      null
+    );
   }, [env, envList]);
   const activeEnv = envList.find((e) => e.key === activeKey) ?? null;
 
   const [email, setEmail] = useState("");
   const [clusterName, setClusterName] = useState("");
-  const [selected, setSelected] = useState<Set<MetricKey>>(new Set(["cpu", "status", "memory", "disk"]));
+  const [selected, setSelected] = useState<Set<MetricKey>>(
+    new Set(["cpu", "status", "memory", "disk"]),
+  );
   const [result, setResult] = useState<SetupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,14 +77,20 @@ export function CloudWatchAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
 
   // Load already-configured alarms on mount so the state persists across refresh.
   // (Errors silently for non-AWS envs / no cluster — we just show nothing then.)
-  const existing = useQuery<{ ok: boolean; clusterName?: string; configured?: number; firing?: number; alarms?: Array<{ name: string; state: string }> }>({
+  const existing = useQuery<{
+    ok: boolean;
+    clusterName?: string;
+    configured?: number;
+    firing?: number;
+    alarms?: Array<{ name: string; state: string }>;
+  }>({
     queryKey: ["p", slug, "cw-alarms", activeKey],
     queryFn: () => api.get(`/projects/${slug}/envs/${activeKey}/cloudwatch/alarms`),
     enabled: !!activeKey,
     retry: false,
     staleTime: 20_000,
   });
-  const configured = existing.data?.ok ? existing.data.configured ?? 0 : 0;
+  const configured = existing.data?.ok ? (existing.data.configured ?? 0) : 0;
 
   function toggle(k: MetricKey) {
     setSelected((s) => {
@@ -101,10 +114,19 @@ export function CloudWatchAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
           {configured > 0 && (
             <StatusDot
               tone={(existing.data?.firing ?? 0) > 0 ? "danger" : "ok"}
-              label={(existing.data?.firing ?? 0) > 0 ? `${existing.data?.firing} firing` : `${configured} alarms`}
+              label={
+                (existing.data?.firing ?? 0) > 0
+                  ? `${existing.data?.firing} firing`
+                  : `${configured} alarms`
+              }
             />
           )}
-          <Btn variant="ghost" icon="refresh" loading={existing.isFetching} onClick={() => existing.refetch()}>
+          <Btn
+            variant="ghost"
+            icon="refresh"
+            loading={existing.isFetching}
+            onClick={() => existing.refetch()}
+          >
             Sync states
           </Btn>
         </Block.Actions>
@@ -115,7 +137,8 @@ export function CloudWatchAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
           {configured > 0 && (
             <div className="card card-pad col gap-1" style={{ fontSize: 12.5 }}>
               <span className="row gap-2" style={{ fontWeight: 600 }}>
-                <span className="dot ok" /> {configured} alarms configured on <b>{existing.data?.clusterName}</b>
+                <span className="dot ok" /> {configured} alarms configured on{" "}
+                <b>{existing.data?.clusterName}</b>
               </span>
               <span className="faint">
                 {(() => {
@@ -134,51 +157,91 @@ export function CloudWatchAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
                 type="button"
                 className={`chip ${selected.has(m.key) ? "active" : ""}`}
                 onClick={() => toggle(m.key)}
-                title={m.note === "needs agent" ? "Enables Container Insights (CloudWatch agent)" : "Native EC2 metric"}
+                title={
+                  m.note === "needs agent"
+                    ? "Enables Container Insights (CloudWatch agent)"
+                    : "Native EC2 metric"
+                }
               >
                 {selected.has(m.key) ? "✓ " : ""}
                 {m.label}
-                <span className="faint" style={{ fontSize: 11 }}> · {m.note}</span>
+                <span className="faint" style={{ fontSize: 11 }}>
+                  {" "}
+                  · {m.note}
+                </span>
               </button>
             ))}
           </div>
 
           <div className="row gap-3 wrap">
-            <Field label="Notify email (SNS)" hint="You'll get an AWS email to confirm the subscription.">
-              <Input type="email" value={email} placeholder="you@company.com" onChange={(e) => setEmail(e.target.value)} />
+            <Field
+              label="Notify email (SNS)"
+              hint="You'll get an AWS email to confirm the subscription."
+            >
+              <Input
+                type="email"
+                value={email}
+                placeholder="you@company.com"
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </Field>
-            <Field label="EKS cluster (optional)" hint="Auto-detected from the kubeconfig if blank.">
-              <Input value={clusterName} placeholder="auto-detect" onChange={(e) => setClusterName(e.target.value)} />
+            <Field
+              label="EKS cluster (optional)"
+              hint="Auto-detected from the kubeconfig if blank."
+            >
+              <Input
+                value={clusterName}
+                placeholder="auto-detect"
+                onChange={(e) => setClusterName(e.target.value)}
+              />
             </Field>
           </div>
 
           <div className="row gap-2">
-            <Btn variant="primary" icon="bell" loading={setup.isPending} disabled={selected.size === 0} onClick={() => setup.mutate()}>
+            <Btn
+              variant="primary"
+              icon="bell"
+              loading={setup.isPending}
+              disabled={selected.size === 0}
+              onClick={() => setup.mutate()}
+            >
               Set up alarms
             </Btn>
           </div>
 
-          {error && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>}
+          {error && (
+            <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>
+          )}
 
           {result && (
             <div className="col gap-2" style={{ fontSize: 12.5 }}>
               <span className="row gap-2">
-                <StatusDot tone={result.ok ? "ok" : "danger"} label={result.ok ? "configured" : "failed"} />
+                <StatusDot
+                  tone={result.ok ? "ok" : "danger"}
+                  label={result.ok ? "configured" : "failed"}
+                />
                 {result.ok ? (
                   <span>
-                    {result.alarms?.filter((a) => a.ok).length ?? 0} alarms on <b>{result.clusterName}</b> ({result.nodeCount} nodes, {result.region}).
+                    {result.alarms?.filter((a) => a.ok).length ?? 0} alarms on{" "}
+                    <b>{result.clusterName}</b> ({result.nodeCount} nodes, {result.region}).
                     {result.topicArn ? " SNS email sent — confirm it to get notified." : ""}
                   </span>
                 ) : (
                   <span>{result.error}</span>
                 )}
               </span>
-              {result.containerInsights && <span className="faint">{result.containerInsights}</span>}
+              {result.containerInsights && (
+                <span className="faint">{result.containerInsights}</span>
+              )}
               {result.alarms && result.alarms.some((a) => !a.ok) && (
                 <div className="col gap-1">
-                  {result.alarms.filter((a) => !a.ok).map((a, i) => (
-                    <span key={i} style={{ color: "var(--danger, #e5484d)" }}>• {a.label} ({a.target}): {a.error}</span>
-                  ))}
+                  {result.alarms
+                    .filter((a) => !a.ok)
+                    .map((a, i) => (
+                      <span key={i} style={{ color: "var(--danger, #e5484d)" }}>
+                        • {a.label} ({a.target}): {a.error}
+                      </span>
+                    ))}
                 </div>
               )}
             </div>

@@ -45,7 +45,8 @@ async function getOrInitSetting(projectId: string) {
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const gate = await requireProjectAccess(slug, "viewer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
   const setting = await getOrInitSetting(gate.access.project.id);
   return NextResponse.json({
     project: projectShape(gate.access.project),
@@ -75,10 +76,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
   const { slug } = await params;
   // Editing settings requires owner/developer; viewers can only read.
   const gate = await requireProjectAccess(slug, "developer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
   const parsed = PatchSettings.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, code: "invalid_input", issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "invalid_input", issues: parsed.error.issues },
+      { status: 400 },
+    );
   }
   const patch = parsed.data;
 
@@ -89,8 +94,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
 
   const settingPatch: Parameters<typeof prisma.projectSetting.update>[0]["data"] = {};
   if (patch.defaultBranch !== undefined) settingPatch.defaultBranch = patch.defaultBranch;
-  if (patch.autoDeployNonProd !== undefined) settingPatch.autoDeployNonProd = patch.autoDeployNonProd;
-  if (patch.requireApprovalRelease !== undefined) settingPatch.requireApprovalRelease = patch.requireApprovalRelease;
+  if (patch.autoDeployNonProd !== undefined)
+    settingPatch.autoDeployNonProd = patch.autoDeployNonProd;
+  if (patch.requireApprovalRelease !== undefined)
+    settingPatch.requireApprovalRelease = patch.requireApprovalRelease;
   if (patch.defaultModel !== undefined) {
     const model = await prisma.model.findFirst({
       where: { name: patch.defaultModel },

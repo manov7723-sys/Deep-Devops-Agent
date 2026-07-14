@@ -64,7 +64,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   const a = parsed.data;
   if (!a.templateVmId && !a.isoFile) {
     return NextResponse.json(
-      { ok: false, code: "invalid_request", message: "Provide a template VM id (to clone) or an ISO file." },
+      {
+        ok: false,
+        code: "invalid_request",
+        message: "Provide a template VM id (to clone) or an ISO file.",
+      },
       { status: 400 },
     );
   }

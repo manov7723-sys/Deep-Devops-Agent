@@ -83,9 +83,7 @@ export type PatchTaskArgs = Partial<{
   lastRunAt: Date | null;
 }>;
 
-export type PatchTaskResult =
-  | { ok: true; task: TaskRow }
-  | { ok: false; code: "not_found" };
+export type PatchTaskResult = { ok: true; task: TaskRow } | { ok: false; code: "not_found" };
 
 export async function patchTask(
   projectId: string,

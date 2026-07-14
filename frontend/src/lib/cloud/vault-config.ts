@@ -43,7 +43,12 @@ export async function resolveVaultConn(projectId: string | null): Promise<VaultC
         token = "";
       }
       if (token) {
-        return { addr: stripTrailingSlash(row.addr), token, mount: row.kvMount, prefix: row.pathPrefix };
+        return {
+          addr: stripTrailingSlash(row.addr),
+          token,
+          mount: row.kvMount,
+          prefix: row.pathPrefix,
+        };
       }
     }
   }
@@ -72,14 +77,35 @@ export async function resolveVaultConnForProvider(providerId: string): Promise<V
 export async function getVaultConfigView(projectId: string): Promise<VaultConfigView> {
   const row = await prisma.vaultConfig.findUnique({ where: { projectId } });
   if (row) {
-    return { configured: true, source: "db", addr: row.addr, mount: row.kvMount, prefix: row.pathPrefix, hasToken: true };
+    return {
+      configured: true,
+      source: "db",
+      addr: row.addr,
+      mount: row.kvMount,
+      prefix: row.pathPrefix,
+      hasToken: true,
+    };
   }
   const addr = process.env.VAULT_ADDR?.trim();
   const token = process.env.VAULT_TOKEN?.trim();
   if (addr && token) {
-    return { configured: true, source: "env", addr, mount: ENV_MOUNT(), prefix: ENV_PREFIX(), hasToken: true };
+    return {
+      configured: true,
+      source: "env",
+      addr,
+      mount: ENV_MOUNT(),
+      prefix: ENV_PREFIX(),
+      hasToken: true,
+    };
   }
-  return { configured: false, source: "none", addr: null, mount: ENV_MOUNT(), prefix: ENV_PREFIX(), hasToken: false };
+  return {
+    configured: false,
+    source: "none",
+    addr: null,
+    mount: ENV_MOUNT(),
+    prefix: ENV_PREFIX(),
+    hasToken: false,
+  };
 }
 
 /** Upsert a project's Vault connection. Token is encrypted before storage. */

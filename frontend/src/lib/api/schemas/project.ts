@@ -97,9 +97,7 @@ export type Alert = z.infer<typeof Alert>;
 
 export const ProjectCost = z.object({
   monthTotal: z.number(),
-  byEnv: z.array(
-    z.object({ name: z.string(), value: z.number(), color: z.string() }),
-  ),
+  byEnv: z.array(z.object({ name: z.string(), value: z.number(), color: z.string() })),
   forecast: z.string(),
   budget: z.number(),
 });

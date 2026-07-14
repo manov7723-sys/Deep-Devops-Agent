@@ -74,7 +74,13 @@ function fmtJoinedDate(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export function ProjectSettingsClient({ slug, projectName }: { slug: string; projectName: string }) {
+export function ProjectSettingsClient({
+  slug,
+  projectName,
+}: {
+  slug: string;
+  projectName: string;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -139,7 +145,9 @@ function GeneralTab({ slug }: { slug: string }) {
   if (!settings) {
     return (
       <div style={{ maxWidth: 720 }}>
-        <Block><Block.Loading /></Block>
+        <Block>
+          <Block.Loading />
+        </Block>
       </div>
     );
   }
@@ -155,7 +163,9 @@ function GeneralTab({ slug }: { slug: string }) {
             <div className="row gap-4 wrap" style={{ alignItems: "center" }}>
               <ProjectAvatar name={name || settings.project.name} hue={hue} size={64} radius={16} />
               <div className="col gap-2">
-                <span className="field-label" style={{ marginBottom: 0 }}>Project icon</span>
+                <span className="field-label" style={{ marginBottom: 0 }}>
+                  Project icon
+                </span>
                 <HuePicker value={hue} onChange={setHue} />
               </div>
             </div>
@@ -231,7 +241,12 @@ function GeneralTab({ slug }: { slug: string }) {
                 ) : (
                   <div className="row gap-2" style={{ alignItems: "center" }}>
                     <code className="mono">{settings.meta.defaultBranch}</code>
-                    <Btn size="sm" variant="ghost" icon="edit" onClick={() => setBranchEditing(true)}>
+                    <Btn
+                      size="sm"
+                      variant="ghost"
+                      icon="edit"
+                      onClick={() => setBranchEditing(true)}
+                    >
                       Edit
                     </Btn>
                   </div>
@@ -323,7 +338,9 @@ function MembersTab({ slug, projectName }: { slug: string; projectName: string }
             <Avatar name={row.original.name} size={34} />
             <div className="col" style={{ lineHeight: 1.3 }}>
               <span style={{ fontWeight: 600 }}>{row.original.name}</span>
-              <span className="faint" style={{ fontSize: 12 }}>{row.original.email}</span>
+              <span className="faint" style={{ fontSize: 12 }}>
+                {row.original.email}
+              </span>
             </div>
           </div>
         ),
@@ -332,17 +349,13 @@ function MembersTab({ slug, projectName }: { slug: string; projectName: string }
         id: "role",
         header: "Role",
         cell: ({ row }) => (
-          <Badge tone={ROLE_TONE[row.original.role]}>
-            {ROLE_LABEL[row.original.role]}
-          </Badge>
+          <Badge tone={ROLE_TONE[row.original.role]}>{ROLE_LABEL[row.original.role]}</Badge>
         ),
       },
       {
         id: "joined",
         header: "Joined",
-        cell: ({ row }) => (
-          <span className="faint">{fmtJoinedDate(row.original.joinedAt)}</span>
-        ),
+        cell: ({ row }) => <span className="faint">{fmtJoinedDate(row.original.joinedAt)}</span>,
       },
       {
         id: "actions",
@@ -479,7 +492,9 @@ function MembersTab({ slug, projectName }: { slug: string; projectName: string }
       {roleTarget && (
         <ChangeRoleModal
           open={!!roleTarget}
-          onOpenChange={(o) => { if (!o) setRoleTarget(null); }}
+          onOpenChange={(o) => {
+            if (!o) setRoleTarget(null);
+          }}
           member={roleTarget}
           onSubmit={async (newRole) => {
             try {
@@ -497,7 +512,9 @@ function MembersTab({ slug, projectName }: { slug: string; projectName: string }
       {confirmRemove && (
         <ConfirmRemoveMemberModal
           open={!!confirmRemove}
-          onOpenChange={(o) => { if (!o) setConfirmRemove(null); }}
+          onOpenChange={(o) => {
+            if (!o) setConfirmRemove(null);
+          }}
           member={confirmRemove}
           onConfirm={async () => {
             try {
@@ -556,18 +573,12 @@ function PendingInviteRow({
             {expiresInDays === 0
               ? "expires today"
               : expiresInDays === 1
-              ? "expires tomorrow"
-              : `expires in ${expiresInDays} days`}
+                ? "expires tomorrow"
+                : `expires in ${expiresInDays} days`}
           </span>
         </div>
       </div>
-      <Btn
-        size="sm"
-        variant="outline"
-        icon="x"
-        disabled={!canRevoke || busy}
-        onClick={onRevoke}
-      >
+      <Btn size="sm" variant="outline" icon="x" disabled={!canRevoke || busy} onClick={onRevoke}>
         Revoke
       </Btn>
     </div>
@@ -677,8 +688,8 @@ function ConfirmRemoveMemberModal({
       }
     >
       <p style={{ fontSize: 13, lineHeight: 1.5 }}>
-        <b>{member.email}</b> will lose access to this project. Pending tasks they
-        were assigned will need a new owner.
+        <b>{member.email}</b> will lose access to this project. Pending tasks they were assigned
+        will need a new owner.
       </p>
     </Modal>
   );
@@ -691,7 +702,9 @@ function IntegrationsTab({ slug }: { slug: string }) {
   const [preset, setPreset] = useState<IntegrationKind | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  const connectedProviders = new Set((integrations ?? []).map((i) => (i as { provider?: string }).provider ?? i.id));
+  const connectedProviders = new Set(
+    (integrations ?? []).map((i) => (i as { provider?: string }).provider ?? i.id),
+  );
 
   const openPreset = (kind: IntegrationKind | null) => {
     setRowError(null);
@@ -701,7 +714,9 @@ function IntegrationsTab({ slug }: { slug: string }) {
 
   async function doDisconnect(id: string, label: string) {
     setRowError(null);
-    if (!confirm(`Disconnect ${label}? Project alerts and webhooks routed there will stop firing.`)) {
+    if (
+      !confirm(`Disconnect ${label}? Project alerts and webhooks routed there will stop firing.`)
+    ) {
       return;
     }
     try {
@@ -717,12 +732,7 @@ function IntegrationsTab({ slug }: { slug: string }) {
         <Block.Header>
           <Block.Title>Connected services</Block.Title>
           <Block.Actions>
-            <Btn
-              size="sm"
-              variant="primary"
-              icon="plus"
-              onClick={() => openPreset(null)}
-            >
+            <Btn size="sm" variant="primary" icon="plus" onClick={() => openPreset(null)}>
               Connect new
             </Btn>
           </Block.Actions>
@@ -731,7 +741,8 @@ function IntegrationsTab({ slug }: { slug: string }) {
           integrations.length === 0 ? (
             <Block.Body>
               <span className="muted" style={{ fontSize: 13 }}>
-                No integrations yet. Click <b>Connect new</b> to wire Slack, PagerDuty, Grafana, Prometheus, Datadog or Sentry.
+                No integrations yet. Click <b>Connect new</b> to wire Slack, PagerDuty, Grafana,
+                Prometheus, Datadog or Sentry.
               </span>
             </Block.Body>
           ) : (
@@ -763,7 +774,9 @@ function IntegrationsTab({ slug }: { slug: string }) {
                           {s.name}
                           {s.connected && <StatusDot tone="ok" />}
                         </span>
-                        <span className="faint" style={{ fontSize: 12 }}>{s.description}</span>
+                        <span className="faint" style={{ fontSize: 12 }}>
+                          {s.description}
+                        </span>
                       </div>
                     </div>
                     <div className="row gap-2">
@@ -900,7 +913,10 @@ const AUDIT_FILTERS: Array<{ value: string; label: string }> = [
 
 function AuditLogTab({ slug }: { slug: string }) {
   const [filter, setFilter] = useState("");
-  const { data: rows, isLoading } = useProjectAuditLog(slug, filter ? { action: filter } : undefined);
+  const { data: rows, isLoading } = useProjectAuditLog(
+    slug,
+    filter ? { action: filter } : undefined,
+  );
 
   return (
     <div className="col gap-4" style={{ maxWidth: 920 }}>
@@ -931,7 +947,9 @@ function AuditLogTab({ slug }: { slug: string }) {
             <Block.Loading />
           ) : rows.length === 0 ? (
             <span className="muted" style={{ fontSize: 13 }}>
-              {filter ? "No entries for this filter." : "Nothing logged yet — this fills up as people act on the project."}
+              {filter
+                ? "No entries for this filter."
+                : "Nothing logged yet — this fills up as people act on the project."}
             </span>
           ) : (
             <div className="col">
@@ -956,7 +974,9 @@ function AuditRow({ row }: { row: import("@/hooks/queries/audit-log").AuditLogRo
     >
       <div className="col" style={{ lineHeight: 1.4, minWidth: 0, flex: 1 }}>
         <div className="row gap-2" style={{ alignItems: "center" }}>
-          <span className="mono" style={{ fontWeight: 600 }}>{row.action}</span>
+          <span className="mono" style={{ fontWeight: 600 }}>
+            {row.action}
+          </span>
           {row.targetType && (
             <span className="faint" style={{ fontSize: 11.5 }}>
               · {row.targetType}
@@ -1016,7 +1036,9 @@ function DangerTab({ slug, projectName }: { slug: string; projectName: string })
     <div className="col gap-4" style={{ maxWidth: 680 }}>
       <div className="card dda-danger-card">
         <div className="card-h">
-          <span className="card-title" style={{ color: "var(--danger)" }}>Danger zone</span>
+          <span className="card-title" style={{ color: "var(--danger)" }}>
+            Danger zone
+          </span>
         </div>
         {!canManage && (
           <div

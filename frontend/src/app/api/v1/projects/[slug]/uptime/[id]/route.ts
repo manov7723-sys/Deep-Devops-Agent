@@ -40,9 +40,14 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string;
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
-  if (!(await owned(gate.access.project.id, id))) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
+  if (!(await owned(gate.access.project.id, id)))
+    return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
   const parsed = Patch.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message },
+      { status: 400 },
+    );
   const m = await prisma.uptimeMonitor.update({ where: { id }, data: parsed.data });
   // Disabling (or pausing) a monitor should clear its open alerts — a paused
   // monitor will never recover to auto-resolve them.
@@ -50,11 +55,15 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string;
   return NextResponse.json({ ok: true, monitor: m });
 }
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
+export async function DELETE(
+  _req: Request,
+  ctx: { params: Promise<{ slug: string; id: string }> },
+) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
-  if (!(await owned(gate.access.project.id, id))) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
+  if (!(await owned(gate.access.project.id, id)))
+    return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
   await resolveMonitorAlerts(gate.access.project.id, id); // don't orphan its open alerts
   await prisma.uptimeMonitor.delete({ where: { id } });
   return NextResponse.json({ ok: true });

@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
 import { SetAwsKeysRequest } from "@/lib/api/schemas/connectivity-api";
 import { getActiveSession } from "@/lib/auth/session";
-import {
-  getProviderForUser,
-  setProviderCredVaultPath,
-} from "@/lib/cloud/providers";
-import {
-  deleteAwsKeys,
-  providerVaultPath,
-  saveAwsKeys,
-} from "@/lib/cloud/vault";
+import { getProviderForUser, setProviderCredVaultPath } from "@/lib/cloud/providers";
+import { deleteAwsKeys, providerVaultPath, saveAwsKeys } from "@/lib/cloud/vault";
 import { getVaultConfigView } from "@/lib/cloud/vault-config";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
@@ -39,14 +32,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!cp) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
   if (cp.kind !== "aws") {
     return NextResponse.json(
-      { ok: false, code: "kind_unsupported", message: "Vault keys are only supported for AWS providers." },
+      {
+        ok: false,
+        code: "kind_unsupported",
+        message: "Vault keys are only supported for AWS providers.",
+      },
       { status: 400 },
     );
   }
   const vaultView = cp.projectId ? await getVaultConfigView(cp.projectId) : null;
   if (!vaultView?.configured) {
     return NextResponse.json(
-      { ok: false, code: "vault_unconfigured", message: "Configure this project's Vault connection (URL + token) first." },
+      {
+        ok: false,
+        code: "vault_unconfigured",
+        message: "Configure this project's Vault connection (URL + token) first.",
+      },
       { status: 409 },
     );
   }
@@ -98,7 +99,10 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   try {
     await deleteAwsKeys(id);
   } catch (e) {
-    return NextResponse.json({ ok: false, code: "vault_error", message: String(e) }, { status: 502 });
+    return NextResponse.json(
+      { ok: false, code: "vault_error", message: String(e) },
+      { status: 502 },
+    );
   }
   await setProviderCredVaultPath(sess.userId, id, null);
 

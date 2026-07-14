@@ -18,11 +18,7 @@ export function proxy(req: NextRequest) {
   // /u/*, /p/*, /admin/* all require an active session cookie. The layout
   // server checks (getActiveSession / requireSuperAdmin) verify validity +
   // role beyond mere presence.
-  if (
-    pathname.startsWith("/u/") ||
-    pathname.startsWith("/p/") ||
-    pathname.startsWith("/admin")
-  ) {
+  if (pathname.startsWith("/u/") || pathname.startsWith("/p/") || pathname.startsWith("/admin")) {
     const cookie = req.cookies.get(SESS_COOKIE)?.value;
     if (!cookie) {
       const url = new URL("/auth/login", req.url);

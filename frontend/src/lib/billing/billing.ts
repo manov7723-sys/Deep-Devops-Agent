@@ -113,9 +113,7 @@ export type CreatePlanArgs = {
   highlights: string[];
 };
 
-export type CreatePlanResult =
-  | { ok: true; plan: PlanRow }
-  | { ok: false; code: "duplicate_tier" };
+export type CreatePlanResult = { ok: true; plan: PlanRow } | { ok: false; code: "duplicate_tier" };
 
 export async function createPlan(args: CreatePlanArgs): Promise<CreatePlanResult> {
   try {

@@ -64,16 +64,29 @@ export async function createEcrRepo(opts: {
 }): Promise<{ ok: true; repo: EcrRepo; alreadyExisted: boolean } | { ok: false; error: string }> {
   const name = opts.name.toLowerCase();
   const res = await aws(
-    ["ecr", "create-repository", "--repository-name", name, "--image-scanning-configuration", "scanOnPush=true"],
+    [
+      "ecr",
+      "create-repository",
+      "--repository-name",
+      name,
+      "--image-scanning-configuration",
+      "scanOnPush=true",
+    ],
     opts.awsEnv,
     opts.region,
   );
   if (res.ok) {
     try {
-      const data = JSON.parse(res.stdout) as { repository?: { repositoryName?: string; repositoryUri?: string; createdAt?: string } };
+      const data = JSON.parse(res.stdout) as {
+        repository?: { repositoryName?: string; repositoryUri?: string; createdAt?: string };
+      };
       const r = data.repository;
       if (r?.repositoryName && r.repositoryUri) {
-        return { ok: true, alreadyExisted: false, repo: { name: r.repositoryName, uri: r.repositoryUri, createdAt: r.createdAt } };
+        return {
+          ok: true,
+          alreadyExisted: false,
+          repo: { name: r.repositoryName, uri: r.repositoryUri, createdAt: r.createdAt },
+        };
       }
     } catch {
       /* fall through to a describe */
@@ -81,13 +94,27 @@ export async function createEcrRepo(opts: {
   }
   // Already exists (or we couldn't parse the create output) → describe it.
   if (res.stderr.includes("RepositoryAlreadyExistsException") || res.ok) {
-    const desc = await aws(["ecr", "describe-repositories", "--repository-names", name], opts.awsEnv, opts.region);
+    const desc = await aws(
+      ["ecr", "describe-repositories", "--repository-names", name],
+      opts.awsEnv,
+      opts.region,
+    );
     if (desc.ok) {
       try {
-        const data = JSON.parse(desc.stdout) as { repositories?: Array<{ repositoryName?: string; repositoryUri?: string; createdAt?: string }> };
+        const data = JSON.parse(desc.stdout) as {
+          repositories?: Array<{
+            repositoryName?: string;
+            repositoryUri?: string;
+            createdAt?: string;
+          }>;
+        };
         const r = data.repositories?.[0];
         if (r?.repositoryName && r.repositoryUri) {
-          return { ok: true, alreadyExisted: true, repo: { name: r.repositoryName, uri: r.repositoryUri, createdAt: r.createdAt } };
+          return {
+            ok: true,
+            alreadyExisted: true,
+            repo: { name: r.repositoryName, uri: r.repositoryUri, createdAt: r.createdAt },
+          };
         }
       } catch {
         /* fall through */

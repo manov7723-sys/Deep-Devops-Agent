@@ -23,7 +23,10 @@ export type DockerfileAnalysis =
   | { ok: false; error: string };
 
 /** Analyze a project-attached repo and generate a Dockerfile set. */
-export async function analyzeRepoForDockerfile(projectId: string, repoFullName: string): Promise<DockerfileAnalysis> {
+export async function analyzeRepoForDockerfile(
+  projectId: string,
+  repoFullName: string,
+): Promise<DockerfileAnalysis> {
   const det = await detectRepoStack(projectId, repoFullName);
   if (!det.ok) return det;
 

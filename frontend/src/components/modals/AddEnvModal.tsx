@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
-import { Btn, Field, Input, Modal, Select, type SelectOption, Textarea, Toggle } from "@/components/ui";
+import {
+  Btn,
+  Field,
+  Input,
+  Modal,
+  Select,
+  type SelectOption,
+  Textarea,
+  Toggle,
+} from "@/components/ui";
 import { api } from "@/lib/api/client";
 
 export interface AddEnvModalProps {
@@ -41,10 +50,12 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
       kubeconfig?: string;
       namespace?: string;
     }) => {
-      const res = await api.post<{ ok: boolean; env?: { id: string; key: string }; message?: string; code?: string }>(
-        `/projects/${projectSlug}/envs`,
-        body,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        env?: { id: string; key: string };
+        message?: string;
+        code?: string;
+      }>(`/projects/${projectSlug}/envs`, body);
       if (!res.ok || !res.env) throw new Error(res.message ?? res.code ?? "Could not create env.");
       return res.env;
     },
@@ -102,7 +113,15 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
     form.setFieldValue("key", v);
     form.setFieldValue(
       "name",
-      v === "alpha" ? "Alpha" : v === "beta" ? "Beta" : v === "release" ? "Release" : v === "staging" ? "Staging" : "Preview",
+      v === "alpha"
+        ? "Alpha"
+        : v === "beta"
+          ? "Beta"
+          : v === "release"
+            ? "Release"
+            : v === "staging"
+              ? "Staging"
+              : "Preview",
     );
     setIsProd(v === "release");
     setAutoDeploy(v !== "release");
@@ -116,8 +135,15 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
       description="Environments group deployments + cloud bindings."
       footer={
         <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
-          <Btn variant="primary" icon="plus" loading={create.isPending} onClick={() => form.handleSubmit()}>
+          <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="primary"
+            icon="plus"
+            loading={create.isPending}
+            onClick={() => form.handleSubmit()}
+          >
             Create env
           </Btn>
         </>
@@ -137,7 +163,11 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
         <div className="row gap-3">
           <form.Field name="key">
             {(field) => (
-              <Field label="Key" required hint="Lowercase identifier used in URLs and the env filter.">
+              <Field
+                label="Key"
+                required
+                hint="Lowercase identifier used in URLs and the env filter."
+              >
                 <Input
                   className="mono"
                   placeholder="alpha"
@@ -197,7 +227,9 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
           <span>
             <span style={{ fontWeight: 600, fontSize: 13 }}>Production</span>
             <br />
-            <span className="faint" style={{ fontSize: 11.5 }}>Triggers approval on every deploy.</span>
+            <span className="faint" style={{ fontSize: 11.5 }}>
+              Triggers approval on every deploy.
+            </span>
           </span>
           <Toggle checked={isProd} onCheckedChange={setIsProd} ariaLabel="Production" />
         </div>
@@ -205,7 +237,9 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
           <span>
             <span style={{ fontWeight: 600, fontSize: 13 }}>Auto-deploy</span>
             <br />
-            <span className="faint" style={{ fontSize: 11.5 }}>Push to the env's branch → automatic pipeline.</span>
+            <span className="faint" style={{ fontSize: 11.5 }}>
+              Push to the env's branch → automatic pipeline.
+            </span>
           </span>
           <Toggle checked={autoDeploy} onCheckedChange={setAutoDeploy} ariaLabel="Auto-deploy" />
         </div>
@@ -221,7 +255,10 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
           }}
         >
           <span style={{ fontWeight: 600, fontSize: 13 }}>
-            Kubernetes cluster <span className="faint" style={{ fontWeight: 400 }}>(optional)</span>
+            Kubernetes cluster{" "}
+            <span className="faint" style={{ fontWeight: 400 }}>
+              (optional)
+            </span>
           </span>
           <span className="faint" style={{ fontSize: 11.5 }}>
             Paste a kubeconfig now to wire this env immediately, or skip and add it later from env
@@ -229,7 +266,10 @@ export function AddEnvModal({ open, onOpenChange, projectSlug }: AddEnvModalProp
           </span>
           <form.Field name="namespace">
             {(field) => (
-              <Field label="Namespace" hint="Namespace where deployments land. Defaults to 'default'.">
+              <Field
+                label="Namespace"
+                hint="Namespace where deployments land. Defaults to 'default'."
+              >
                 <Input
                   className="mono"
                   placeholder="default"

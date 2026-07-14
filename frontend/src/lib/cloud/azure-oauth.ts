@@ -47,7 +47,8 @@ function redirectUri(): string {
   );
 }
 
-const b64url = (b: Buffer) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const b64url = (b: Buffer) =>
+  b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 /** Fresh PKCE pair + state for one authorization attempt. */
 export function newPkce(): { state: string; verifier: string; challenge: string } {
@@ -93,7 +94,10 @@ async function tokenRequest(body: URLSearchParams, tenantOverride?: string): Pro
       cache: "no-store",
     });
   } catch (err) {
-    return { ok: false, error: `Network error reaching Microsoft: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Microsoft: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   const j = (await res.json().catch(() => ({}))) as {
     access_token?: string;
@@ -103,11 +107,20 @@ async function tokenRequest(body: URLSearchParams, tenantOverride?: string): Pro
     error_description?: string;
   };
   if (!res.ok || !j.access_token) {
-    return { ok: false, error: (j.error_description || j.error || `token request failed (${res.status})`).split("\n")[0] };
+    return {
+      ok: false,
+      error: (j.error_description || j.error || `token request failed (${res.status})`).split(
+        "\n",
+      )[0],
+    };
   }
   return {
     ok: true,
-    tokens: { accessToken: j.access_token, refreshToken: j.refresh_token ?? "", expiresIn: j.expires_in ?? 3600 },
+    tokens: {
+      accessToken: j.access_token,
+      refreshToken: j.refresh_token ?? "",
+      expiresIn: j.expires_in ?? 3600,
+    },
   };
 }
 
@@ -127,7 +140,10 @@ export function exchangeAzureCode(code: string, verifier: string): Promise<Token
 }
 
 /** Mint a fresh ARM access token from a stored refresh token (rotates it). */
-export function refreshAzureToken(refreshToken: string, tenantOverride?: string): Promise<TokenResult> {
+export function refreshAzureToken(
+  refreshToken: string,
+  tenantOverride?: string,
+): Promise<TokenResult> {
   return tokenRequest(
     new URLSearchParams({
       client_id: process.env.AZURE_OAUTH_CLIENT_ID ?? "",
@@ -148,7 +164,10 @@ export function refreshAzureToken(refreshToken: string, tenantOverride?: string)
  *  SP auto-provisioning right after OAuth sign-in. Returns AADSTS-consent-
  *  needed errors verbatim so the caller can log them and gracefully skip
  *  auto-provisioning (the OAuth flow itself remains successful). */
-export function refreshAzureGraphToken(refreshToken: string, tenantOverride?: string): Promise<TokenResult> {
+export function refreshAzureGraphToken(
+  refreshToken: string,
+  tenantOverride?: string,
+): Promise<TokenResult> {
   return tokenRequest(
     new URLSearchParams({
       client_id: process.env.AZURE_OAUTH_CLIENT_ID ?? "",
@@ -164,7 +183,9 @@ export function refreshAzureGraphToken(refreshToken: string, tenantOverride?: st
 export type AzureSub = { id: string; displayName: string; state: string };
 
 /** List ARM subscriptions visible to an access token (validates + resolves a default). */
-export async function listAzureSubscriptions(accessToken: string): Promise<{ ok: true; subs: AzureSub[] } | { ok: false; error: string }> {
+export async function listAzureSubscriptions(
+  accessToken: string,
+): Promise<{ ok: true; subs: AzureSub[] } | { ok: false; error: string }> {
   let res: Response;
   try {
     res = await fetch(`${ARM}/subscriptions?api-version=2020-01-01`, {
@@ -172,10 +193,19 @@ export async function listAzureSubscriptions(accessToken: string): Promise<{ ok:
       cache: "no-store",
     });
   } catch (err) {
-    return { ok: false, error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (!res.ok) return { ok: false, error: `Azure returned ${res.status} listing subscriptions.` };
-  const data = (await res.json().catch(() => ({}))) as { value?: Array<{ subscriptionId: string; displayName: string; state: string }> };
-  const subs = (data.value ?? []).map((s) => ({ id: s.subscriptionId, displayName: s.displayName, state: s.state }));
+  const data = (await res.json().catch(() => ({}))) as {
+    value?: Array<{ subscriptionId: string; displayName: string; state: string }>;
+  };
+  const subs = (data.value ?? []).map((s) => ({
+    id: s.subscriptionId,
+    displayName: s.displayName,
+    state: s.state,
+  }));
   return { ok: true, subs };
 }

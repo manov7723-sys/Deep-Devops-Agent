@@ -95,9 +95,7 @@ export type CreateRepoArgs = {
   visibility: RepoVisibility;
 };
 
-export type CreateRepoResult =
-  | { ok: true; repo: RepoRow }
-  | { ok: false; code: "duplicate" };
+export type CreateRepoResult = { ok: true; repo: RepoRow } | { ok: false; code: "duplicate" };
 
 /**
  * Idempotent. When `oauthAccountId` is provided, identity is
@@ -197,9 +195,7 @@ export async function createRepo(args: CreateRepoArgs): Promise<CreateRepoResult
   return { ok: true, repo: row(updated) };
 }
 
-export type DisconnectResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" };
+export type DisconnectResult = { ok: true } | { ok: false; code: "not_found" };
 
 export async function disconnectRepo(userId: string, repoId: string): Promise<DisconnectResult> {
   const { count } = await prisma.repo.updateMany({
@@ -214,8 +210,7 @@ export async function disconnectRepo(userId: string, repoId: string): Promise<Di
 // ──────────────────────────────────────────────────────────────────
 
 export type AttachRepoResult =
-  | { ok: true }
-  | { ok: false; code: "repo_not_yours" | "repo_not_found" | "already_attached" };
+  { ok: true } | { ok: false; code: "repo_not_yours" | "repo_not_found" | "already_attached" };
 
 export async function attachRepoToProject(
   attachingUserId: string,

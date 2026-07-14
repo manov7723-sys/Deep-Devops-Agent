@@ -7,7 +7,12 @@ import { runStage } from "@/lib/runner/exec";
 import type { Tool } from "./types";
 
 /** PATH additions so the `docker` / `git` binaries are found on dev + container hosts. */
-const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/Applications/Docker.app/Contents/Resources/bin"];
+const EXTRA_PATH = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/usr/bin",
+  "/Applications/Docker.app/Contents/Resources/bin",
+];
 
 type Input = {
   /** owner/repo — must be attached to the current project. */
@@ -67,7 +72,8 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
       repoFullName: { type: "string", description: "owner/repo, must be attached to the project." },
       files: {
         type: "array",
-        description: "Files to write into the build context before building (Dockerfile + sidecars).",
+        description:
+          "Files to write into the build context before building (Dockerfile + sidecars).",
         items: {
           type: "object",
           properties: {
@@ -78,8 +84,14 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
           additionalProperties: false,
         },
       },
-      dockerfilePath: { type: "string", description: 'Dockerfile path in the context. Defaults to "Dockerfile".' },
-      ref: { type: "string", description: "Branch / ref to clone. Defaults to the repo's default branch." },
+      dockerfilePath: {
+        type: "string",
+        description: 'Dockerfile path in the context. Defaults to "Dockerfile".',
+      },
+      ref: {
+        type: "string",
+        description: "Branch / ref to clone. Defaults to the repo's default branch.",
+      },
     },
     required: ["repoFullName", "files"],
     additionalProperties: false,
@@ -93,7 +105,10 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
       return { ok: false, error: `Invalid dockerfilePath "${input.dockerfilePath}".` };
     }
     if (!input.files.some((f) => safeRelPath(f.path) === dockerfilePath)) {
-      return { ok: false, error: `The files array must include the Dockerfile at "${dockerfilePath}".` };
+      return {
+        ok: false,
+        error: `The files array must include the Dockerfile at "${dockerfilePath}".`,
+      };
     }
 
     const repo = await prisma.repo.findFirst({
@@ -131,10 +146,16 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
         timeoutMs: 90_000,
       });
       if (clone.exitCode !== 0) {
-        if (clone.exitCode === -1 && (clone.stderr.includes("ENOENT") || clone.stderr.includes("[exec]"))) {
+        if (
+          clone.exitCode === -1 &&
+          (clone.stderr.includes("ENOENT") || clone.stderr.includes("[exec]"))
+        ) {
           return { ok: false, error: "`git` isn't installed on the server." };
         }
-        return { ok: false, error: `git clone failed: ${clone.stderr.slice(-500) || clone.stdout.slice(-500)}` };
+        return {
+          ok: false,
+          error: `git clone failed: ${clone.stderr.slice(-500) || clone.stdout.slice(-500)}`,
+        };
       }
 
       // 2 — overlay the candidate files (creating subdirs as needed).
@@ -155,8 +176,15 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
 
-      if (build.exitCode === -1 && (build.stderr.includes("ENOENT") || build.stderr.includes("[exec]"))) {
-        return { ok: false, error: "`docker` isn't installed / not running on the server. Cannot verify the build here." };
+      if (
+        build.exitCode === -1 &&
+        (build.stderr.includes("ENOENT") || build.stderr.includes("[exec]"))
+      ) {
+        return {
+          ok: false,
+          error:
+            "`docker` isn't installed / not running on the server. Cannot verify the build here.",
+        };
       }
 
       const log = (build.stderr + "\n" + build.stdout).trim().slice(-4_000);
@@ -165,7 +193,9 @@ export const verifyDockerBuildTool: Tool<Input, Output> = {
         output: {
           built: build.exitCode === 0,
           exitCode: build.exitCode,
-          log: build.timedOut ? `${log}\n[verify] build timed out after ${DEFAULT_TIMEOUT_MS / 1000}s` : log,
+          log: build.timedOut
+            ? `${log}\n[verify] build timed out after ${DEFAULT_TIMEOUT_MS / 1000}s`
+            : log,
         },
       };
     } finally {

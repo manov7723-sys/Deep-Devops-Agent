@@ -33,7 +33,10 @@ export async function GET(req: Request) {
 
   const tok = await getFreshAccessTokenForAccount(oauth);
   if (!tok.ok) {
-    return NextResponse.json({ ok: false, code: "gitlab_not_connected", message: tok.message }, { status: 409 });
+    return NextResponse.json(
+      { ok: false, code: "gitlab_not_connected", message: tok.message },
+      { status: 409 },
+    );
   }
 
   const base = (oauth.providerBaseUrl || gitlabBaseUrl()).replace(/\/+$/, "");

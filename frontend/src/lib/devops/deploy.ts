@@ -67,9 +67,18 @@ export type DeployPrefill = {
  * fails the flow — if detection is unavailable, returns sensible defaults so the
  * wizard still works.
  */
-export async function prefillFromRepo(projectId: string, repoFullName: string): Promise<DeployPrefill> {
+export async function prefillFromRepo(
+  projectId: string,
+  repoFullName: string,
+): Promise<DeployPrefill> {
   const appName = sanitizeAppName(repoFullName.split("/")[1] || repoFullName);
-  const fallback: DeployPrefill = { appName, containerPort: 8080, stackTitle: null, reasoning: null, hasDockerfile: false };
+  const fallback: DeployPrefill = {
+    appName,
+    containerPort: 8080,
+    stackTitle: null,
+    reasoning: null,
+    hasDockerfile: false,
+  };
   try {
     const d = await detectRepoStack(projectId, repoFullName);
     if (!d.ok) return fallback;
@@ -88,7 +97,16 @@ export async function prefillFromRepo(projectId: string, repoFullName: string): 
 }
 
 export type DeployResult =
-  | { ok: true; applied: boolean; dryRun: boolean; resources: string[]; command: string; stdout: string; stderr: string; healthy?: boolean }
+  | {
+      ok: true;
+      applied: boolean;
+      dryRun: boolean;
+      resources: string[];
+      command: string;
+      stdout: string;
+      stderr: string;
+      healthy?: boolean;
+    }
   | { ok: false; error: string; rolledBack?: boolean };
 
 /** Poll the rollout until healthy or the timeout elapses. Returns whether it went healthy. */
@@ -113,7 +131,12 @@ export async function runDeploy(
   ctx: { projectId: string; userId: string },
   target: { envKey: string; envId: string; namespace: string },
   spec: DeploySpec,
-  opts?: { dryRun?: boolean; autoRollback?: boolean; healthTimeoutMs?: number; source?: "manual" | "scheduled" | "agent" },
+  opts?: {
+    dryRun?: boolean;
+    autoRollback?: boolean;
+    healthTimeoutMs?: number;
+    source?: "manual" | "scheduled" | "agent";
+  },
 ): Promise<DeployResult> {
   const source = opts?.source ?? "manual";
   const { yaml, resources } = buildDeployManifest(spec);
@@ -128,15 +151,32 @@ export async function runDeploy(
     const errText = (out.stderr || out.stdout || "kubectl apply failed").slice(-500);
     // Notify on failure too (email + ChatOps), unless it was a dry-run.
     if (!opts?.dryRun) {
-      await postEventToChatOps(ctx.projectId, "❌", `Deploy failed — ${app} → ${target.envKey}`, errText).catch(() => {});
-      await emailProjectMembers(ctx.projectId, `❌ Deploy failed — ${app} → ${target.envKey}`, `The deploy of "${app}" to ${target.envKey} failed:\n\n${errText}`).catch(() => {});
+      await postEventToChatOps(
+        ctx.projectId,
+        "❌",
+        `Deploy failed — ${app} → ${target.envKey}`,
+        errText,
+      ).catch(() => {});
+      await emailProjectMembers(
+        ctx.projectId,
+        `❌ Deploy failed — ${app} → ${target.envKey}`,
+        `The deploy of "${app}" to ${target.envKey} failed:\n\n${errText}`,
+      ).catch(() => {});
       await recordDeployment(ctx.projectId, ctx.userId, target, spec, "failed", errText, source);
     }
     return { ok: false, error: errText };
   }
 
   if (opts?.dryRun) {
-    return { ok: true, applied: out.applied, dryRun: out.dryRun, resources, command: out.command, stdout: out.stdout, stderr: out.stderr };
+    return {
+      ok: true,
+      applied: out.applied,
+      dryRun: out.dryRun,
+      resources,
+      command: out.command,
+      stdout: out.stdout,
+      stderr: out.stderr,
+    };
   }
 
   await recordActivity({
@@ -154,27 +194,70 @@ export async function runDeploy(
   // healthy in time, revert to the last known-good revision and notify — so a bad
   // deploy self-heals instead of leaving the app down.
   if (opts?.autoRollback !== false) {
-    const healthy = await waitForHealthy(ctx, target.envKey, app, spec.namespace, opts?.healthTimeoutMs ?? 120_000);
+    const healthy = await waitForHealthy(
+      ctx,
+      target.envKey,
+      app,
+      spec.namespace,
+      opts?.healthTimeoutMs ?? 120_000,
+    );
     if (!healthy) {
-      const rb = await rollbackDeployment(ctx.projectId, target.envKey, app, { namespace: spec.namespace });
+      const rb = await rollbackDeployment(ctx.projectId, target.envKey, app, {
+        namespace: spec.namespace,
+      });
       if (rb.ok) {
         const note = `The deploy of "${app}" to ${target.envKey} didn't become healthy in time, so it was AUTOMATICALLY ROLLED BACK to the previous version. Image attempted: ${spec.image}.`;
-        await postEventToChatOps(ctx.projectId, "↩️", `Auto-rolled back ${app} → ${target.envKey}`, note).catch(() => {});
-        await emailProjectMembers(ctx.projectId, `↩️ Auto-rolled back — ${app} → ${target.envKey}`, note).catch(() => {});
-        await recordDeployment(ctx.projectId, ctx.userId, target, spec, "rolled_back", note, source);
-        return { ok: false, error: `"${app}" failed to become healthy and was automatically rolled back to the previous version.`, rolledBack: true };
+        await postEventToChatOps(
+          ctx.projectId,
+          "↩️",
+          `Auto-rolled back ${app} → ${target.envKey}`,
+          note,
+        ).catch(() => {});
+        await emailProjectMembers(
+          ctx.projectId,
+          `↩️ Auto-rolled back — ${app} → ${target.envKey}`,
+          note,
+        ).catch(() => {});
+        await recordDeployment(
+          ctx.projectId,
+          ctx.userId,
+          target,
+          spec,
+          "rolled_back",
+          note,
+          source,
+        );
+        return {
+          ok: false,
+          error: `"${app}" failed to become healthy and was automatically rolled back to the previous version.`,
+          rolledBack: true,
+        };
       }
       // Couldn't roll back — most likely the FIRST deploy (no previous revision).
       const note = `The deploy of "${app}" to ${target.envKey} didn't become healthy and could NOT be auto-rolled back (${rb.error}). The app has no previous good version to revert to — check the pod logs (image pull, wrong port, or a missing env var).`;
-      await postEventToChatOps(ctx.projectId, "⚠️", `Deploy unhealthy — ${app} → ${target.envKey}`, note).catch(() => {});
-      await emailProjectMembers(ctx.projectId, `⚠️ Deploy unhealthy — ${app} → ${target.envKey}`, note).catch(() => {});
+      await postEventToChatOps(
+        ctx.projectId,
+        "⚠️",
+        `Deploy unhealthy — ${app} → ${target.envKey}`,
+        note,
+      ).catch(() => {});
+      await emailProjectMembers(
+        ctx.projectId,
+        `⚠️ Deploy unhealthy — ${app} → ${target.envKey}`,
+        note,
+      ).catch(() => {});
       await recordDeployment(ctx.projectId, ctx.userId, target, spec, "failed", note, source);
       return { ok: false, error: note, rolledBack: false };
     }
   }
 
   // Healthy (or auto-rollback disabled) → report success to the team's channel.
-  await postEventToChatOps(ctx.projectId, "🚀", `Deployed ${app} → ${target.envKey}`, summary).catch(() => {});
+  await postEventToChatOps(
+    ctx.projectId,
+    "🚀",
+    `Deployed ${app} → ${target.envKey}`,
+    summary,
+  ).catch(() => {});
   await emailProjectMembers(
     ctx.projectId,
     `✅ Deployed ${app} → ${target.envKey}`,
@@ -211,7 +294,10 @@ export async function setEnvKubeconfigSecret(
   const repo = await resolveAttachedRepo(projectId, repoFullName);
   if (!repo.ok) return { ok: false, error: repo.error };
 
-  const env = await prisma.env.findFirst({ where: { projectId, key: envKey }, select: { id: true } });
+  const env = await prisma.env.findFirst({
+    where: { projectId, key: envKey },
+    select: { id: true },
+  });
   if (!env) return { ok: false, error: `Env "${envKey}" not found in this project.` };
 
   const kc = await getKubeconfigForEnv(env.id);
@@ -219,20 +305,27 @@ export async function setEnvKubeconfigSecret(
   try {
     const content = await readFile(kc.handle.path, "utf8");
     const b64 = Buffer.from(content, "utf8").toString("base64");
-    const res = await setRepoActionsSecret(repo.repo.accessToken, repoFullName, "KUBECONFIG_B64", b64);
+    const res = await setRepoActionsSecret(
+      repo.repo.accessToken,
+      repoFullName,
+      "KUBECONFIG_B64",
+      b64,
+    );
     return res.ok ? { ok: true, secret: "KUBECONFIG_B64" } : { ok: false, error: res.error };
   } finally {
     await kc.handle.cleanup();
   }
 }
 
-export type RolloutStatus = {
-  ok: true;
-  found: boolean;
-  ready: string; // "X/Y"
-  healthy: boolean;
-  pods: Array<{ name: string; status: string; ready: string }>;
-} | { ok: false; error: string };
+export type RolloutStatus =
+  | {
+      ok: true;
+      found: boolean;
+      ready: string; // "X/Y"
+      healthy: boolean;
+      pods: Array<{ name: string; status: string; ready: string }>;
+    }
+  | { ok: false; error: string };
 
 /** Poll the Deployment + its Pods to report rollout health. */
 export async function deployStatus(

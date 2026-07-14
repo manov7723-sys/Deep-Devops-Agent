@@ -84,7 +84,9 @@ export type CreateProjectArgs = {
  * Create + owner-membership in one transaction. Slug is generated from the
  * name with deterministic collision suffixing.
  */
-export async function createProject(args: CreateProjectArgs): Promise<{ id: string; slug: string }> {
+export async function createProject(
+  args: CreateProjectArgs,
+): Promise<{ id: string; slug: string }> {
   const slug = await generateUniqueSlug(args.name);
   const created = await prisma.$transaction(async (tx) => {
     const p = await tx.project.create({
@@ -166,10 +168,7 @@ export type TransferProjectResult =
   | { ok: true; newOwner: { id: string; name: string; email: string } }
   | {
       ok: false;
-      code:
-        | "user_not_found"
-        | "already_owner"
-        | "self_transfer";
+      code: "user_not_found" | "already_owner" | "self_transfer";
     };
 
 /**
@@ -273,8 +272,7 @@ export async function listMembers(projectId: string): Promise<MemberRow[]> {
 }
 
 export type ChangeRoleResult =
-  | { ok: true }
-  | { ok: false; code: "not_a_member" | "last_owner" | "cannot_demote_owner" };
+  { ok: true } | { ok: false; code: "not_a_member" | "last_owner" | "cannot_demote_owner" };
 
 /**
  * Change a member's role. Demoting the last owner is rejected to prevent
@@ -299,8 +297,7 @@ export async function changeMemberRole(
 }
 
 export type RemoveMemberResult =
-  | { ok: true }
-  | { ok: false; code: "not_a_member" | "cannot_remove_owner" };
+  { ok: true } | { ok: false; code: "not_a_member" | "cannot_remove_owner" };
 
 export async function removeMember(
   projectId: string,

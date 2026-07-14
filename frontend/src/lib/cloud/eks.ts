@@ -7,7 +7,9 @@
 import { tmpdir } from "node:os";
 import { runStage } from "@/lib/runner/exec";
 
-const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].filter(Boolean).join(":");
+const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+  .filter(Boolean)
+  .join(":");
 
 export type EksCluster = { name: string; status?: string; version?: string };
 
@@ -25,13 +27,15 @@ export async function listEksClusters(
     timeoutMs: 30_000,
   });
   if (list.exitCode !== 0) {
-    const missing = list.exitCode === -1 && (list.stderr.includes("ENOENT") || list.stderr.includes("[exec]"));
+    const missing =
+      list.exitCode === -1 && (list.stderr.includes("ENOENT") || list.stderr.includes("[exec]"));
     return {
       ok: false,
       code: missing ? "cli_not_installed" : "list_failed",
       error: missing
         ? "The `aws` CLI isn't on the server's PATH. Install it on the runner host."
-        : list.stderr.slice(-500) || "aws eks list-clusters failed (check the region and that the AWS creds have eks:ListClusters).",
+        : list.stderr.slice(-500) ||
+          "aws eks list-clusters failed (check the region and that the AWS creds have eks:ListClusters).",
     };
   }
 

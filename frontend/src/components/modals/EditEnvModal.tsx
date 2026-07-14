@@ -110,7 +110,9 @@ export function EditEnvModal({ open, onOpenChange, projectSlug, env }: EditEnvMo
       footer={
         confirmDelete ? (
           <>
-            <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Btn>
             <Btn
               variant="primary"
               icon="x"
@@ -123,13 +125,10 @@ export function EditEnvModal({ open, onOpenChange, projectSlug, env }: EditEnvMo
           </>
         ) : (
           <>
-            <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
-            <Btn
-              variant="primary"
-              icon="check"
-              loading={update.isPending}
-              onClick={submit}
-            >
+            <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Btn>
+            <Btn variant="primary" icon="check" loading={update.isPending} onClick={submit}>
               Save changes
             </Btn>
           </>
@@ -159,10 +158,7 @@ export function EditEnvModal({ open, onOpenChange, projectSlug, env }: EditEnvMo
               onChange={(e) => setRegion(e.target.value)}
             />
           </Field>
-          <Field
-            label="Terraform workspace"
-            hint={`Defaults to ${fallbackWorkspace} when blank.`}
-          >
+          <Field label="Terraform workspace" hint={`Defaults to ${fallbackWorkspace} when blank.`}>
             <Input
               className="mono"
               placeholder={fallbackWorkspace}
@@ -204,7 +200,10 @@ export function EditEnvModal({ open, onOpenChange, projectSlug, env }: EditEnvMo
           }}
         >
           <div className="row between" style={{ alignItems: "center" }}>
-            <span className="row gap-2" style={{ alignItems: "center", fontWeight: 600, fontSize: 13 }}>
+            <span
+              className="row gap-2"
+              style={{ alignItems: "center", fontWeight: 600, fontSize: 13 }}
+            >
               Kubernetes cluster
               {env.hasKubeconfig ? (
                 <StatusDot tone="ok" label="wired" />
@@ -244,10 +243,7 @@ export function EditEnvModal({ open, onOpenChange, projectSlug, env }: EditEnvMo
               Verify cluster
             </Btn>
           </div>
-          <Field
-            label="Namespace"
-            hint="Namespace where deployments land. Created if missing."
-          >
+          <Field label="Namespace" hint="Namespace where deployments land. Created if missing.">
             <Input
               className="mono"
               placeholder="default"
@@ -288,8 +284,7 @@ export function EditEnvModal({ open, onOpenChange, projectSlug, env }: EditEnvMo
                 <>
                   <b>
                     Connected — {verifyResult.nodes.length} node
-                    {verifyResult.nodes.length === 1 ? "" : "s"} ·{" "}
-                    {verifyResult.durationMs}ms
+                    {verifyResult.nodes.length === 1 ? "" : "s"} · {verifyResult.durationMs}ms
                   </b>
                   <div className="col" style={{ marginTop: 6 }}>
                     {verifyResult.nodes.slice(0, 5).map((n) => (

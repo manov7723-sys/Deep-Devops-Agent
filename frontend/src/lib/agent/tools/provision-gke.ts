@@ -79,39 +79,84 @@ export const provisionGkeTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       envKey: { type: "string", description: "Env key whose GCP creds to use, e.g. 'release'." },
-      name: { type: "string", description: "Cluster name (lowercase letters, digits, hyphens; start with a letter)." },
+      name: {
+        type: "string",
+        description: "Cluster name (lowercase letters, digits, hyphens; start with a letter).",
+      },
       project: { type: "string", description: "GCP project id the cluster lives in." },
-      location: { type: "string", description: "Region (e.g. 'us-central1') or zone (e.g. 'us-central1-a'). Default us-central1." },
+      location: {
+        type: "string",
+        description:
+          "Region (e.g. 'us-central1') or zone (e.g. 'us-central1-a'). Default us-central1.",
+      },
       kubernetesVersion: { type: "string", description: "K8s version, e.g. '1.30'." },
       machineType: { type: "string", description: "Node machine type, e.g. 'n2-standard-4'." },
       desiredNodes: { type: "number", description: "Desired node count. Default 1." },
       minNodes: { type: "number", description: "Min node count. Default 1." },
       maxNodes: { type: "number", description: "Max node count. Default 3." },
       createNetwork: { type: "boolean", description: "Create a new dedicated VPC. Default true." },
-      existingNetwork: { type: "string", description: "Existing network name (required when createNetwork=false)." },
-      existingSubnetwork: { type: "string", description: "Existing subnetwork name (optional, only when createNetwork=false)." },
+      existingNetwork: {
+        type: "string",
+        description: "Existing network name (required when createNetwork=false).",
+      },
+      existingSubnetwork: {
+        type: "string",
+        description: "Existing subnetwork name (optional, only when createNetwork=false).",
+      },
       privateNodes: { type: "boolean", description: "Nodes have no public IPs. Default true." },
-      privateEndpoint: { type: "boolean", description: "Also make the control-plane endpoint private. Default false." },
-      workloadIdentity: { type: "boolean", description: "Federated GCP IAM for pods. Default true." },
-      shieldedNodes: { type: "boolean", description: "Secure boot + integrity monitoring. Default true." },
-      binaryAuthorization: { type: "boolean", description: "Signed-image enforcement. Default true." },
-      releaseChannel: { type: "string", enum: ["REGULAR", "STABLE", "RAPID"], description: "GKE release channel. Default REGULAR." },
-      appNodePool: { type: "boolean", description: "Add an application node pool alongside the default. Default true." },
+      privateEndpoint: {
+        type: "boolean",
+        description: "Also make the control-plane endpoint private. Default false.",
+      },
+      workloadIdentity: {
+        type: "boolean",
+        description: "Federated GCP IAM for pods. Default true.",
+      },
+      shieldedNodes: {
+        type: "boolean",
+        description: "Secure boot + integrity monitoring. Default true.",
+      },
+      binaryAuthorization: {
+        type: "boolean",
+        description: "Signed-image enforcement. Default true.",
+      },
+      releaseChannel: {
+        type: "string",
+        enum: ["REGULAR", "STABLE", "RAPID"],
+        description: "GKE release channel. Default REGULAR.",
+      },
+      appNodePool: {
+        type: "boolean",
+        description: "Add an application node pool alongside the default. Default true.",
+      },
       appMachineType: { type: "string", description: "App pool machine type." },
       appSpot: { type: "boolean", description: "Use spot VMs for the app pool. Default true." },
       appMinNodes: { type: "number", description: "App pool min nodes." },
       appMaxNodes: { type: "number", description: "App pool max nodes." },
       stateBucket: { type: "string", description: "GCS bucket for remote state (optional)." },
-      mode: { type: "string", enum: ["push", "apply", "push_and_apply"], description: "Execution mode the user chose." },
-      repoFullName: { type: "string", description: "owner/repo to push to (required for push modes)." },
-      path: { type: "string", description: "GitHub folder for the files. Default terraform/gke/<name>." },
+      mode: {
+        type: "string",
+        enum: ["push", "apply", "push_and_apply"],
+        description: "Execution mode the user chose.",
+      },
+      repoFullName: {
+        type: "string",
+        description: "owner/repo to push to (required for push modes).",
+      },
+      path: {
+        type: "string",
+        description: "GitHub folder for the files. Default terraform/gke/<name>.",
+      },
     },
     required: ["envKey", "name", "project", "mode"],
     additionalProperties: false,
   },
   async execute(input, ctx) {
     if (!/^[a-z][a-z0-9-]{1,38}$/.test(input.name)) {
-      return { ok: false, error: "Invalid cluster name. Use lowercase letters, digits, hyphens; start with a letter." };
+      return {
+        ok: false,
+        error: "Invalid cluster name. Use lowercase letters, digits, hyphens; start with a letter.",
+      };
     }
     const wantsPush = input.mode === "push" || input.mode === "push_and_apply";
     const wantsApply = input.mode === "apply" || input.mode === "push_and_apply";
@@ -129,7 +174,10 @@ export const provisionGkeTool: Tool<Input, Output> = {
     });
     if (!env) return { ok: false, error: `Env "${input.envKey}" not found in this project.` };
     if (wantsApply && !env.cloudProviderId) {
-      return { ok: false, error: `Env "${input.envKey}" has no cloud provider connected — connect GCP before applying.` };
+      return {
+        ok: false,
+        error: `Env "${input.envKey}" has no cloud provider connected — connect GCP before applying.`,
+      };
     }
 
     // Backend resolution priority: explicit stateBucket from this call →
@@ -139,7 +187,9 @@ export const provisionGkeTool: Tool<Input, Output> = {
     const explicitBucket = input.stateBucket?.trim();
     const resolvedBucket = explicitBucket || env.tfBackendGcsBucket || undefined;
     if (explicitBucket && explicitBucket !== env.tfBackendGcsBucket) {
-      await setEnvGcsBackend(ctx.projectId, input.envKey, { bucket: explicitBucket }).catch(() => {});
+      await setEnvGcsBackend(ctx.projectId, input.envKey, { bucket: explicitBucket }).catch(
+        () => {},
+      );
     }
 
     const spec: GkeSpec = {
@@ -167,7 +217,11 @@ export const provisionGkeTool: Tool<Input, Output> = {
       appMaxNodes: input.appMaxNodes,
       ...(resolvedBucket ? { stateBucket: resolvedBucket } : {}),
     };
-    if (spec.maxNodes < spec.minNodes || spec.desiredNodes < spec.minNodes || spec.desiredNodes > spec.maxNodes) {
+    if (
+      spec.maxNodes < spec.minNodes ||
+      spec.desiredNodes < spec.minNodes ||
+      spec.desiredNodes > spec.maxNodes
+    ) {
       return { ok: false, error: "Node counts must satisfy min ≤ desired ≤ max." };
     }
 
@@ -194,7 +248,8 @@ export const provisionGkeTool: Tool<Input, Output> = {
           },
           ctx,
         );
-        if (!res.ok) return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
+        if (!res.ok)
+          return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
         if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
         first = false;
@@ -220,11 +275,22 @@ export const provisionGkeTool: Tool<Input, Output> = {
     const bits: string[] = [`Generated ${fileCount} GKE Terraform files for "${input.name}".`];
     if (pullRequest) bits.push(`Opened PR #${pullRequest.number}: ${pullRequest.url}`);
     else if (committed.length) bits.push(`Committed ${committed.length} files.`);
-    if (runId) bits.push(`Started terraform apply (run ${runId}) — track it on the Infrastructure tab (GKE takes ~10–15 min).`);
+    if (runId)
+      bits.push(
+        `Started terraform apply (run ${runId}) — track it on the Infrastructure tab (GKE takes ~10–15 min).`,
+      );
 
     return {
       ok: true,
-      output: { cluster: input.name, fileCount, mode: input.mode, runId, pullRequest, committed, note: bits.join(" ") },
+      output: {
+        cluster: input.name,
+        fileCount,
+        mode: input.mode,
+        runId,
+        pullRequest,
+        committed,
+        note: bits.join(" "),
+      },
     };
   },
 };

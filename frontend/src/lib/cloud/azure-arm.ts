@@ -69,16 +69,30 @@ async function armFetch(
   const method = (init?.method ?? "GET").toUpperCase();
   // Re-attach the bearer token on every hop (we follow redirects manually so a
   // regional redirect can't drop the Authorization header).
-  const reqHeaders: Record<string, string> = { Authorization: `Bearer ${token}`, Accept: "application/json", ...(init?.headers ?? {}) };
+  const reqHeaders: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    ...(init?.headers ?? {}),
+  };
   const trail: string[] = [];
   let url = `${ARM}${path}`;
   let res: RawResponse;
   try {
     for (let hop = 0; ; hop++) {
-      const host = (() => { try { return new URL(url).host; } catch { return url; } })();
+      const host = (() => {
+        try {
+          return new URL(url).host;
+        } catch {
+          return url;
+        }
+      })();
       trail.push(`${method} ${host}`);
       res = await rawHttps(url, { method, headers: reqHeaders, body: init?.body });
-      if ((res.status === 301 || res.status === 302 || res.status === 307 || res.status === 308) && res.location && hop < 4) {
+      if (
+        (res.status === 301 || res.status === 302 || res.status === 307 || res.status === 308) &&
+        res.location &&
+        hop < 4
+      ) {
         const nextUrl = res.location.startsWith("http") ? res.location : `${ARM}${res.location}`;
         console.error(`[azure-arm] ${res.status} redirect ${method} -> ${nextUrl}`);
         url = nextUrl;
@@ -87,11 +101,20 @@ async function armFetch(
       break;
     }
   } catch (err) {
-    return { ok: false, error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (res.status < 200 || res.status >= 300) {
     const body = res.text;
-    const host = (() => { try { return new URL(url).host; } catch { return url; } })();
+    const host = (() => {
+      try {
+        return new URL(url).host;
+      } catch {
+        return url;
+      }
+    })();
     console.error(
       `[azure-arm] ${method} ${ARM}${path} -> ${res.status} ${res.statusText}` +
         ` (final host: ${host}; hops: ${trail.join(" → ")}) :: ${body.slice(0, 300)}`,
@@ -120,10 +143,18 @@ async function armFetch(
 function tokenIdentity(jwt: string): string {
   try {
     const payload = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64").toString("utf8")) as {
-      upn?: string; unique_name?: string; email?: string; appid?: string; app_displayname?: string; oid?: string; idtyp?: string;
+      upn?: string;
+      unique_name?: string;
+      email?: string;
+      appid?: string;
+      app_displayname?: string;
+      oid?: string;
+      idtyp?: string;
     };
-    if (payload.upn || payload.unique_name || payload.email) return `user ${payload.upn || payload.unique_name || payload.email}`;
-    if (payload.appid) return `service principal ${payload.app_displayname ? `"${payload.app_displayname}" ` : ""}(appid ${payload.appid})`;
+    if (payload.upn || payload.unique_name || payload.email)
+      return `user ${payload.upn || payload.unique_name || payload.email}`;
+    if (payload.appid)
+      return `service principal ${payload.app_displayname ? `"${payload.app_displayname}" ` : ""}(appid ${payload.appid})`;
     return payload.oid ? `identity ${payload.oid}` : "unknown identity";
   } catch {
     return "unknown identity";
@@ -147,12 +178,20 @@ export async function listAksClusters(
   token: string,
   subscriptionId: string,
 ): Promise<{ ok: true; clusters: AksClusterInfo[] } | { ok: false; error: string }> {
-  const r = await armFetch(token, `/subscriptions/${subscriptionId.trim()}/providers/Microsoft.ContainerService/managedClusters?api-version=${AKS_API_VERSIONS[1]}`);
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId.trim()}/providers/Microsoft.ContainerService/managedClusters?api-version=${AKS_API_VERSIONS[1]}`,
+  );
   if (!r.ok) return { ok: false, error: r.error };
-  const list = (r.data as { value?: Array<{ name?: string; id?: string; location?: string }> }).value ?? [];
+  const list =
+    (r.data as { value?: Array<{ name?: string; id?: string; location?: string }> }).value ?? [];
   return {
     ok: true,
-    clusters: list.map((c) => ({ name: c.name ?? "", resourceGroup: rgFromId(c.id ?? ""), location: c.location ?? "" })),
+    clusters: list.map((c) => ({
+      name: c.name ?? "",
+      resourceGroup: rgFromId(c.id ?? ""),
+      location: c.location ?? "",
+    })),
   };
 }
 
@@ -167,21 +206,34 @@ export async function findAksClusterByName(
   subscriptionId: string,
   clusterName: string,
 ): Promise<{ ok: true; resourceGroup: string; location: string } | { ok: false; error: string }> {
-  const r = await armFetch(token, `/subscriptions/${subscriptionId.trim()}/providers/Microsoft.ContainerService/managedClusters?api-version=${AKS_API_VERSIONS[1]}`);
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId.trim()}/providers/Microsoft.ContainerService/managedClusters?api-version=${AKS_API_VERSIONS[1]}`,
+  );
   if (!r.ok) return { ok: false, error: r.error };
-  const list = (r.data as { value?: Array<{ name?: string; id?: string; location?: string }> }).value ?? [];
+  const list =
+    (r.data as { value?: Array<{ name?: string; id?: string; location?: string }> }).value ?? [];
   const want = clusterName.trim().toLowerCase();
   const match = list.find((c) => (c.name ?? "").toLowerCase() === want);
   if (!match) {
-    const names = list.map((c) => c.name).filter(Boolean).join(", ");
-    return { ok: false, error: `No AKS cluster named "${clusterName}" in this subscription.${names ? ` Found: ${names}.` : " No clusters found."}` };
+    const names = list
+      .map((c) => c.name)
+      .filter(Boolean)
+      .join(", ");
+    return {
+      ok: false,
+      error: `No AKS cluster named "${clusterName}" in this subscription.${names ? ` Found: ${names}.` : " No clusters found."}`,
+    };
   }
   return { ok: true, resourceGroup: rgFromId(match.id ?? ""), location: match.location ?? "" };
 }
 
 /** The tenant that owns a subscription (needed to mint a tenant-scoped token
  *  for personal-account owners). Null on failure. */
-export async function getSubscriptionTenant(token: string, subscriptionId: string): Promise<string | null> {
+export async function getSubscriptionTenant(
+  token: string,
+  subscriptionId: string,
+): Promise<string | null> {
   const r = await armFetch(token, `/subscriptions/${subscriptionId}?api-version=2020-01-01`);
   if (!r.ok) return null;
   return (r.data as { tenantId?: string }).tenantId ?? null;
@@ -189,16 +241,27 @@ export async function getSubscriptionTenant(token: string, subscriptionId: strin
 
 export type AzureResourceGroup = { name: string; location: string };
 export type AzureSubnet = { name: string; id: string; addressPrefix: string };
-export type AzureVnet = { name: string; resourceGroup: string; location: string; subnets: AzureSubnet[] };
+export type AzureVnet = {
+  name: string;
+  resourceGroup: string;
+  location: string;
+  subnets: AzureSubnet[];
+};
 
 export async function listAzureResourceGroups(
   token: string,
   subscriptionId: string,
 ): Promise<{ ok: true; resourceGroups: AzureResourceGroup[] } | { ok: false; error: string }> {
-  const r = await armFetch(token, `/subscriptions/${subscriptionId}/resourcegroups?api-version=2021-04-01`);
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/resourcegroups?api-version=2021-04-01`,
+  );
   if (!r.ok) return r;
   const value = (r.data as { value?: Array<{ name?: string; location?: string }> }).value ?? [];
-  return { ok: true, resourceGroups: value.map((g) => ({ name: g.name ?? "", location: g.location ?? "" })) };
+  return {
+    ok: true,
+    resourceGroups: value.map((g) => ({ name: g.name ?? "", location: g.location ?? "" })),
+  };
 }
 
 export async function listAzureVnets(
@@ -210,12 +273,23 @@ export async function listAzureVnets(
     `/subscriptions/${subscriptionId}/providers/Microsoft.Network/virtualNetworks?api-version=2023-09-01`,
   );
   if (!r.ok) return r;
-  const value = (r.data as {
-    value?: Array<{
-      id?: string; name?: string; location?: string;
-      properties?: { subnets?: Array<{ id?: string; name?: string; properties?: { addressPrefix?: string } }> };
-    }>;
-  }).value ?? [];
+  const value =
+    (
+      r.data as {
+        value?: Array<{
+          id?: string;
+          name?: string;
+          location?: string;
+          properties?: {
+            subnets?: Array<{
+              id?: string;
+              name?: string;
+              properties?: { addressPrefix?: string };
+            }>;
+          };
+        }>;
+      }
+    ).value ?? [];
   const vnets: AzureVnet[] = value.map((v) => ({
     name: v.name ?? "",
     resourceGroup: rgFromId(v.id ?? ""),
@@ -240,10 +314,18 @@ export async function listAzureVnets(
 const AKS_API_VERSIONS = ["2024-09-01", "2024-05-01", "2024-02-01", "2023-10-01"];
 
 /** Ask Azure for the newest stable api-version of managedClusters (null on failure). */
-async function latestManagedClustersApiVersion(token: string, subscriptionId: string): Promise<string | null> {
-  const r = await armFetch(token, `/subscriptions/${subscriptionId}/providers/Microsoft.ContainerService?api-version=2022-12-01`);
+async function latestManagedClustersApiVersion(
+  token: string,
+  subscriptionId: string,
+): Promise<string | null> {
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/providers/Microsoft.ContainerService?api-version=2022-12-01`,
+  );
   if (!r.ok) return null;
-  const rt = (r.data as { resourceTypes?: Array<{ resourceType?: string; apiVersions?: string[] }> }).resourceTypes ?? [];
+  const rt =
+    (r.data as { resourceTypes?: Array<{ resourceType?: string; apiVersions?: string[] }> })
+      .resourceTypes ?? [];
   const mc = rt.find((t) => t.resourceType === "managedClusters");
   // apiVersions are returned newest-first; skip preview versions.
   return mc?.apiVersions?.find((v) => !v.includes("preview")) ?? null;
@@ -261,9 +343,11 @@ async function toTokenKubeconfig(
 ): Promise<{ ok: true; kubeconfig: string } | { ok: false; error: string }> {
   const ca = userYaml.match(/certificate-authority-data:\s*([A-Za-z0-9+/=]+)/)?.[1];
   const server = userYaml.match(/server:\s*(\S+)/)?.[1];
-  if (!ca || !server) return { ok: false, error: "couldn't parse the cluster CA/server from the kubeconfig" };
+  if (!ca || !server)
+    return { ok: false, error: "couldn't parse the cluster CA/server from the kubeconfig" };
   const tok = await getAksAadToken(cloudProviderId);
-  if (!tok.ok) return { ok: false, error: `couldn't mint an AAD token for the cluster: ${tok.error}` };
+  if (!tok.ok)
+    return { ok: false, error: `couldn't mint an AAD token for the cluster: ${tok.error}` };
   const kubeconfig = `apiVersion: v1
 kind: Config
 clusters:
@@ -291,7 +375,9 @@ export async function getAksKubeconfig(
   resourceGroup: string,
   clusterName: string,
   cloudProviderId: string,
-): Promise<{ ok: true; kubeconfig: string; mode: "admin" | "user" } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; kubeconfig: string; mode: "admin" | "user" } | { ok: false; error: string }
+> {
   const rg = resourceGroup.trim();
   const name = clusterName.trim();
   const base = `/subscriptions/${subscriptionId.trim()}/resourceGroups/${encodeURIComponent(rg)}/providers/Microsoft.ContainerService/managedClusters/${encodeURIComponent(name)}`;
@@ -301,19 +387,32 @@ export async function getAksKubeconfig(
   // cluster that lives in a different subscription gives a precise error.
   const found = await armFetch(token, `${base}?api-version=${AKS_API_VERSIONS[1]}`);
   if (!found.ok) {
-    return { ok: false, error: `Couldn't find AKS cluster "${name}" in ${where}. Azure said: ${found.error}` };
+    return {
+      ok: false,
+      error: `Couldn't find AKS cluster "${name}" in ${where}. Azure said: ${found.error}`,
+    };
   }
   // Inspect the cluster's state — Azure refuses to issue a kubeconfig for a
   // cluster that isn't fully provisioned, returning a misleading 404 on the
   // credential actions. Short-circuit with a clear, actionable message.
-  const props = (found.data as { id?: string; properties?: { provisioningState?: string; powerState?: { code?: string } } }).properties;
+  const props = (
+    found.data as {
+      id?: string;
+      properties?: { provisioningState?: string; powerState?: { code?: string } };
+    }
+  ).properties;
   const provisioning = props?.provisioningState ?? "Unknown";
   const power = props?.powerState?.code ?? "Unknown";
   const state = `provisioningState=${provisioning}, powerState=${power}`;
-  console.error(`[azure-arm] AKS GET ok: ${(found.data as { id?: string }).id ?? "(no id)"} (${state})`);
+  console.error(
+    `[azure-arm] AKS GET ok: ${(found.data as { id?: string }).id ?? "(no id)"} (${state})`,
+  );
 
   if (power === "Stopped") {
-    return { ok: false, error: `AKS cluster "${name}" is stopped. Start it (Azure Portal → the cluster → Start, or \`az aks start -g ${rg} -n ${name}\`), then connect again.` };
+    return {
+      ok: false,
+      error: `AKS cluster "${name}" is stopped. Start it (Azure Portal → the cluster → Start, or \`az aks start -g ${rg} -n ${name}\`), then connect again.`,
+    };
   }
   if (provisioning !== "Succeeded") {
     const failed = provisioning === "Failed";
@@ -338,12 +437,18 @@ export async function getAksKubeconfig(
   // ARM list-action POSTs expect a JSON content-type + (empty) body; a bodyless
   // POST can make the gateway return a bare "404: Page Not Found".
   const post = (path: string) =>
-    armFetch(token, path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    armFetch(token, path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
 
   // Use the api-version Azure currently advertises for managedClusters (so a
   // retired hardcoded version can't be the cause), then the static fallbacks.
   const liveVersion = await latestManagedClustersApiVersion(token, subscriptionId.trim());
-  const versions = liveVersion ? [liveVersion, ...AKS_API_VERSIONS.filter((v) => v !== liveVersion)] : AKS_API_VERSIONS;
+  const versions = liveVersion
+    ? [liveVersion, ...AKS_API_VERSIONS.filter((v) => v !== liveVersion)]
+    : AKS_API_VERSIONS;
 
   // 2 — Fetch the kubeconfig. Try USER credentials first (granted by the
   // least-privilege "Azure Kubernetes Service Cluster User Role"), then ADMIN
@@ -353,9 +458,15 @@ export async function getAksKubeconfig(
   let lastErr = "no response";
   const tryCreds = async (action: string, v: string): Promise<{ kubeconfig: string } | null> => {
     const res = await post(`${base}/${action}?api-version=${v}`);
-    if (!res.ok) { lastErr = res.error; return null; }
+    if (!res.ok) {
+      lastErr = res.error;
+      return null;
+    }
     const kc = extract(res.data);
-    if (!kc) { lastErr = "empty kubeconfig"; return null; }
+    if (!kc) {
+      lastErr = "empty kubeconfig";
+      return null;
+    }
     if (/\bexec:/.test(kc)) {
       const conv = await toTokenKubeconfig(kc, cloudProviderId);
       if (conv.ok) return { kubeconfig: conv.kubeconfig };
@@ -380,11 +491,18 @@ export async function getAksKubeconfig(
   // not the app. On a real deployed server this call works.
   let diagnosis = "";
   if (/page not found/i.test(lastErr) || /\b404\b/.test(lastErr)) {
-    const control = await armFetch(token, `/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subscriptions: [subscriptionId.trim()], query: "Resources | limit 1" }),
-    });
+    const control = await armFetch(
+      token,
+      `/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscriptions: [subscriptionId.trim()],
+          query: "Resources | limit 1",
+        }),
+      },
+    );
     const who = tokenIdentity(token);
     diagnosis = control.ok
       ? ` (Note: other Azure POST calls succeed, so this is specific to the credential action. The app is acting as: ${who}. If that's a service principal / not the cluster owner, it lacks the 'listClusterAdminCredentials' permission — grant it 'Azure Kubernetes Service Cluster Admin Role'. If that IS the owner, this is a code/Azure routing issue, not permissions.)`

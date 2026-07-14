@@ -78,18 +78,31 @@ export function OptionsFormBox({
   }
 
   return (
-    <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+    <div
+      className="card"
+      style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}
+    >
       {data.intro && <div style={{ fontSize: 13 }}>{data.intro}</div>}
       {data.questions.map((q) => (
         <fieldset
           key={q.key}
-          style={{ border: 0, padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}
+          style={{
+            border: 0,
+            padding: 0,
+            margin: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
         >
           <legend style={{ fontWeight: 600, fontSize: 13, padding: 0 }}>{q.question}</legend>
           {/* maxHeight caps the wrap area so a question with many options
               (e.g. 20+ branches) can't push the Submit button off-screen.
               Roughly 4 rows of pills; taller lists scroll inside the box. */}
-          <div className="row gap-2 wrap" style={{ maxHeight: 132, overflowY: "auto", paddingRight: 2 }}>
+          <div
+            className="row gap-2 wrap"
+            style={{ maxHeight: 132, overflowY: "auto", paddingRight: 2 }}
+          >
             {q.options.map((o) => {
               const selected = answers[q.key] === o;
               return (

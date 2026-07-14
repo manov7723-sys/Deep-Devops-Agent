@@ -11,7 +11,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request" }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json({ ok: false, code: "invalid_request" }, { status: 400 });
 
   const budgetCents = Math.round(parsed.data.budgetDollars * 100);
   const now = new Date();
@@ -26,7 +27,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   if (existing) {
     await prisma.costSnapshot.update({ where: { id: existing.id }, data: { budgetCents } });
   } else {
-    await prisma.costSnapshot.create({ data: { projectId, periodStart, totalCents: 0, budgetCents } });
+    await prisma.costSnapshot.create({
+      data: { projectId, periodStart, totalCents: 0, budgetCents },
+    });
   }
   return NextResponse.json({ ok: true, budgetCents });
 }

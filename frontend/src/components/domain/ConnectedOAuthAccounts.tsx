@@ -48,12 +48,7 @@ export function ConnectedOAuthAccounts() {
           Connected accounts
         </Block.Title>
         <Block.Actions>
-          <Btn
-            size="sm"
-            variant="outline"
-            icon="github"
-            onClick={() => connectAnother("github")}
-          >
+          <Btn size="sm" variant="outline" icon="github" onClick={() => connectAnother("github")}>
             Connect GitHub
           </Btn>
         </Block.Actions>
@@ -82,9 +77,7 @@ export function ConnectedOAuthAccounts() {
                   try {
                     await disconnect.mutateAsync(a.id);
                   } catch (e) {
-                    setError(
-                      e instanceof Error ? e.message : "Could not disconnect account.",
-                    );
+                    setError(e instanceof Error ? e.message : "Could not disconnect account.");
                   }
                 }}
                 busy={disconnect.isPending}
@@ -93,10 +86,7 @@ export function ConnectedOAuthAccounts() {
           </div>
         )}
         {error && (
-          <p
-            style={{ marginTop: 10, fontSize: 12.5, color: "var(--danger)" }}
-            role="alert"
-          >
+          <p style={{ marginTop: 10, fontSize: 12.5, color: "var(--danger)" }} role="alert">
             {error}
           </p>
         )}
@@ -160,13 +150,7 @@ function OAuthAccountRow({
           </span>
         </div>
       </div>
-      <Btn
-        size="sm"
-        variant="outline"
-        icon="x"
-        loading={busy}
-        onClick={onDisconnect}
-      >
+      <Btn size="sm" variant="outline" icon="x" loading={busy} onClick={onDisconnect}>
         Disconnect
       </Btn>
     </div>

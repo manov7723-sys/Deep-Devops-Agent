@@ -113,7 +113,10 @@ function runDocker(args: string[]): Promise<{ stdout: string; stderr: string }> 
 }
 
 /** Run Trivy against a connected repo and return parsed findings. */
-export async function scanRepoWithTrivy(projectId: string, repoFullName: string): Promise<TrivyScanResult> {
+export async function scanRepoWithTrivy(
+  projectId: string,
+  repoFullName: string,
+): Promise<TrivyScanResult> {
   const resolved = await resolveAttachedRepo(projectId, repoFullName);
   if (!resolved.ok) return resolved;
   const { id, fullName } = resolved.repo;
@@ -127,25 +130,36 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
   let stdout: string;
   try {
     const res = await runDocker([
-      "run", "--rm",
+      "run",
+      "--rm",
       TRIVY_IMAGE,
       "repo",
-      "--scanners", "vuln,secret,misconfig",
-      "--format", "json",
+      "--scanners",
+      "vuln,secret,misconfig",
+      "--format",
+      "json",
       "--quiet",
-      "--timeout", "4m",
+      "--timeout",
+      "4m",
       cloneUrl,
     ]);
     stdout = res.stdout;
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { stderr?: string; killed?: boolean };
     if (err.code === "ENOENT") {
-      return { ok: false, error: "Docker isn't available on the server — the Trivy scan needs Docker to run." };
+      return {
+        ok: false,
+        error: "Docker isn't available on the server — the Trivy scan needs Docker to run.",
+      };
     }
     if (err.killed) {
-      return { ok: false, error: "The scan timed out. The repository may be too large to scan inline." };
+      return {
+        ok: false,
+        error: "The scan timed out. The repository may be too large to scan inline.",
+      };
     }
-    const detail = (err.stderr || err.message || "").trim().split("\n").slice(-1)[0] || "unknown error";
+    const detail =
+      (err.stderr || err.message || "").trim().split("\n").slice(-1)[0] || "unknown error";
     return { ok: false, error: `Trivy scan failed: ${detail}` };
   }
 
@@ -156,7 +170,8 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
     return { ok: false, error: "Couldn't parse the Trivy output." };
   }
 
-  const sev = (s?: string): Severity => (SEVERITY_ORDER.includes(s as Severity) ? (s as Severity) : "UNKNOWN");
+  const sev = (s?: string): Severity =>
+    SEVERITY_ORDER.includes(s as Severity) ? (s as Severity) : "UNKNOWN";
   const clip = (s: string) => (s.length > 180 ? s.slice(0, 177) + "…" : s);
 
   // Trivy can emit the same finding several times (e.g. one misconfig per
@@ -178,7 +193,8 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
     for (const v of r.Vulnerabilities ?? []) {
       add({
         class: "vuln",
-        target, targetType,
+        target,
+        targetType,
         pkgName: v.PkgName ?? "",
         vulnerabilityId: v.VulnerabilityID ?? "",
         severity: sev(v.Severity),
@@ -198,7 +214,8 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
       if (m.Status && m.Status.toUpperCase() === "PASS") continue;
       add({
         class: "misconfig",
-        target, targetType,
+        target,
+        targetType,
         pkgName: "",
         vulnerabilityId: m.AVDID || m.ID || "",
         severity: sev(m.Severity),
@@ -218,7 +235,8 @@ export async function scanRepoWithTrivy(projectId: string, repoFullName: string)
     for (const s of r.Secrets ?? []) {
       add({
         class: "secret",
-        target, targetType,
+        target,
+        targetType,
         pkgName: s.Category ?? "",
         vulnerabilityId: s.RuleID ?? "",
         severity: sev(s.Severity),

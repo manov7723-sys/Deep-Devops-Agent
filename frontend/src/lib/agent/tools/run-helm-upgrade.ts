@@ -74,18 +74,33 @@ export const runHelmUpgradeTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       envKey: { type: "string", description: "Project env key (e.g. 'alpha')." },
-      repoFullName: { type: "string", description: 'owner/repo where the chart lives.' },
-      chartPath: { type: "string", description: 'Path to the chart directory inside the repo. Defaults to "chart".' },
+      repoFullName: { type: "string", description: "owner/repo where the chart lives." },
+      chartPath: {
+        type: "string",
+        description: 'Path to the chart directory inside the repo. Defaults to "chart".',
+      },
       releaseName: { type: "string", description: "Helm release name (stable per app per env)." },
-      imageRepository: { type: "string", description: "Image repo URL — sets image.repository in values." },
-      imageTag: { type: "string", description: "Image tag (sha / version) — sets image.tag in values." },
+      imageRepository: {
+        type: "string",
+        description: "Image repo URL — sets image.repository in values.",
+      },
+      imageTag: {
+        type: "string",
+        description: "Image tag (sha / version) — sets image.tag in values.",
+      },
       setValues: {
         type: "object",
-        description: 'Additional Helm `--set` overrides as key/value pairs.',
+        description: "Additional Helm `--set` overrides as key/value pairs.",
         additionalProperties: { type: "string" },
       },
-      timeoutSeconds: { type: "number", description: "Rollout wait timeout in seconds. Default 300." },
-      ref: { type: "string", description: "Branch / ref to clone for the chart. Defaults to default branch." },
+      timeoutSeconds: {
+        type: "number",
+        description: "Rollout wait timeout in seconds. Default 300.",
+      },
+      ref: {
+        type: "string",
+        description: "Branch / ref to clone for the chart. Defaults to default branch.",
+      },
     },
     required: ["envKey", "repoFullName", "releaseName"],
     additionalProperties: false,
@@ -137,14 +152,7 @@ export const runHelmUpgradeTool: Tool<Input, Output> = {
       const cloneUrl = resolved.client.cloneUrlWithToken();
       const clone = await runStage({
         command: "git",
-        args: [
-          "clone",
-          "--depth=1",
-          "--branch", ref,
-          "--single-branch",
-          cloneUrl,
-          repoDir,
-        ],
+        args: ["clone", "--depth=1", "--branch", ref, "--single-branch", cloneUrl, repoDir],
         cwd: workspace,
         env: { GIT_TERMINAL_PROMPT: "0" },
         timeoutMs: 60_000,
@@ -158,12 +166,16 @@ export const runHelmUpgradeTool: Tool<Input, Output> = {
 
       // 5. Assemble the helm command.
       const args = [
-        "upgrade", "--install", input.releaseName,
+        "upgrade",
+        "--install",
+        input.releaseName,
         join(repoDir, chartPathInRepo),
-        "--namespace", env.namespace,
+        "--namespace",
+        env.namespace,
         "--create-namespace",
         "--wait",
-        "--timeout", `${timeoutSeconds}s`,
+        "--timeout",
+        `${timeoutSeconds}s`,
       ];
       if (input.imageRepository) args.push("--set", `image.repository=${input.imageRepository}`);
       if (input.imageTag) args.push("--set", `image.tag=${input.imageTag}`);

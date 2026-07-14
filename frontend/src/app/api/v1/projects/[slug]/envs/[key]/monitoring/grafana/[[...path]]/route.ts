@@ -29,7 +29,9 @@ async function handle(
   try {
     base = await getGrafanaForwardBase(env.id);
   } catch (e) {
-    return new Response(`Grafana tunnel unavailable: ${e instanceof Error ? e.message : "error"}`, { status: 502 });
+    return new Response(`Grafana tunnel unavailable: ${e instanceof Error ? e.message : "error"}`, {
+      status: 502,
+    });
   }
 
   // Forward straight to Grafana over the tunnel, keeping the full app sub-path so
@@ -50,18 +52,33 @@ async function handle(
   try {
     upstream = await fetch(target, { method, headers: fwdHeaders, body, redirect: "manual" });
   } catch (e) {
-    return new Response(`Grafana unreachable: ${e instanceof Error ? e.message : "error"}`, { status: 502 });
+    return new Response(`Grafana unreachable: ${e instanceof Error ? e.message : "error"}`, {
+      status: 502,
+    });
   }
 
   // Relay status + body, stripping hop-by-hop / encoding headers we can't honor.
   const resHeaders = new Headers();
   upstream.headers.forEach((v, k) => {
-    if (["connection", "transfer-encoding", "content-encoding", "content-length", "set-cookie"].includes(k.toLowerCase())) return;
+    if (
+      [
+        "connection",
+        "transfer-encoding",
+        "content-encoding",
+        "content-length",
+        "set-cookie",
+      ].includes(k.toLowerCase())
+    )
+      return;
     resHeaders.set(k, v);
   });
   for (const c of upstream.headers.getSetCookie?.() ?? []) resHeaders.append("set-cookie", c);
 
-  return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: resHeaders });
+  return new Response(upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: resHeaders,
+  });
 }
 
 export const GET = handle;

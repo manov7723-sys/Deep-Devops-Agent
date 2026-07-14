@@ -31,21 +31,47 @@ type Output = {
 };
 
 const ALLOWED_KINDS = new Set([
-  "pods", "pod", "po",
-  "deployments", "deployment", "deploy",
-  "services", "service", "svc",
-  "ingresses", "ingress", "ing",
-  "nodes", "node", "no",
-  "configmaps", "configmap", "cm",
-  "secrets", "secret",
-  "namespaces", "namespace", "ns",
-  "replicasets", "replicaset", "rs",
-  "statefulsets", "statefulset", "sts",
-  "daemonsets", "daemonset", "ds",
-  "jobs", "job",
-  "cronjobs", "cronjob", "cj",
-  "persistentvolumeclaims", "pvc",
-  "persistentvolumes", "pv",
+  "pods",
+  "pod",
+  "po",
+  "deployments",
+  "deployment",
+  "deploy",
+  "services",
+  "service",
+  "svc",
+  "ingresses",
+  "ingress",
+  "ing",
+  "nodes",
+  "node",
+  "no",
+  "configmaps",
+  "configmap",
+  "cm",
+  "secrets",
+  "secret",
+  "namespaces",
+  "namespace",
+  "ns",
+  "replicasets",
+  "replicaset",
+  "rs",
+  "statefulsets",
+  "statefulset",
+  "sts",
+  "daemonsets",
+  "daemonset",
+  "ds",
+  "jobs",
+  "job",
+  "cronjobs",
+  "cronjob",
+  "cj",
+  "persistentvolumeclaims",
+  "pvc",
+  "persistentvolumes",
+  "pv",
 ]);
 
 /**
@@ -111,7 +137,14 @@ export const listKubernetesResourcesTool: Tool<Input, Output> = {
 
     const namespace = input.namespace ?? env.namespace ?? "default";
     const args =
-      kind === "nodes" || kind === "node" || kind === "no" || kind === "namespaces" || kind === "namespace" || kind === "ns" || kind === "pv" || kind === "persistentvolumes"
+      kind === "nodes" ||
+      kind === "node" ||
+      kind === "no" ||
+      kind === "namespaces" ||
+      kind === "namespace" ||
+      kind === "ns" ||
+      kind === "pv" ||
+      kind === "persistentvolumes"
         ? ["get", kind, "-o", "json"] // cluster-scoped
         : ["get", kind, "-n", namespace, "-o", "json"]; // namespaced
 
@@ -168,13 +201,25 @@ function normaliseItem(raw: unknown): ResourceItem {
   // Try to pull commonly-asked-about fields per kind.
   if (r.kind === "Pod") {
     const phase = (r.status as { phase?: string })?.phase;
-    const containerStatuses = (r.status as { containerStatuses?: Array<{ ready?: boolean; restartCount?: number; image?: string }> })?.containerStatuses ?? [];
+    const containerStatuses =
+      (
+        r.status as {
+          containerStatuses?: Array<{ ready?: boolean; restartCount?: number; image?: string }>;
+        }
+      )?.containerStatuses ?? [];
     const readyN = containerStatuses.filter((c) => c.ready).length;
     const total = containerStatuses.length;
     const restarts = containerStatuses.reduce((s, c) => s + (c.restartCount ?? 0), 0);
     if (containerStatuses[0]?.image) extra.image = containerStatuses[0].image;
     extra.restarts = String(restarts);
-    return { name, namespace, status: phase, ready: `${readyN}/${total}`, age: ageOf(r.metadata?.creationTimestamp), extra };
+    return {
+      name,
+      namespace,
+      status: phase,
+      ready: `${readyN}/${total}`,
+      age: ageOf(r.metadata?.creationTimestamp),
+      extra,
+    };
   }
   if (r.kind === "Deployment") {
     const s = r.status as { readyReplicas?: number; replicas?: number; updatedReplicas?: number };
@@ -187,14 +232,19 @@ function normaliseItem(raw: unknown): ResourceItem {
     };
   }
   if (r.kind === "Service") {
-    const sp = r.spec as { type?: string; clusterIP?: string; ports?: Array<{ port?: number; targetPort?: unknown }> };
+    const sp = r.spec as {
+      type?: string;
+      clusterIP?: string;
+      ports?: Array<{ port?: number; targetPort?: unknown }>;
+    };
     extra.type = sp.type ?? "ClusterIP";
     if (sp.clusterIP) extra.clusterIP = sp.clusterIP;
     if (sp.ports?.[0]?.port) extra.port = String(sp.ports[0].port);
     return { name, namespace, status: sp.type, age: ageOf(r.metadata?.creationTimestamp), extra };
   }
   if (r.kind === "Node") {
-    const cs = (r.status as { conditions?: Array<{ type?: string; status?: string }> })?.conditions ?? [];
+    const cs =
+      (r.status as { conditions?: Array<{ type?: string; status?: string }> })?.conditions ?? [];
     const ready = cs.find((c) => c.type === "Ready")?.status === "True" ? "Ready" : "NotReady";
     const ver = (r.status as { nodeInfo?: { kubeletVersion?: string } })?.nodeInfo?.kubeletVersion;
     if (ver) extra.version = ver;

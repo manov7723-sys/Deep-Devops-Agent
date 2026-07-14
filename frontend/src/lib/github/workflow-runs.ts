@@ -21,7 +21,13 @@ export type WorkflowRun = {
    * (DEEPAGENT_ACR_SECRETS_MISSING) AND the raw docker/login-action error
    * message ("Username and password required"). See classifyFailure below.
    */
-  failureKind?: "acr_secrets_missing" | "cd_no_aws_creds" | "cd_no_gcp_creds" | "ci_wif_binding_missing" | "unknown" | null;
+  failureKind?:
+    | "acr_secrets_missing"
+    | "cd_no_aws_creds"
+    | "cd_no_gcp_creds"
+    | "ci_wif_binding_missing"
+    | "unknown"
+    | null;
   /** A short excerpt of the failing job's error annotations, for the agent's report. */
   failureHint?: string | null;
 };
@@ -36,7 +42,11 @@ function headers(token: string): Record<string, string> {
   };
 }
 
-async function fetchLatestRun(fullName: string, token: string, opts: { workflowFile?: string; branch?: string }): Promise<Res<WorkflowRun | null>> {
+async function fetchLatestRun(
+  fullName: string,
+  token: string,
+  opts: { workflowFile?: string; branch?: string },
+): Promise<Res<WorkflowRun | null>> {
   const params = new URLSearchParams({ per_page: "1" });
   if (opts.branch) params.set("branch", opts.branch);
   const path = opts.workflowFile
@@ -44,16 +54,29 @@ async function fetchLatestRun(fullName: string, token: string, opts: { workflowF
     : `/repos/${fullName}/actions/runs`;
   let res: Response;
   try {
-    res = await fetch(`${GH}${path}?${params.toString()}`, { headers: headers(token), cache: "no-store" });
+    res = await fetch(`${GH}${path}?${params.toString()}`, {
+      headers: headers(token),
+      cache: "no-store",
+    });
   } catch (e) {
-    return { ok: false, error: `Network error reaching GitHub: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GitHub: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     return { ok: false, error: `GitHub API ${res.status}: ${t.slice(0, 200)}` };
   }
   const data = (await res.json().catch(() => ({}))) as {
-    workflow_runs?: Array<{ id: number; name?: string; status?: string; conclusion?: string | null; head_sha?: string; html_url?: string }>;
+    workflow_runs?: Array<{
+      id: number;
+      name?: string;
+      status?: string;
+      conclusion?: string | null;
+      head_sha?: string;
+      html_url?: string;
+    }>;
   };
   const r = data.workflow_runs?.[0];
   if (!r) return { ok: true, data: null };
@@ -92,10 +115,18 @@ async function classifyFailure(
   runId: number,
 ): Promise<{ kind: WorkflowRun["failureKind"]; hint: string | null }> {
   try {
-    const jobsRes = await fetch(`${GH}/repos/${fullName}/actions/runs/${runId}/jobs`, { headers: headers(token), cache: "no-store" });
+    const jobsRes = await fetch(`${GH}/repos/${fullName}/actions/runs/${runId}/jobs`, {
+      headers: headers(token),
+      cache: "no-store",
+    });
     if (!jobsRes.ok) return { kind: "unknown", hint: null };
     const jobs = (await jobsRes.json().catch(() => ({}))) as {
-      jobs?: Array<{ id: number; name?: string; conclusion?: string | null; steps?: Array<{ name?: string; conclusion?: string | null; number?: number }> }>;
+      jobs?: Array<{
+        id: number;
+        name?: string;
+        conclusion?: string | null;
+        steps?: Array<{ name?: string; conclusion?: string | null; number?: number }>;
+      }>;
     };
     for (const job of jobs.jobs ?? []) {
       if (job.conclusion !== "failure") continue;
@@ -105,28 +136,44 @@ async function classifyFailure(
       // first thing to break when secrets are missing because it runs BEFORE
       // docker/login-action.
       if (failingStep?.name && /Verify ACR push secrets/i.test(failingStep.name)) {
-        return { kind: "acr_secrets_missing", hint: "Preflight found missing ACR admin secrets on the repo." };
+        return {
+          kind: "acr_secrets_missing",
+          hint: "Preflight found missing ACR admin secrets on the repo.",
+        };
       }
 
       // Fallback: read the failing step's log. Older workflow files (pre-fix)
       // don't have the preflight step; they'll fail directly at docker-login.
       if (failingStep?.number) {
         const stepLogUrl = `${GH}/repos/${fullName}/actions/jobs/${job.id}/logs`;
-        const logRes = await fetch(stepLogUrl, { headers: headers(token), cache: "no-store", redirect: "follow" });
+        const logRes = await fetch(stepLogUrl, {
+          headers: headers(token),
+          cache: "no-store",
+          redirect: "follow",
+        });
         if (logRes.ok) {
           const text = await logRes.text().catch(() => "");
           if (/DEEPAGENT_ACR_SECRETS_MISSING/.test(text)) {
-            return { kind: "acr_secrets_missing", hint: "Preflight marker DEEPAGENT_ACR_SECRETS_MISSING found in job log." };
+            return {
+              kind: "acr_secrets_missing",
+              hint: "Preflight marker DEEPAGENT_ACR_SECRETS_MISSING found in job log.",
+            };
           }
           if (/Username and password required/i.test(text) && /docker\/login-action/i.test(text)) {
-            return { kind: "acr_secrets_missing", hint: "docker/login-action failed with 'Username and password required' — repo secrets are missing or empty." };
+            return {
+              kind: "acr_secrets_missing",
+              hint: "docker/login-action failed with 'Username and password required' — repo secrets are missing or empty.",
+            };
           }
           // EKS CD workflow trying to call kubectl without AWS creds in the runner.
           // Root cause is the env's kubeconfig is an EKS exec-plugin config but
           // no AWS provider is connected on the project, so no configure-aws-
           // credentials step was generated. The agent's remedy: connect AWS,
           // then re-run deploy_my_app so the workflow is regenerated.
-          if (/aws.*NoCredentials|Unable to locate credentials|aws.*exit code 253/i.test(text) && /kubectl|eks\.amazonaws\.com/i.test(text)) {
+          if (
+            /aws.*NoCredentials|Unable to locate credentials|aws.*exit code 253/i.test(text) &&
+            /kubectl|eks\.amazonaws\.com/i.test(text)
+          ) {
             return {
               kind: "cd_no_aws_creds",
               hint:
@@ -136,7 +183,10 @@ async function classifyFailure(
             };
           }
           // Same shape but for GKE — gcloud auth missing in the CD runner.
-          if (/gke_gcloud_auth_plugin|cannot execute binary file|google.*credentials/i.test(text) && /kubectl|container\.googleapis\.com/i.test(text)) {
+          if (
+            /gke_gcloud_auth_plugin|cannot execute binary file|google.*credentials/i.test(text) &&
+            /kubectl|container\.googleapis\.com/i.test(text)
+          ) {
             return {
               kind: "cd_no_gcp_creds",
               hint:
@@ -150,8 +200,11 @@ async function classifyFailure(
           //   - gcloud.auth.docker-helper: 'iam.serviceAccounts.getAccessToken' denied
           //   - denied: Unauthenticated request... artifactregistry.repositories.uploadArtifacts
           if (
-            /iam\.serviceAccounts\.getAccessToken|serviceAccountTokenCreator|workloadIdentityUser/i.test(text) ||
-            (/artifactregistry\.repositories\.uploadArtifacts/i.test(text) && /Unauthenticated request/i.test(text))
+            /iam\.serviceAccounts\.getAccessToken|serviceAccountTokenCreator|workloadIdentityUser/i.test(
+              text,
+            ) ||
+            (/artifactregistry\.repositories\.uploadArtifacts/i.test(text) &&
+              /Unauthenticated request/i.test(text))
           ) {
             return {
               kind: "ci_wif_binding_missing",
@@ -191,7 +244,10 @@ export async function waitForWorkflowRun(
   let last: WorkflowRun | null = null;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const r = await fetchLatestRun(repoFullName, token, { workflowFile: opts.workflowFile, branch });
+    const r = await fetchLatestRun(repoFullName, token, {
+      workflowFile: opts.workflowFile,
+      branch,
+    });
     if (!r.ok) return r;
     last = r.data;
     if (last && last.status === "completed") return { ok: true, data: { done: true, run: last } };

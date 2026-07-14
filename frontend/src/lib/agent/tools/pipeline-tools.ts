@@ -20,7 +20,10 @@ type TriggerOutput = {
  * Pipeline with 5 stages, and — for production envs (or when the project
  * requires approval) — a pending Approval the pipeline waits on.
  */
-export const triggerPipelineTool: Tool<{ envKey: string; repoId: string; branch?: string; sha?: string }, TriggerOutput> = {
+export const triggerPipelineTool: Tool<
+  { envKey: string; repoId: string; branch?: string; sha?: string },
+  TriggerOutput
+> = {
   name: "trigger_pipeline",
   description:
     "Manually trigger a deployment pipeline for a repo + branch on an environment. Production envs create a " +
@@ -32,7 +35,10 @@ export const triggerPipelineTool: Tool<{ envKey: string; repoId: string; branch?
       envKey: { type: "string", description: "Target environment key." },
       repoId: { type: "string", description: "Repo id — from list_project_repos." },
       branch: { type: "string", description: "Defaults to 'main'." },
-      sha: { type: "string", description: "Optional commit sha; a random one is generated if omitted." },
+      sha: {
+        type: "string",
+        description: "Optional commit sha; a random one is generated if omitted.",
+      },
     },
     required: ["envKey", "repoId"],
     additionalProperties: false,
@@ -45,7 +51,11 @@ export const triggerPipelineTool: Tool<{ envKey: string; repoId: string; branch?
       where: { projectId: ctx.projectId, repoId: input.repoId },
       select: { repoId: true },
     });
-    if (!projectRepo) return { ok: false, error: "That repo isn't attached to this project. Use attach_project_repo first." };
+    if (!projectRepo)
+      return {
+        ok: false,
+        error: "That repo isn't attached to this project. Use attach_project_repo first.",
+      };
 
     const setting = await prisma.projectSetting.findUnique({
       where: { projectId: ctx.projectId },
@@ -67,7 +77,11 @@ export const triggerPipelineTool: Tool<{ envKey: string; repoId: string; branch?
         progressPct: 0,
         attempt: 1,
         stages: {
-          create: STAGE_LABELS.map((label, order) => ({ label, order, status: order === 0 ? "run" : "wait" })),
+          create: STAGE_LABELS.map((label, order) => ({
+            label,
+            order,
+            status: order === 0 ? "run" : "wait",
+          })),
         },
       },
       select: { id: true, sha: true, branch: true, status: true },
@@ -83,14 +97,23 @@ export const triggerPipelineTool: Tool<{ envKey: string; repoId: string; branch?
         changesSummary: "Production deploy",
         risk: "high",
         repoId: input.repoId,
-        diff: [{ kind: "comment", text: "No diff captured yet — agents will populate before applying." }],
+        diff: [
+          { kind: "comment", text: "No diff captured yet — agents will populate before applying." },
+        ],
       });
       approvalId = approval.id;
     }
 
     return {
       ok: true,
-      output: { pipelineId: pipeline.id, branch: pipeline.branch, sha: pipeline.sha, status: pipeline.status, approvalId, requiresApproval },
+      output: {
+        pipelineId: pipeline.id,
+        branch: pipeline.branch,
+        sha: pipeline.sha,
+        status: pipeline.status,
+        approvalId,
+        requiresApproval,
+      },
     };
   },
 };

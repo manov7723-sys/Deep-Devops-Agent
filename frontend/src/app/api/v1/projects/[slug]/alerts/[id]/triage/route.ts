@@ -17,7 +17,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
   const res = await triageAndPropose(gate.access.project.id, id);
-  if (!res.ok) return NextResponse.json({ ok: false, code: "triage_failed", message: res.error }, { status: 400 });
+  if (!res.ok)
+    return NextResponse.json(
+      { ok: false, code: "triage_failed", message: res.error },
+      { status: 400 },
+    );
 
   const meta = extractRequestMeta(req);
   await audit({
@@ -28,8 +32,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
     targetId: id,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
-    metadata: { agent: "sre-triage", toolsUsed: res.toolsUsed, confidence: res.diagnosis.confidence, approvalsCreated: res.approvalsCreated },
+    metadata: {
+      agent: "sre-triage",
+      toolsUsed: res.toolsUsed,
+      confidence: res.diagnosis.confidence,
+      approvalsCreated: res.approvalsCreated,
+    },
   });
 
-  return NextResponse.json({ ok: true, diagnosis: res.diagnosis, toolsUsed: res.toolsUsed, approvalsCreated: res.approvalsCreated });
+  return NextResponse.json({
+    ok: true,
+    diagnosis: res.diagnosis,
+    toolsUsed: res.toolsUsed,
+    approvalsCreated: res.approvalsCreated,
+  });
 }

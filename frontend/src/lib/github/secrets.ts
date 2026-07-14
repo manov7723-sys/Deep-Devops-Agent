@@ -28,20 +28,36 @@ function sealedBox(publicKeyB64: string, value: string): string {
 }
 
 /** Create or update a repository Actions secret. */
-export async function setRepoActionsSecret(token: string, fullName: string, name: string, value: string): Promise<Res> {
-  if (!value) return { ok: false, error: `Refusing to write empty value to GitHub secret "${name}".` };
+export async function setRepoActionsSecret(
+  token: string,
+  fullName: string,
+  name: string,
+  value: string,
+): Promise<Res> {
+  if (!value)
+    return { ok: false, error: `Refusing to write empty value to GitHub secret "${name}".` };
   let pk: Response;
   try {
-    pk = await fetch(`${GH}/repos/${fullName}/actions/secrets/public-key`, { headers: headers(token), cache: "no-store" });
+    pk = await fetch(`${GH}/repos/${fullName}/actions/secrets/public-key`, {
+      headers: headers(token),
+      cache: "no-store",
+    });
   } catch (e) {
-    return { ok: false, error: `Network error reaching GitHub: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GitHub: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   if (!pk.ok) {
     const t = await pk.text().catch(() => "");
-    return { ok: false, error: `Couldn't read the repo public key (HTTP ${pk.status}). ${t.slice(0, 160)}` };
+    return {
+      ok: false,
+      error: `Couldn't read the repo public key (HTTP ${pk.status}). ${t.slice(0, 160)}`,
+    };
   }
   const { key, key_id } = (await pk.json()) as { key?: string; key_id?: string };
-  if (!key || !key_id) return { ok: false, error: "GitHub did not return a public key for this repo." };
+  if (!key || !key_id)
+    return { ok: false, error: "GitHub did not return a public key for this repo." };
 
   let encrypted_value: string;
   try {
@@ -58,7 +74,10 @@ export async function setRepoActionsSecret(token: string, fullName: string, name
       body: JSON.stringify({ encrypted_value, key_id }),
     });
   } catch (e) {
-    return { ok: false, error: `Network error writing the secret: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error writing the secret: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   if (put.status !== 201 && put.status !== 204) {
     const t = await put.text().catch(() => "");
@@ -72,7 +91,10 @@ export async function setRepoActionsSecret(token: string, fullName: string, name
   const exists = await repoActionsSecretExists(token, fullName, name);
   if (!exists.ok) return exists;
   if (!exists.data) {
-    return { ok: false, error: `Secret "${name}" was written but doesn't appear on the repo — retry.` };
+    return {
+      ok: false,
+      error: `Secret "${name}" was written but doesn't appear on the repo — retry.`,
+    };
   }
   return { ok: true };
 }
@@ -95,7 +117,10 @@ export async function repoActionsSecretExists(
       cache: "no-store",
     });
   } catch (e) {
-    return { ok: false, error: `Network error reading the secret: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reading the secret: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   if (res.status === 200) return { ok: true, data: true };
   if (res.status === 404) return { ok: true, data: false };
@@ -109,7 +134,12 @@ export async function repoActionsSecretExists(
  * pipeline config like the OIDC role ARN, region and ECR URI so workflows stay
  * generic instead of hardcoding values.
  */
-export async function setRepoActionsVariable(token: string, fullName: string, name: string, value: string): Promise<Res> {
+export async function setRepoActionsVariable(
+  token: string,
+  fullName: string,
+  name: string,
+  value: string,
+): Promise<Res> {
   // Try update first; create if it doesn't exist yet.
   let res: Response;
   try {
@@ -119,7 +149,10 @@ export async function setRepoActionsVariable(token: string, fullName: string, na
       body: JSON.stringify({ name, value }),
     });
   } catch (e) {
-    return { ok: false, error: `Network error writing the variable: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error writing the variable: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   if (res.status === 204) return { ok: true };
   if (res.status === 404) {
@@ -131,11 +164,17 @@ export async function setRepoActionsVariable(token: string, fullName: string, na
         body: JSON.stringify({ name, value }),
       });
     } catch (e) {
-      return { ok: false, error: `Network error creating the variable: ${e instanceof Error ? e.message : "error"}` };
+      return {
+        ok: false,
+        error: `Network error creating the variable: ${e instanceof Error ? e.message : "error"}`,
+      };
     }
     if (create.status === 201) return { ok: true };
     const t = await create.text().catch(() => "");
-    return { ok: false, error: `Couldn't create the variable (HTTP ${create.status}). ${t.slice(0, 160)}` };
+    return {
+      ok: false,
+      error: `Couldn't create the variable (HTTP ${create.status}). ${t.slice(0, 160)}`,
+    };
   }
   const t = await res.text().catch(() => "");
   return { ok: false, error: `Couldn't set the variable (HTTP ${res.status}). ${t.slice(0, 160)}` };

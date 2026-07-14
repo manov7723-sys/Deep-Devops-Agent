@@ -4,9 +4,16 @@
  * agent can answer "analyse cost optimization" without extra reasoning.
  */
 import type { Tool } from "./types";
-import { analyzeCostOptimization, type Recommendation, type Driver } from "@/lib/insights/cost-optim";
+import {
+  analyzeCostOptimization,
+  type Recommendation,
+  type Driver,
+} from "@/lib/insights/cost-optim";
 
-export const analyzeCostOptimizationTool: Tool<Record<string, never>, { recommendations: Recommendation[]; drivers: Driver[] }> = {
+export const analyzeCostOptimizationTool: Tool<
+  Record<string, never>,
+  { recommendations: Recommendation[]; drivers: Driver[] }
+> = {
   name: "analyze_cost_optimization",
   description:
     "Analyse this project's cost and cluster utilization and return concrete savings recommendations " +

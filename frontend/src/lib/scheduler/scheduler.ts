@@ -17,7 +17,9 @@ export function startScheduler(): void {
   if (started) return;
   started = true;
   // eslint-disable-next-line no-console
-  console.log("[scheduler] started — uptime + cert checks, scheduled deploys, and the deploy watchdog run every 60s in the background");
+  console.log(
+    "[scheduler] started — uptime + cert checks, scheduled deploys, and the deploy watchdog run every 60s in the background",
+  );
 
   const tick = async () => {
     try {
@@ -35,12 +37,16 @@ export function startScheduler(): void {
       const rolledBack = await runDeployWatchdog(now);
       if (rolledBack > 0) {
         // eslint-disable-next-line no-console
-        console.log(`[scheduler] watchdog auto-rolled-back ${rolledBack} app${rolledBack === 1 ? "" : "s"}`);
+        console.log(
+          `[scheduler] watchdog auto-rolled-back ${rolledBack} app${rolledBack === 1 ? "" : "s"}`,
+        );
       }
       const autoHealed = await runPipelineWatchdog();
       if (autoHealed > 0) {
         // eslint-disable-next-line no-console
-        console.log(`[scheduler] agent reviewer auto-healed ${autoHealed} pipeline${autoHealed === 1 ? "" : "s"}`);
+        console.log(
+          `[scheduler] agent reviewer auto-healed ${autoHealed} pipeline${autoHealed === 1 ? "" : "s"}`,
+        );
       }
     } catch (e) {
       // eslint-disable-next-line no-console

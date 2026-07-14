@@ -219,7 +219,10 @@ export async function clearTempSession(): Promise<void> {
   if (token) {
     const tokenHash = hashToken(token);
     await prisma.session
-      .updateMany({ where: { tokenHash, status: "pending_mfa" }, data: { revokedAt: new Date(), status: "revoked" } })
+      .updateMany({
+        where: { tokenHash, status: "pending_mfa" },
+        data: { revokedAt: new Date(), status: "revoked" },
+      })
       .catch(() => undefined);
     jar.delete(TEMP_COOKIE);
   }

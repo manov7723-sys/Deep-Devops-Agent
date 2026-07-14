@@ -13,9 +13,25 @@ import { Block, Btn, Field, Input, Select } from "@/components/ui";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
 type Result = { ok: boolean; message?: string };
-type Candidate = { kind: "ServiceMonitor" | "PodMonitor"; target: string; selectorKey: string; selectorValue: string; port: string; path: string; hint: string };
+type Candidate = {
+  kind: "ServiceMonitor" | "PodMonitor";
+  target: string;
+  selectorKey: string;
+  selectorValue: string;
+  port: string;
+  path: string;
+  hint: string;
+};
 
-export function AppMetricsScrapeForm({ slug, envKey, defaultNamespace }: { slug: string; envKey: string; defaultNamespace: string }) {
+export function AppMetricsScrapeForm({
+  slug,
+  envKey,
+  defaultNamespace,
+}: {
+  slug: string;
+  envKey: string;
+  defaultNamespace: string;
+}) {
   const [kind, setKind] = useState<"ServiceMonitor" | "PodMonitor">("ServiceMonitor");
   const [name, setName] = useState("");
   const [namespace, setNamespace] = useState(defaultNamespace);
@@ -49,16 +65,22 @@ export function AppMetricsScrapeForm({ slug, envKey, defaultNamespace }: { slug:
 
   const detect = useMutation({
     mutationFn: () =>
-      api.get<{ ok: boolean; candidates?: Candidate[]; message?: string }>(`/projects/${slug}/envs/${envKey}/monitoring/scrape`, {
-        namespace: namespace.trim(),
-      }),
+      api.get<{ ok: boolean; candidates?: Candidate[]; message?: string }>(
+        `/projects/${slug}/envs/${envKey}/monitoring/scrape`,
+        {
+          namespace: namespace.trim(),
+        },
+      ),
     onMutate: () => setError(null),
     onError: (e) => setError(apiErrorMessage(e, "Detect failed.")),
   });
 
   // One-click: deploy a demo app that exposes /metrics + wire its ServiceMonitor.
   const demo = useMutation({
-    mutationFn: () => api.post<Result>(`/projects/${slug}/envs/${envKey}/monitoring/demo-app`, { namespace: namespace.trim() }),
+    mutationFn: () =>
+      api.post<Result>(`/projects/${slug}/envs/${envKey}/monitoring/demo-app`, {
+        namespace: namespace.trim(),
+      }),
     onMutate: () => {
       setError(null);
       setResult(null);
@@ -69,7 +91,10 @@ export function AppMetricsScrapeForm({ slug, envKey, defaultNamespace }: { slug:
 
   // Send test traffic so request-rate/latency cards have data (defaults to the demo app).
   const traffic = useMutation({
-    mutationFn: () => api.post<Result>(`/projects/${slug}/envs/${envKey}/monitoring/demo-traffic`, { namespace: namespace.trim() }),
+    mutationFn: () =>
+      api.post<Result>(`/projects/${slug}/envs/${envKey}/monitoring/demo-traffic`, {
+        namespace: namespace.trim(),
+      }),
     onMutate: () => {
       setError(null);
       setResult(null);
@@ -114,8 +139,18 @@ export function AppMetricsScrapeForm({ slug, envKey, defaultNamespace }: { slug:
             </Field>
             <Field label="Namespace">
               <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Input value={namespace} placeholder="dev" onChange={(e) => setNamespace(e.target.value)} />
-                <Btn variant="outline" icon="search" loading={detect.isPending} disabled={!namespace.trim()} onClick={() => detect.mutate()}>
+                <Input
+                  value={namespace}
+                  placeholder="dev"
+                  onChange={(e) => setNamespace(e.target.value)}
+                />
+                <Btn
+                  variant="outline"
+                  icon="search"
+                  loading={detect.isPending}
+                  disabled={!namespace.trim()}
+                  onClick={() => detect.mutate()}
+                >
                   Detect
                 </Btn>
               </div>
@@ -123,32 +158,58 @@ export function AppMetricsScrapeForm({ slug, envKey, defaultNamespace }: { slug:
           </div>
 
           {/* Auto-detected candidates — click one to fill the form. */}
-          {detect.data?.ok && (
-            (detect.data.candidates ?? []).length === 0 ? (
+          {detect.data?.ok &&
+            ((detect.data.candidates ?? []).length === 0 ? (
               <span className="muted" style={{ fontSize: 12.5 }}>
-                No services with an obvious metrics port found in <b>{namespace}</b>. Fill the fields manually, or check the app exposes /metrics.
+                No services with an obvious metrics port found in <b>{namespace}</b>. Fill the
+                fields manually, or check the app exposes /metrics.
               </span>
             ) : (
               <div className="col gap-1">
-                <span className="faint" style={{ fontSize: 11.5 }}>Detected — click to use:</span>
+                <span className="faint" style={{ fontSize: 11.5 }}>
+                  Detected — click to use:
+                </span>
                 <div className="row gap-2 wrap">
                   {(detect.data.candidates ?? []).map((c) => (
-                    <button key={`${c.kind}/${c.target}`} type="button" className="chip" onClick={() => fill(c)} title={c.hint}>
+                    <button
+                      key={`${c.kind}/${c.target}`}
+                      type="button"
+                      className="chip"
+                      onClick={() => fill(c)}
+                      title={c.hint}
+                    >
                       {c.target} · {c.selectorKey}={c.selectorValue} · :{c.port}
-                      <span className="faint" style={{ fontSize: 11 }}> · {c.kind === "PodMonitor" ? "PodMonitor" : "ServiceMonitor"} · {c.hint}</span>
+                      <span className="faint" style={{ fontSize: 11 }}>
+                        {" "}
+                        · {c.kind === "PodMonitor" ? "PodMonitor" : "ServiceMonitor"} · {c.hint}
+                      </span>
                     </button>
                   ))}
                 </div>
               </div>
-            )
-          )}
+            ))}
 
           <div className="row gap-3 wrap">
-            <Field label="Selector label key" hint={kind === "ServiceMonitor" ? "Matches the Service's label" : "Matches the pods' label"}>
-              <Input value={selectorKey} placeholder="app" onChange={(e) => setSelectorKey(e.target.value)} />
+            <Field
+              label="Selector label key"
+              hint={
+                kind === "ServiceMonitor"
+                  ? "Matches the Service's label"
+                  : "Matches the pods' label"
+              }
+            >
+              <Input
+                value={selectorKey}
+                placeholder="app"
+                onChange={(e) => setSelectorKey(e.target.value)}
+              />
             </Field>
             <Field label="Selector value">
-              <Input value={selectorValue} placeholder="vote" onChange={(e) => setSelectorValue(e.target.value)} />
+              <Input
+                value={selectorValue}
+                placeholder="vote"
+                onChange={(e) => setSelectorValue(e.target.value)}
+              />
             </Field>
           </div>
 
@@ -157,39 +218,74 @@ export function AppMetricsScrapeForm({ slug, envKey, defaultNamespace }: { slug:
               <Input value={port} placeholder="metrics" onChange={(e) => setPort(e.target.value)} />
             </Field>
             <Field label="Path">
-              <Input value={path} placeholder="/metrics" onChange={(e) => setPath(e.target.value)} />
+              <Input
+                value={path}
+                placeholder="/metrics"
+                onChange={(e) => setPath(e.target.value)}
+              />
             </Field>
             <Field label="Interval">
-              <Input value={interval} placeholder="30s" onChange={(e) => setInterval(e.target.value)} />
+              <Input
+                value={interval}
+                placeholder="30s"
+                onChange={(e) => setInterval(e.target.value)}
+              />
             </Field>
           </div>
 
           <div className="row gap-2 wrap" style={{ alignItems: "center" }}>
-            <Btn variant="primary" icon="plus" loading={create.isPending} disabled={!ready} onClick={() => create.mutate()}>
+            <Btn
+              variant="primary"
+              icon="plus"
+              loading={create.isPending}
+              disabled={!ready}
+              onClick={() => create.mutate()}
+            >
               Create {kind}
             </Btn>
-            <span className="faint" style={{ fontSize: 12 }}>or</span>
-            <Btn variant="outline" icon="rocket" loading={demo.isPending} onClick={() => demo.mutate()}>
+            <span className="faint" style={{ fontSize: 12 }}>
+              or
+            </span>
+            <Btn
+              variant="outline"
+              icon="rocket"
+              loading={demo.isPending}
+              onClick={() => demo.mutate()}
+            >
               Deploy demo metrics app
             </Btn>
-            <Btn variant="outline" icon="send" loading={traffic.isPending} onClick={() => traffic.mutate()}>
+            <Btn
+              variant="outline"
+              icon="send"
+              loading={traffic.isPending}
+              onClick={() => traffic.mutate()}
+            >
               Send test traffic
             </Btn>
           </div>
           <span className="faint" style={{ fontSize: 11.5 }}>
-            Deploy demo = a sample app exposing /metrics + its ServiceMonitor. Send test traffic = make request-rate/latency cards show data.
+            Deploy demo = a sample app exposing /metrics + its ServiceMonitor. Send test traffic =
+            make request-rate/latency cards show data.
           </span>
 
-          {error && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>}
+          {error && (
+            <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>
+          )}
           {result && (
-            <span style={{ color: result.ok ? "var(--ok, #30a46c)" : "var(--danger, #e5484d)", fontSize: 12.5 }}>
+            <span
+              style={{
+                color: result.ok ? "var(--ok, #30a46c)" : "var(--danger, #e5484d)",
+                fontSize: 12.5,
+              }}
+            >
               {result.ok ? "✅ " : "❌ "}
               {result.message}
             </span>
           )}
           {result?.ok && (
             <span className="faint" style={{ fontSize: 11.5 }}>
-              Confirm it scraped in Grafana → Explore → Prometheus, or in the Status/Targets. Then query your app metrics in the dashboard.
+              Confirm it scraped in Grafana → Explore → Prometheus, or in the Status/Targets. Then
+              query your app metrics in the dashboard.
             </span>
           )}
         </div>

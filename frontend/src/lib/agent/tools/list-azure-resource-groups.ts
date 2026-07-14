@@ -21,7 +21,10 @@ export const listAzureResourceGroupsTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      subscriptionId: { type: "string", description: "Subscription id. Defaults to the connected subscription." },
+      subscriptionId: {
+        type: "string",
+        description: "Subscription id. Defaults to the connected subscription.",
+      },
     },
     required: [],
     additionalProperties: false,
@@ -30,10 +33,16 @@ export const listAzureResourceGroupsTool: Tool<Input, Output> = {
     const c = await azureContext(ctx.projectId);
     if (!c.ok) return { ok: false, error: c.error };
     const sub = input.subscriptionId?.trim() || c.ctx.subscriptionId;
-    const res = await armGet(c.ctx.accessToken, `/subscriptions/${encodeURIComponent(sub)}/resourcegroups?api-version=2021-04-01`);
+    const res = await armGet(
+      c.ctx.accessToken,
+      `/subscriptions/${encodeURIComponent(sub)}/resourcegroups?api-version=2021-04-01`,
+    );
     if (!res.ok) return { ok: false, error: res.error };
     const data = res.data as { value?: Array<{ name: string; location: string }> };
     const resourceGroups = (data.value ?? []).map((r) => ({ name: r.name, location: r.location }));
-    return { ok: true, output: { subscriptionId: sub, count: resourceGroups.length, resourceGroups } };
+    return {
+      ok: true,
+      output: { subscriptionId: sub, count: resourceGroups.length, resourceGroups },
+    };
   },
 };

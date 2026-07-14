@@ -194,7 +194,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     if (providerId === "github" || providerId === "gitlab") {
       try {
         await prisma.repo.updateMany({
-          where: { ownerId: activeSess.userId, oauthAccountId: null, deletedAt: null, provider: providerId },
+          where: {
+            ownerId: activeSess.userId,
+            oauthAccountId: null,
+            deletedAt: null,
+            provider: providerId,
+          },
           data: { oauthAccountId: linkedAccount.id },
         });
       } catch {
@@ -217,7 +222,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     return smartReturn(nextPath ?? "/u/dashboard");
   }
 
-  const resolved = await resolveIdentity(providerId as OAuthProvider, ex.profile, provider.baseUrl ?? null);
+  const resolved = await resolveIdentity(
+    providerId as OAuthProvider,
+    ex.profile,
+    provider.baseUrl ?? null,
+  );
   if (!resolved.ok) {
     await audit({
       action: "auth.oauth.failed",
@@ -242,9 +251,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   await audit({
     userId: user.id,
     action:
-      outcome === "signup" ? "auth.oauth.signup" :
-      outcome === "linked" ? "auth.oauth.linked" :
-      "auth.oauth.signin",
+      outcome === "signup"
+        ? "auth.oauth.signup"
+        : outcome === "linked"
+          ? "auth.oauth.linked"
+          : "auth.oauth.signin",
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
     metadata: { provider: providerId, outcome },

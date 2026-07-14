@@ -27,7 +27,8 @@ const PRESETS: Array<{
   {
     name: "Infra Operator",
     skill: "infra-operator",
-    triggerDescription: "Manual run from the project chat. Authorized for plan/apply on non-prod envs.",
+    triggerDescription:
+      "Manual run from the project chat. Authorized for plan/apply on non-prod envs.",
     approvalPolicy: "Auto-apply on alpha/beta. Production requires human approval.",
     systemPrompt:
       "You are an infrastructure operator. Generate Terraform changes, run `terraform plan`, summarize the diff, and apply only after approval. Always include a rollback plan.",
@@ -35,7 +36,8 @@ const PRESETS: Array<{
   {
     name: "Cost Sentinel",
     skill: "cost-sentinel",
-    triggerDescription: "Nightly cron at 03:00 UTC. Also triggered when a deployment lands in release.",
+    triggerDescription:
+      "Nightly cron at 03:00 UTC. Also triggered when a deployment lands in release.",
     approvalPolicy: "Opens issues. Cannot apply changes directly.",
     systemPrompt:
       "You monitor cloud spend. Surface anomalies, untagged resources, idle capacity, and overprovisioning. Be concise and actionable.",
@@ -138,10 +140,7 @@ export function AddAgentModal({ open, onOpenChange }: AddAgentModalProps) {
       }
     >
       <div className="col gap-4">
-        <Field
-          label="Preset"
-          hint="Start from a template — every field is still editable below."
-        >
+        <Field label="Preset" hint="Start from a template — every field is still editable below.">
           <Select
             value={presetIdx}
             onValueChange={(v) => applyPreset(Number(v))}
@@ -202,7 +201,11 @@ export function AddAgentModal({ open, onOpenChange }: AddAgentModalProps) {
           />
         </Field>
 
-        <Field label="System prompt" required hint="Sent to the model as the system message on every turn.">
+        <Field
+          label="System prompt"
+          required
+          hint="Sent to the model as the system message on every turn."
+        >
           <Textarea
             rows={6}
             value={systemPrompt}

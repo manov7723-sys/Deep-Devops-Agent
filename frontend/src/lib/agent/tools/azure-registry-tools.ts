@@ -21,11 +21,17 @@ import type { Tool } from "./types";
 const NEEDS_SP_ERROR = /Keyless ACR setup needs a SERVICE-PRINCIPAL Azure connection/i;
 
 async function azureProviderId(projectId: string): Promise<string | null> {
-  const cp = await prisma.cloudProvider.findFirst({ where: { projectId, kind: "azure" }, select: { id: true } });
+  const cp = await prisma.cloudProvider.findFirst({
+    where: { projectId, kind: "azure" },
+    select: { id: true },
+  });
   return cp?.id ?? null;
 }
 
-export const listAcrTool: Tool<Record<string, never>, { registries: Array<{ name: string; resourceGroup: string; loginServer: string }> }> = {
+export const listAcrTool: Tool<
+  Record<string, never>,
+  { registries: Array<{ name: string; resourceGroup: string; loginServer: string }> }
+> = {
   name: "list_acr",
   description:
     "List the project's existing Azure Container Registries. Use when setting up a CI workflow and the user wants to push to an EXISTING ACR — show the list and let them pick.",
@@ -39,7 +45,10 @@ export const listAcrTool: Tool<Record<string, never>, { registries: Array<{ name
   },
 };
 
-export const createAcrTool: Tool<{ resourceGroup: string; name: string; location?: string }, { name: string; loginServer: string }> = {
+export const createAcrTool: Tool<
+  { resourceGroup: string; name: string; location?: string },
+  { name: string; loginServer: string }
+> = {
   name: "create_acr",
   description:
     "Create a new Azure Container Registry (Basic SKU). Use when the user chose to CREATE a new registry. ACR names are global, " +
@@ -67,7 +76,10 @@ type SetupOidcOutput =
   | { mode: "keyless"; clientId: string; tenantId: string; subscriptionId: string }
   | { mode: "secret"; registry: string; loginServer: string; secretPrefix: string; note: string };
 
-export const setupAzureGithubOidcTool: Tool<{ repoFullName: string; acrName: string; resourceGroup: string; branch?: string }, SetupOidcOutput> = {
+export const setupAzureGithubOidcTool: Tool<
+  { repoFullName: string; acrName: string; resourceGroup: string; branch?: string },
+  SetupOidcOutput
+> = {
   name: "setup_azure_github_oidc",
   description:
     "Set up GitHub → ACR push auth for one repo + ACR. Prefers KEYLESS OIDC (azure/login + federated credential, no stored " +
@@ -92,7 +104,13 @@ export const setupAzureGithubOidcTool: Tool<{ repoFullName: string; acrName: str
     const branch = input.branch || "main";
 
     // Try keyless first — the "right" answer when the Azure connection can do it.
-    const keyless = await setupGithubFederatedCredential(id, input.repoFullName, input.acrName, input.resourceGroup, branch);
+    const keyless = await setupGithubFederatedCredential(
+      id,
+      input.repoFullName,
+      input.acrName,
+      input.resourceGroup,
+      branch,
+    );
     if (keyless.ok) {
       return {
         ok: true,
@@ -113,14 +131,29 @@ export const setupAzureGithubOidcTool: Tool<{ repoFullName: string; acrName: str
     // OAuth connection — fall back to secret-based push. Enable ACR admin, fetch
     // creds, set them as GitHub secrets. Then the workflow uses docker login.
     const repo = await prisma.repo.findFirst({
-      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
       select: { id: true },
     });
-    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    if (!repo)
+      return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
     const gh = await resolveTokenForRepo(repo.id);
-    if (!gh.ok) return { ok: false, error: `Could not resolve a GitHub token to store the ACR credentials: ${gh.message}` };
+    if (!gh.ok)
+      return {
+        ok: false,
+        error: `Could not resolve a GitHub token to store the ACR credentials: ${gh.message}`,
+      };
 
-    const secret = await setupAcrSecretPush(id, gh.accessToken, input.repoFullName, input.resourceGroup, input.acrName);
+    const secret = await setupAcrSecretPush(
+      id,
+      gh.accessToken,
+      input.repoFullName,
+      input.resourceGroup,
+      input.acrName,
+    );
     if (!secret.ok) return { ok: false, error: secret.error };
 
     return {
@@ -148,7 +181,10 @@ type AcrGenInput = {
   subscriptionId?: string;
   secretPrefix?: string;
 };
-export const generateAcrWorkflowTool: Tool<AcrGenInput, { files: Array<{ path: string; content: string }> }> = {
+export const generateAcrWorkflowTool: Tool<
+  AcrGenInput,
+  { files: Array<{ path: string; content: string }> }
+> = {
   name: "generate_acr_workflow",
   description:
     "Generate the GitHub Actions workflow that builds the image and pushes it to Azure Container Registry. Pick `mode` based " +
@@ -158,14 +194,24 @@ export const generateAcrWorkflowTool: Tool<AcrGenInput, { files: Array<{ path: s
   inputSchema: {
     type: "object",
     properties: {
-      mode: { type: "string", enum: ["keyless", "secret"], description: "Match the mode returned by setup_azure_github_oidc. Default 'keyless'." },
+      mode: {
+        type: "string",
+        enum: ["keyless", "secret"],
+        description: "Match the mode returned by setup_azure_github_oidc. Default 'keyless'.",
+      },
       registry: { type: "string", description: "ACR name (without .azurecr.io)." },
       image: { type: "string", description: "Image name." },
       branch: { type: "string", description: "Branch that triggers the build. Defaults to main." },
       clientId: { type: "string", description: "Keyless mode only. From setup_azure_github_oidc." },
       tenantId: { type: "string", description: "Keyless mode only. From setup_azure_github_oidc." },
-      subscriptionId: { type: "string", description: "Keyless mode only. From setup_azure_github_oidc." },
-      secretPrefix: { type: "string", description: "Secret mode only. From setup_azure_github_oidc." },
+      subscriptionId: {
+        type: "string",
+        description: "Keyless mode only. From setup_azure_github_oidc.",
+      },
+      secretPrefix: {
+        type: "string",
+        description: "Secret mode only. From setup_azure_github_oidc.",
+      },
     },
     required: ["registry", "image"],
     additionalProperties: false,
@@ -173,7 +219,11 @@ export const generateAcrWorkflowTool: Tool<AcrGenInput, { files: Array<{ path: s
   async execute(input) {
     const mode = input.mode ?? "keyless";
     if (mode === "keyless" && (!input.clientId || !input.tenantId || !input.subscriptionId)) {
-      return { ok: false, error: "Keyless mode needs clientId, tenantId and subscriptionId (from setup_azure_github_oidc)." };
+      return {
+        ok: false,
+        error:
+          "Keyless mode needs clientId, tenantId and subscriptionId (from setup_azure_github_oidc).",
+      };
     }
     if (mode === "secret" && !input.secretPrefix) {
       return { ok: false, error: "Secret mode needs secretPrefix (from setup_azure_github_oidc)." };
@@ -206,7 +256,12 @@ type RepairInput = {
   rerunFailed?: boolean;
 };
 type RepairOutput = {
-  repaired: Array<{ registry: string; secretPrefix: string; secretNames: string[]; workflowPath: string | null }>;
+  repaired: Array<{
+    registry: string;
+    secretPrefix: string;
+    secretNames: string[];
+    workflowPath: string | null;
+  }>;
   reruns: Array<{ workflowFile: string; note: string; runId: number | null }>;
   steps: string[];
 };
@@ -223,10 +278,23 @@ export const repairAzureAcrPushAuthTool: Tool<RepairInput, RepairOutput> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'GitHub repo as "owner/name". The one whose CI is failing.' },
-      acrName: { type: "string", description: "ACR to refresh. Omit to auto-discover from the repo's workflows and fix all of them." },
-      resourceGroup: { type: "string", description: "Resource group of the ACR. Auto-resolved from listAcr if omitted." },
-      rerunFailed: { type: "boolean", description: "Re-run the latest failed run of the affected workflow. Default true." },
+      repoFullName: {
+        type: "string",
+        description: 'GitHub repo as "owner/name". The one whose CI is failing.',
+      },
+      acrName: {
+        type: "string",
+        description:
+          "ACR to refresh. Omit to auto-discover from the repo's workflows and fix all of them.",
+      },
+      resourceGroup: {
+        type: "string",
+        description: "Resource group of the ACR. Auto-resolved from listAcr if omitted.",
+      },
+      rerunFailed: {
+        type: "boolean",
+        description: "Re-run the latest failed run of the affected workflow. Default true.",
+      },
     },
     required: ["repoFullName"],
     additionalProperties: false,
@@ -236,10 +304,15 @@ export const repairAzureAcrPushAuthTool: Tool<RepairInput, RepairOutput> = {
     if (!id) return { ok: false, error: "No Azure provider is connected to this project." };
 
     const repo = await prisma.repo.findFirst({
-      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
       select: { id: true },
     });
-    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    if (!repo)
+      return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
     const gh = await resolveTokenForRepo(repo.id);
     if (!gh.ok) return { ok: false, error: `Could not resolve a GitHub token: ${gh.message}` };
 
@@ -251,17 +324,40 @@ export const repairAzureAcrPushAuthTool: Tool<RepairInput, RepairOutput> = {
 
     // Build the set of ACRs to repair — either the one the caller named, or
     // everything the repo's workflows push to (deduped by ACR name).
-    let targets: Array<{ registry: string; workflowPath: string | null; secretPrefix: string | null }> = [];
+    let targets: Array<{
+      registry: string;
+      workflowPath: string | null;
+      secretPrefix: string | null;
+    }> = [];
     if (input.acrName) {
-      const found = discover.data.find((d) => d.registry.toLowerCase() === input.acrName!.toLowerCase());
-      targets = [{ registry: input.acrName, workflowPath: found?.workflowPath ?? null, secretPrefix: found?.secretPrefix ?? null }];
+      const found = discover.data.find(
+        (d) => d.registry.toLowerCase() === input.acrName!.toLowerCase(),
+      );
+      targets = [
+        {
+          registry: input.acrName,
+          workflowPath: found?.workflowPath ?? null,
+          secretPrefix: found?.secretPrefix ?? null,
+        },
+      ];
     } else {
-      const dedup = new Map<string, { registry: string; workflowPath: string; secretPrefix: string }>();
+      const dedup = new Map<
+        string,
+        { registry: string; workflowPath: string; secretPrefix: string }
+      >();
       for (const d of discover.data) if (!dedup.has(d.registry)) dedup.set(d.registry, d);
-      targets = [...dedup.values()].map((d) => ({ registry: d.registry, workflowPath: d.workflowPath, secretPrefix: d.secretPrefix }));
+      targets = [...dedup.values()].map((d) => ({
+        registry: d.registry,
+        workflowPath: d.workflowPath,
+        secretPrefix: d.secretPrefix,
+      }));
     }
     if (targets.length === 0) {
-      return { ok: false, error: "No ACR push workflow found on the repo, and no acrName was provided — nothing to repair. Run the deploy flow first." };
+      return {
+        ok: false,
+        error:
+          "No ACR push workflow found on the repo, and no acrName was provided — nothing to repair. Run the deploy flow first.",
+      };
     }
 
     const repaired: RepairOutput["repaired"] = [];
@@ -269,15 +365,28 @@ export const repairAzureAcrPushAuthTool: Tool<RepairInput, RepairOutput> = {
       let rgName: string | null = input.resourceGroup ?? null;
       if (!rgName) {
         const lookup = await findAcrResourceGroup(id, t.registry);
-        if (!lookup.ok) return { ok: false, error: `Couldn't look up ACR "${t.registry}": ${lookup.error}` };
+        if (!lookup.ok)
+          return { ok: false, error: `Couldn't look up ACR "${t.registry}": ${lookup.error}` };
         rgName = lookup.data;
       }
       if (!rgName) {
-        return { ok: false, error: `ACR "${t.registry}" isn't in the connected Azure subscription. Reconnect Azure or pass resourceGroup.` };
+        return {
+          ok: false,
+          error: `ACR "${t.registry}" isn't in the connected Azure subscription. Reconnect Azure or pass resourceGroup.`,
+        };
       }
-      const fix = await repairAcrSecretPush(id, gh.accessToken, input.repoFullName, rgName, t.registry);
-      if (!fix.ok) return { ok: false, error: `Refreshing "${t.registry}" secrets failed: ${fix.error}` };
-      steps.push(`Refreshed ACR "${t.registry}" admin credential and rewrote ${fix.data.secretNames.length} GitHub secrets.`);
+      const fix = await repairAcrSecretPush(
+        id,
+        gh.accessToken,
+        input.repoFullName,
+        rgName,
+        t.registry,
+      );
+      if (!fix.ok)
+        return { ok: false, error: `Refreshing "${t.registry}" secrets failed: ${fix.error}` };
+      steps.push(
+        `Refreshed ACR "${t.registry}" admin credential and rewrote ${fix.data.secretNames.length} GitHub secrets.`,
+      );
       repaired.push({
         registry: t.registry,
         secretPrefix: t.secretPrefix ?? fix.data.secretNames[0].replace(/_LOGIN_SERVER$/, ""),

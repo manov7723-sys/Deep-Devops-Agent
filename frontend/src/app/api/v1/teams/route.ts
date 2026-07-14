@@ -132,7 +132,10 @@ export async function POST(req: Request) {
   if (!sess) return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
   const parsed = PostBody.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, code: "invalid_input", issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "invalid_input", issues: parsed.error.issues },
+      { status: 400 },
+    );
   }
   const { email, role, projectIds } = parsed.data;
 
@@ -145,7 +148,11 @@ export async function POST(req: Request) {
   const notOwned = projectIds.filter((id) => !ownedSet.has(id));
   if (notOwned.length > 0) {
     return NextResponse.json(
-      { ok: false, code: "forbidden", message: "You must be an owner of every project you invite to." },
+      {
+        ok: false,
+        code: "forbidden",
+        message: "You must be an owner of every project you invite to.",
+      },
       { status: 403 },
     );
   }

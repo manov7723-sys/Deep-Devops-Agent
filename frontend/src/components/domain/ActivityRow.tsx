@@ -64,9 +64,7 @@ export function ActivityRow({ a }: ActivityRowProps) {
       </span>
       <div className="grow" style={{ minWidth: 0 }}>
         <span style={{ fontSize: 13 }}>
-          <b>{a.actorName}</b>{" "}
-          <span className="muted">{a.action}</span>{" "}
-          {a.targetLabel}
+          <b>{a.actorName}</b> <span className="muted">{a.action}</span> {a.targetLabel}
         </span>
       </div>
       <div className="row gap-3" style={{ flex: "none" }}>

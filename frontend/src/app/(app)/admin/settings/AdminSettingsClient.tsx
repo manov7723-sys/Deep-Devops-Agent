@@ -100,7 +100,9 @@ function BrandingTab() {
   if (!settings) {
     return (
       <div style={{ maxWidth: 720 }}>
-        <Block><Block.Loading /></Block>
+        <Block>
+          <Block.Loading />
+        </Block>
       </div>
     );
   }
@@ -141,7 +143,9 @@ function BrandingTab() {
                           style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
                         />
                       ) : (
-                        <span className="faint" style={{ fontSize: 11 }}>{b.label.split(" ")[0]}</span>
+                        <span className="faint" style={{ fontSize: 11 }}>
+                          {b.label.split(" ")[0]}
+                        </span>
                       )}
                     </div>
                     <div className="col" style={{ lineHeight: 1.35 }}>
@@ -156,7 +160,9 @@ function BrandingTab() {
                           </span>
                         )}
                       </span>
-                      <span className="faint" style={{ fontSize: 12 }}>{b.hint}</span>
+                      <span className="faint" style={{ fontSize: 12 }}>
+                        {b.hint}
+                      </span>
                     </div>
                   </div>
                   <Btn
@@ -177,7 +183,9 @@ function BrandingTab() {
       {uploadTarget && (
         <BrandAssetUploadModal
           open={!!uploadTarget}
-          onOpenChange={(o) => { if (!o) setUploadTarget(null); }}
+          onOpenChange={(o) => {
+            if (!o) setUploadTarget(null);
+          }}
           asset={uploadTarget}
         />
       )}
@@ -191,7 +199,11 @@ function BrandingTab() {
               <Input value={siteTitle} onChange={(e) => setSiteTitle(e.target.value)} />
             </Field>
             <Field label="Meta description">
-              <Textarea rows={2} value={metaDescription} onChange={(e) => setMetaDescription(e.target.value)} />
+              <Textarea
+                rows={2}
+                value={metaDescription}
+                onChange={(e) => setMetaDescription(e.target.value)}
+              />
             </Field>
             <div className="row">
               <Btn
@@ -220,7 +232,9 @@ function EnvVarsTab() {
         id: "key",
         header: "Key",
         cell: ({ row }) => (
-          <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{row.original.key}</span>
+          <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>
+            {row.original.key}
+          </span>
         ),
       },
       {
@@ -246,11 +260,7 @@ function EnvVarsTab() {
         cell: ({ row }) => (
           <Menu
             trigger={
-              <Btn
-                variant="ghost"
-                size="icon"
-                aria-label={`Actions for ${row.original.key}`}
-              >
+              <Btn variant="ghost" size="icon" aria-label={`Actions for ${row.original.key}`}>
                 <Icon name="more" size={16} />
               </Btn>
             }
@@ -307,7 +317,9 @@ function EmailTab() {
   if (!settings) {
     return (
       <div style={{ maxWidth: 640 }}>
-        <Block><Block.Loading /></Block>
+        <Block>
+          <Block.Loading />
+        </Block>
       </div>
     );
   }
@@ -322,12 +334,20 @@ function EmailTab() {
           <div className="row gap-3 wrap">
             <div className="grow" style={{ minWidth: 180 }}>
               <Field label="SMTP host">
-                <Input className="mono" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
+                <Input
+                  className="mono"
+                  value={smtpHost}
+                  onChange={(e) => setSmtpHost(e.target.value)}
+                />
               </Field>
             </div>
             <div style={{ width: 120 }}>
               <Field label="Port">
-                <Input className="mono" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
+                <Input
+                  className="mono"
+                  value={smtpPort}
+                  onChange={(e) => setSmtpPort(e.target.value)}
+                />
               </Field>
             </div>
           </div>
@@ -367,7 +387,11 @@ function SystemStatusTab() {
         <Block.Title>System status</Block.Title>
       </Block.Header>
       {settings ? (
-        <ul className="col" style={{ listStyle: "none", margin: 0, padding: 0 }} aria-label="System components">
+        <ul
+          className="col"
+          style={{ listStyle: "none", margin: 0, padding: 0 }}
+          aria-label="System components"
+        >
           {components.map((s) => (
             <li
               key={s.id}
@@ -378,11 +402,15 @@ function SystemStatusTab() {
                 <StatusDot
                   tone={STATUS_TONE[s.status]}
                   pulse={s.status === "ok"}
-                  label={s.status === "ok" ? "Operational" : s.status === "warn" ? "Degraded" : "Down"}
+                  label={
+                    s.status === "ok" ? "Operational" : s.status === "warn" ? "Degraded" : "Down"
+                  }
                 />
                 <span style={{ fontWeight: 600 }}>{s.name}</span>
               </div>
-              <span className="faint" style={{ fontSize: 12.5 }}>{s.note}</span>
+              <span className="faint" style={{ fontSize: 12.5 }}>
+                {s.note}
+              </span>
             </li>
           ))}
         </ul>
@@ -446,12 +474,7 @@ function BrandAssetUploadModal({
       footer={
         <>
           {asset.hasUpload && (
-            <Btn
-              variant="ghost"
-              icon="x"
-              loading={save.isPending}
-              onClick={() => submit(null)}
-            >
+            <Btn variant="ghost" icon="x" loading={save.isPending} onClick={() => submit(null)}>
               Reset to default
             </Btn>
           )}
@@ -583,7 +606,9 @@ function OAuthProvidersTab() {
       {editing && (
         <OAuthProviderModal
           open={!!editing}
-          onOpenChange={(o) => { if (!o) setEditing(null); }}
+          onOpenChange={(o) => {
+            if (!o) setEditing(null);
+          }}
           providerId={editing}
           existing={byProvider.get(editing)}
         />

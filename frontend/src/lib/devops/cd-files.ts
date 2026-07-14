@@ -26,7 +26,11 @@ export function deployManifestFile(spec: DeploySpec, manifestDir?: string): Gene
 }
 
 /** The CD GitHub Actions workflow that applies the manifests in `manifestDir`. */
-export function cdWorkflowFile(opts: { appName: string; namespace: string; manifestDir?: string }): GeneratedFile {
+export function cdWorkflowFile(opts: {
+  appName: string;
+  namespace: string;
+  manifestDir?: string;
+}): GeneratedFile {
   const app = sanitizeAppName(opts.appName);
   const ns = opts.namespace || "default";
   const dir = normalizeManifestDir(opts.manifestDir);
@@ -77,5 +81,8 @@ jobs:
 
 /** Both CD files (manifest + workflow) the agent commits together. */
 export function buildCdFiles(spec: DeploySpec, manifestDir?: string): GeneratedFile[] {
-  return [deployManifestFile(spec, manifestDir), cdWorkflowFile({ appName: spec.appName, namespace: spec.namespace, manifestDir })];
+  return [
+    deployManifestFile(spec, manifestDir),
+    cdWorkflowFile({ appName: spec.appName, namespace: spec.namespace, manifestDir }),
+  ];
 }

@@ -57,7 +57,9 @@ export function AlertCard({ alert: a, override, onAck, onResolve, onAsk }: Alert
           </div>
         </div>
         <div className="row gap-2" style={{ flex: "none" }}>
-          <Badge tone={tone} icon="alert">{a.sev}</Badge>
+          <Badge tone={tone} icon="alert">
+            {a.sev}
+          </Badge>
           <Badge tone={ENV_TONE[a.env]}>{a.env}</Badge>
         </div>
       </div>
@@ -73,10 +75,14 @@ export function AlertCard({ alert: a, override, onAck, onResolve, onAsk }: Alert
           <b>{a.recommendation}</b>
         </span>
         {status === "resolved" ? (
-          <Badge tone="ok" icon="check">Resolved</Badge>
+          <Badge tone="ok" icon="check">
+            Resolved
+          </Badge>
         ) : status === "ack" ? (
           <div className="row gap-2">
-            <Badge tone="info" icon="eye">Acknowledged</Badge>
+            <Badge tone="info" icon="eye">
+              Acknowledged
+            </Badge>
             <Btn size="sm" variant="primary" icon="check" onClick={() => onResolve?.(a.id)}>
               Resolve
             </Btn>

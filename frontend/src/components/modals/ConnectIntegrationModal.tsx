@@ -11,7 +11,8 @@ import { api } from "@/lib/api/client";
  * `credentials` entry becomes one `IntegrationCredential` row (AES-256-GCM
  * encrypted by `APP_SECRET_KEY` server-side).
  */
-export type IntegrationKind = "slack" | "pagerduty" | "grafana" | "prometheus" | "datadog" | "sentry";
+export type IntegrationKind =
+  "slack" | "pagerduty" | "grafana" | "prometheus" | "datadog" | "sentry";
 
 type CredentialField = {
   key: string;
@@ -308,7 +309,11 @@ export function ConnectIntegrationModal({
             <Field key={f.key} label={f.label} required={f.required} hint={f.hint}>
               <Input
                 type={f.isSecret ? "password" : "text"}
-                className={f.key.endsWith("_url") || f.key.endsWith("_key") || f.key.endsWith("_token") ? "mono" : undefined}
+                className={
+                  f.key.endsWith("_url") || f.key.endsWith("_key") || f.key.endsWith("_token")
+                    ? "mono"
+                    : undefined
+                }
                 placeholder={f.placeholder}
                 value={values[f.key] ?? ""}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}

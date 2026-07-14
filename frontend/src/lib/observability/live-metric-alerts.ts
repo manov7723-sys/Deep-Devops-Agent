@@ -50,8 +50,10 @@ const RULES: Rule[] = [
     category: "Performance",
     severity: "high",
     title: (n, v) => `High CPU on node ${n} — ${v.toFixed(0)}%`,
-    detail: (n, v, t) => `Node ${n} CPU is ${v.toFixed(1)}% (threshold ${t}%), live from in-cluster Prometheus.`,
-    recommendation: "Scale the node pool or the workload — sustained CPU saturation throttles your apps.",
+    detail: (n, v, t) =>
+      `Node ${n} CPU is ${v.toFixed(1)}% (threshold ${t}%), live from in-cluster Prometheus.`,
+    recommendation:
+      "Scale the node pool or the workload — sustained CPU saturation throttles your apps.",
   },
   {
     key: "node-mem",
@@ -64,8 +66,10 @@ const RULES: Rule[] = [
     category: "Performance",
     severity: "high",
     title: (n, v) => `High memory on node ${n} — ${v.toFixed(0)}%`,
-    detail: (n, v, t) => `Node ${n} memory is ${v.toFixed(1)}% (threshold ${t}%), live from in-cluster Prometheus.`,
-    recommendation: "Scale the node pool or reduce memory requests — nodes near capacity risk OOM evictions.",
+    detail: (n, v, t) =>
+      `Node ${n} memory is ${v.toFixed(1)}% (threshold ${t}%), live from in-cluster Prometheus.`,
+    recommendation:
+      "Scale the node pool or reduce memory requests — nodes near capacity risk OOM evictions.",
   },
 ];
 
@@ -102,7 +106,7 @@ export async function evaluateLiveMetricAlerts(projectId: string, envId: string)
       for (const s of res.result) {
         const v = Number(s.value?.[1]);
         if (!Number.isFinite(v)) continue;
-        const entity = rule.labelKey ? s.metric[rule.labelKey] ?? "cluster" : "cluster";
+        const entity = rule.labelKey ? (s.metric[rule.labelKey] ?? "cluster") : "cluster";
         if (v > threshold) breaching.set(entity, v);
       }
     }

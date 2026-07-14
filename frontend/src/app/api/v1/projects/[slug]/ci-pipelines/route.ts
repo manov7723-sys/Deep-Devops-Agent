@@ -12,10 +12,18 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
     where: { projectId: gate.access.project.id },
     orderBy: { updatedAt: "desc" },
     select: {
-      id: true, name: true, status: true, agentReview: true, branch: true,
-      runUrl: true, conclusion: true, lastError: true, healAttempts: true,
+      id: true,
+      name: true,
+      status: true,
+      agentReview: true,
+      branch: true,
+      runUrl: true,
+      conclusion: true,
+      lastError: true,
+      healAttempts: true,
       repo: { select: { fullName: true } },
-      updatedAt: true, createdAt: true,
+      updatedAt: true,
+      createdAt: true,
     },
   });
   return NextResponse.json(

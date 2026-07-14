@@ -39,28 +39,50 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.issues[0]?.message },
+      { status: 400 },
+    );
   const b = parsed.data;
 
   const runAt = new Date(b.runAt);
-  if (Number.isNaN(runAt.getTime())) return NextResponse.json({ ok: false, message: "Invalid run time." }, { status: 400 });
-  if (runAt.getTime() <= Date.now() + 30_000) return NextResponse.json({ ok: false, message: "The scheduled time must be in the future." }, { status: 400 });
-  if (b.expose && !(b.host || "").trim()) return NextResponse.json({ ok: false, message: "A host is required to expose the app publicly." }, { status: 400 });
+  if (Number.isNaN(runAt.getTime()))
+    return NextResponse.json({ ok: false, message: "Invalid run time." }, { status: 400 });
+  if (runAt.getTime() <= Date.now() + 30_000)
+    return NextResponse.json(
+      { ok: false, message: "The scheduled time must be in the future." },
+      { status: 400 },
+    );
+  if (b.expose && !(b.host || "").trim())
+    return NextResponse.json(
+      { ok: false, message: "A host is required to expose the app publicly." },
+      { status: 400 },
+    );
 
   const targets = await listDeployTargets(gate.access.project.id);
   const target = targets.find((t) => t.envKey === b.envKey);
-  if (!target) return NextResponse.json({ ok: false, message: `No deployable env "${b.envKey}". Connect a cluster first.` }, { status: 400 });
+  if (!target)
+    return NextResponse.json(
+      { ok: false, message: `No deployable env "${b.envKey}". Connect a cluster first.` },
+      { status: 400 },
+    );
 
-  const sd = await scheduleDeploy(gate.access.project.id, gate.access.session.userId, {
-    envKey: target.envKey,
-    appName: b.appName,
-    image: b.image,
-    containerPort: b.containerPort,
-    replicas: b.replicas,
-    expose: b.expose,
-    host: b.host,
-    namespace: (b.namespace || "").trim() || target.namespace,
-  }, runAt);
+  const sd = await scheduleDeploy(
+    gate.access.project.id,
+    gate.access.session.userId,
+    {
+      envKey: target.envKey,
+      appName: b.appName,
+      image: b.image,
+      containerPort: b.containerPort,
+      replicas: b.replicas,
+      expose: b.expose,
+      host: b.host,
+      namespace: (b.namespace || "").trim() || target.namespace,
+    },
+    runAt,
+  );
 
   return NextResponse.json({ ok: true, scheduled: sd });
 }

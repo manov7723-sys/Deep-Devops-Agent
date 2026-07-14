@@ -4,7 +4,12 @@ import { api } from "@/lib/api/client";
 export type CiFile = { path: string; content: string };
 
 export type CiStageStep = { name: string; status: string; conclusion: string | null };
-export type CiStage = { name: string; status: string; conclusion: string | null; steps: CiStageStep[] };
+export type CiStage = {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  steps: CiStageStep[];
+};
 
 export type CiPipelineRow = {
   id: string;
@@ -86,9 +91,12 @@ export function useRunCiPipeline(slug: string, id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await api.post<{ ok: boolean; message?: string; code?: string; runUrl?: string | null }>(
-        `/projects/${slug}/ci-pipelines/${id}/run`,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        message?: string;
+        code?: string;
+        runUrl?: string | null;
+      }>(`/projects/${slug}/ci-pipelines/${id}/run`);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not run the pipeline.");
       return res;
     },

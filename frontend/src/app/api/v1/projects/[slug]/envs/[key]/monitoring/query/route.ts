@@ -22,15 +22,23 @@ const Body = z.object({
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string; key: string }> }) {
   const { slug, key } = await ctx.params;
   const gate = await requireProjectAccess(slug, "viewer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.errors[0]?.message }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.errors[0]?.message },
+      { status: 400 },
+    );
   }
 
   const env = await envBySlugAndKey(gate.access.project.id, key);
-  if (!env) return NextResponse.json({ ok: false, code: "env_not_found", message: "Environment not found." }, { status: 404 });
+  if (!env)
+    return NextResponse.json(
+      { ok: false, code: "env_not_found", message: "Environment not found." },
+      { status: 404 },
+    );
 
   const { query, type, minutes, step } = parsed.data;
   const result = await queryClusterPrometheus(env.id, query, {
@@ -40,7 +48,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   });
 
   if (!result.ok) {
-    return NextResponse.json({ ok: false, code: "query_failed", message: result.error }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "query_failed", message: result.error },
+      { status: 400 },
+    );
   }
   return NextResponse.json(result);
 }

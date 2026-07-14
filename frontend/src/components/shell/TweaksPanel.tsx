@@ -104,8 +104,7 @@ export function TweaksPanel({ open, onOpenChange }: TweaksPanelProps) {
             <div className="divider" style={{ margin: "8px 0 4px" }} />
             <span className="field-label">Mock chaos (demo)</span>
             <p className="faint" style={{ fontSize: 11.5, marginTop: -4 }}>
-              Inject latency or failure to exercise loading + error states across
-              every screen.
+              Inject latency or failure to exercise loading + error states across every screen.
             </p>
 
             <Field label="Latency">

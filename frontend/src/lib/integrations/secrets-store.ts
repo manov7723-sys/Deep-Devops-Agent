@@ -18,7 +18,11 @@ export const SECRET_KEY_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 export type SecretKeyInfo = { key: string; updatedAt: string };
 
 export async function listSecretKeys(projectId: string): Promise<SecretKeyInfo[]> {
-  const rows = await prisma.appSecret.findMany({ where: { projectId }, orderBy: { key: "asc" }, select: { key: true, updatedAt: true } });
+  const rows = await prisma.appSecret.findMany({
+    where: { projectId },
+    orderBy: { key: "asc" },
+    select: { key: true, updatedAt: true },
+  });
   return rows.map((r) => ({ key: r.key, updatedAt: r.updatedAt.toISOString() }));
 }
 
@@ -37,7 +41,10 @@ export async function deleteSecret(projectId: string, key: string): Promise<void
 
 /** Server-only: decrypt all secrets for syncing. Never expose to the client. */
 async function getDecryptedSecrets(projectId: string): Promise<Record<string, string>> {
-  const rows = await prisma.appSecret.findMany({ where: { projectId }, select: { key: true, valueRef: true } });
+  const rows = await prisma.appSecret.findMany({
+    where: { projectId },
+    select: { key: true, valueRef: true },
+  });
   const out: Record<string, string> = {};
   for (const r of rows) {
     try {
@@ -66,21 +73,32 @@ function buildSecretYaml(namespace: string, data: Record<string, string>): strin
   return lines.join("\n");
 }
 
-export type SyncResult = { ok: true; count: number; namespace: string } | { ok: false; error: string };
+export type SyncResult =
+  { ok: true; count: number; namespace: string } | { ok: false; error: string };
 
 /** Push all the project's secrets to the env's cluster as one k8s Secret. */
-export async function syncSecretsToCluster(ctx: { projectId: string; userId: string }, envKey: string): Promise<SyncResult> {
+export async function syncSecretsToCluster(
+  ctx: { projectId: string; userId: string },
+  envKey: string,
+): Promise<SyncResult> {
   const secrets = await getDecryptedSecrets(ctx.projectId);
   const keys = Object.keys(secrets);
   if (keys.length === 0) return { ok: false, error: "No secrets to sync — add some first." };
 
-  const env = await prisma.env.findFirst({ where: { projectId: ctx.projectId, key: envKey }, select: { id: true, namespace: true } });
+  const env = await prisma.env.findFirst({
+    where: { projectId: ctx.projectId, key: envKey },
+    select: { id: true, namespace: true },
+  });
   if (!env) return { ok: false, error: `Env "${envKey}" not found.` };
   const namespace = env.namespace || "default";
 
   const yaml = buildSecretYaml(namespace, secrets);
   const res = await applyK8sManifestTool.execute({ envKey, manifest: yaml, namespace }, ctx);
   if (!res.ok) return { ok: false, error: res.error };
-  if (res.output.exitCode !== 0) return { ok: false, error: (res.output.stderr || res.output.stdout || "kubectl apply failed").slice(-300) };
+  if (res.output.exitCode !== 0)
+    return {
+      ok: false,
+      error: (res.output.stderr || res.output.stdout || "kubectl apply failed").slice(-300),
+    };
   return { ok: true, count: keys.length, namespace };
 }

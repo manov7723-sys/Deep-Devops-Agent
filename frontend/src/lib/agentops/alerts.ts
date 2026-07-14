@@ -7,17 +7,37 @@ import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/transport";
 import { postAlertToChatOps } from "@/lib/integrations/chatops";
 
-const APP_URL = (process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+const APP_URL = (
+  process.env.APP_BASE_URL ||
+  process.env.NEXT_PUBLIC_APP_URL ||
+  "http://localhost:3000"
+).replace(/\/$/, "");
 
 /** Resolve a project's notification recipients: members + UI-managed addresses + env. */
-async function projectNotifyRecipients(projectId: string): Promise<{ name: string; slug: string; emails: string[] } | null> {
+async function projectNotifyRecipients(
+  projectId: string,
+): Promise<{ name: string; slug: string; emails: string[] } | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { name: true, slug: true, alertEmails: true, memberships: { select: { user: { select: { email: true } } } } },
+    select: {
+      name: true,
+      slug: true,
+      alertEmails: true,
+      memberships: { select: { user: { select: { email: true } } } },
+    },
   });
   if (!project) return null;
-  const extra = (process.env.ALERT_NOTIFY_EMAIL || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const emails = [...new Set([...project.memberships.map((m) => m.user.email), ...project.alertEmails, ...extra].filter(Boolean))];
+  const extra = (process.env.ALERT_NOTIFY_EMAIL || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const emails = [
+    ...new Set(
+      [...project.memberships.map((m) => m.user.email), ...project.alertEmails, ...extra].filter(
+        Boolean,
+      ),
+    ),
+  ];
   return { name: project.name, slug: project.slug, emails };
 }
 
@@ -26,7 +46,11 @@ async function projectNotifyRecipients(projectId: string): Promise<{ name: strin
  * configured Notification emails). Best-effort; never throws. Used for deploy
  * results and other ops notifications.
  */
-export async function emailProjectMembers(projectId: string, subject: string, body: string): Promise<void> {
+export async function emailProjectMembers(
+  projectId: string,
+  subject: string,
+  body: string,
+): Promise<void> {
   try {
     const p = await projectNotifyRecipients(projectId);
     if (!p || p.emails.length === 0) return;
@@ -168,8 +192,7 @@ export async function createAlert(args: CreateAlertArgs): Promise<AlertRow> {
 }
 
 export type PatchAlertResult =
-  | { ok: true; alert: AlertRow }
-  | { ok: false; code: "not_found" | "already_resolved" };
+  { ok: true; alert: AlertRow } | { ok: false; code: "not_found" | "already_resolved" };
 
 export async function patchAlertStatus(
   projectId: string,

@@ -14,7 +14,11 @@ export function NotificationsDropdown() {
       width={320}
       align="end"
       trigger={
-        <button className="btn ghost icon" aria-label="Notifications" style={{ position: "relative" }}>
+        <button
+          className="btn ghost icon"
+          aria-label="Notifications"
+          style={{ position: "relative" }}
+        >
           <Icon name="bell" size={18} />
           {unread > 0 && (
             <span
@@ -42,7 +46,9 @@ export function NotificationsDropdown() {
             </span>
             <div className="col" style={{ lineHeight: 1.3 }}>
               <span style={{ fontSize: 12.5, fontWeight: 600 }}>{n.title}</span>
-              <span className="faint" style={{ fontSize: 11.5 }}>{n.subtitle}</span>
+              <span className="faint" style={{ fontSize: 11.5 }}>
+                {n.subtitle}
+              </span>
             </div>
           </div>
         ))

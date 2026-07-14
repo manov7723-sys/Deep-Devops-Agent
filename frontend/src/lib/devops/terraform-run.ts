@@ -181,9 +181,7 @@ export async function listTerraformRunsAsync(envId: string, limit = 20): Promise
   const byId = new Map<string, TfRun>();
   for (const r of dbRuns) byId.set(r.id, r);
   for (const r of memRuns) byId.set(r.id, r); // in-memory wins (fresher logs)
-  return [...byId.values()]
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    .slice(0, limit);
+  return [...byId.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, limit);
 }
 
 /**
@@ -241,7 +239,10 @@ export type RerunOptions = {
   /** Override the display name. Default: derive from the source run. */
   name?: string;
 };
-export async function rerunTerraformRun(runId: string, opts: RerunOptions = {}): Promise<TfRun | null> {
+export async function rerunTerraformRun(
+  runId: string,
+  opts: RerunOptions = {},
+): Promise<TfRun | null> {
   // First try in-memory (fresh, has the exact source spec). If the run was
   // evicted or the server restarted, fall back to the DB row — sourceFiles +
   // sourceBackend + sourceStack + cloudProviderId are all persisted there.
@@ -272,7 +273,8 @@ export async function rerunTerraformRun(runId: string, opts: RerunOptions = {}):
   }
   const action = opts.action ?? original.action;
   const baseName = opts.name ?? original.name.replace(/-rerun-\d+$/, "");
-  const rerunCount = 1 + [...RUNS.values()].filter((r) => r.name.startsWith(`${baseName}-rerun-`)).length;
+  const rerunCount =
+    1 + [...RUNS.values()].filter((r) => r.name.startsWith(`${baseName}-rerun-`)).length;
   return startTerraformRun({
     projectId: original.projectId,
     envId: original.envId,
@@ -288,7 +290,12 @@ export async function rerunTerraformRun(runId: string, opts: RerunOptions = {}):
 
 /** Filesystem-safe token. */
 function san(s: string): string {
-  return s.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "x";
+  return (
+    s
+      .replace(/[^A-Za-z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "x"
+  );
 }
 
 /** Where durable local Terraform state lives when no S3 backend is configured. */
@@ -313,7 +320,10 @@ function resolveStack(explicit: string | undefined, files: Record<string, string
     while ((m = reMod.exec(c))) addrs.push(`module.${m[1]}`);
   }
   if (addrs.length === 0) return "default";
-  const hash = createHash("sha256").update([...addrs].sort().join(",")).digest("hex").slice(0, 12);
+  const hash = createHash("sha256")
+    .update([...addrs].sort().join(","))
+    .digest("hex")
+    .slice(0, 12);
   const hint = san(addrs.sort()[0].split(".")[0]); // e.g. "module" or "aws_s3_bucket"
   return `${hint}-${hash}`.slice(0, 80);
 }
@@ -339,7 +349,8 @@ async function fileExists(p: string): Promise<boolean> {
 /** Copy persisted local state INTO the workdir before init (if any exists). */
 async function restoreLocalState(dir: string, workdir: string): Promise<void> {
   for (const f of ["terraform.tfstate", "terraform.tfstate.backup"]) {
-    if (await fileExists(join(dir, f))) await copyFile(join(dir, f), join(workdir, f)).catch(() => {});
+    if (await fileExists(join(dir, f)))
+      await copyFile(join(dir, f), join(workdir, f)).catch(() => {});
   }
 }
 
@@ -347,7 +358,8 @@ async function restoreLocalState(dir: string, workdir: string): Promise<void> {
 async function persistLocalState(dir: string, workdir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   for (const f of ["terraform.tfstate", "terraform.tfstate.backup"]) {
-    if (await fileExists(join(workdir, f))) await copyFile(join(workdir, f), join(dir, f)).catch(() => {});
+    if (await fileExists(join(workdir, f)))
+      await copyFile(join(workdir, f), join(dir, f)).catch(() => {});
   }
 }
 
@@ -507,7 +519,9 @@ async function execRun(run: TfRun, args: StartTfRunArgs): Promise<void> {
   // re-running the same infra reuses the same state and stays consistent.
   const stack = resolveStack(args.stack, args.files);
   const usingRemote = !!args.backend;
-  const localStateDir = usingRemote ? null : join(stateRoot(), san(args.projectId), san(args.envKey), stack);
+  const localStateDir = usingRemote
+    ? null
+    : join(stateRoot(), san(args.projectId), san(args.envKey), stack);
   let runCwd = workdir; // set to the real .tf dir once files are materialized
 
   try {
@@ -529,16 +543,34 @@ async function execRun(run: TfRun, args: StartTfRunArgs): Promise<void> {
     //    Terraform runs in.
     if (usingRemote) {
       const stateKey = `${san(args.projectId)}/${san(args.envKey)}/${stack}`;
-      await writeFile(join(runCwd, "backend_override.tf"), backendOverride(args.backend!, stateKey), "utf8");
+      await writeFile(
+        join(runCwd, "backend_override.tf"),
+        backendOverride(args.backend!, stateKey),
+        "utf8",
+      );
     } else if (localStateDir) {
       await mkdir(localStateDir, { recursive: true });
       await restoreLocalState(localStateDir, runCwd);
     }
 
     // 3) init → plan → (apply)
-    const ranInit = await runTfStage(run, "init", runCwd, childEnv, ["init", "-input=false", "-no-color"], INIT_TIMEOUT_MS);
+    const ranInit = await runTfStage(
+      run,
+      "init",
+      runCwd,
+      childEnv,
+      ["init", "-input=false", "-no-color"],
+      INIT_TIMEOUT_MS,
+    );
     if (ranInit) {
-      const ranPlan = await runTfStage(run, "plan", runCwd, childEnv, ["plan", "-input=false", "-no-color"], PLAN_TIMEOUT_MS);
+      const ranPlan = await runTfStage(
+        run,
+        "plan",
+        runCwd,
+        childEnv,
+        ["plan", "-input=false", "-no-color"],
+        PLAN_TIMEOUT_MS,
+      );
       if (ranPlan && args.action === "apply") {
         const applied = await runTfStage(
           run,
@@ -648,7 +680,11 @@ function detectOrphans(logs: string): OrphanSpec[] | null {
   const seen = new Set<string>();
   const specs: OrphanSpec[] = [];
   for (const block of blocks) {
-    if (!/(AlreadyExists|EntityAlreadyExists|ResourceAlreadyExistsException|BucketAlreadyExists|BucketAlreadyOwnedByYou)/i.test(block)) {
+    if (
+      !/(AlreadyExists|EntityAlreadyExists|ResourceAlreadyExistsException|BucketAlreadyExists|BucketAlreadyOwnedByYou)/i.test(
+        block,
+      )
+    ) {
       return null;
     }
     const addr = block.match(/with\s+([^,\n]+),/)?.[1]?.trim();
@@ -661,17 +697,19 @@ function detectOrphans(logs: string): OrphanSpec[] | null {
     } else if (type === "aws_cloudwatch_log_group") {
       id = block.match(/Log Group \(([^)]+)\)/)?.[1] ?? null;
     } else if (type === "aws_iam_role") {
-      id = block.match(/Role with name ([A-Za-z0-9+=,.@_-]+)/)?.[1]
-        ?? block.match(/iam[/ ]role[/ ]([A-Za-z0-9+=,.@_-]+)/i)?.[1]
-        ?? null;
+      id =
+        block.match(/Role with name ([A-Za-z0-9+=,.@_-]+)/)?.[1] ??
+        block.match(/iam[/ ]role[/ ]([A-Za-z0-9+=,.@_-]+)/i)?.[1] ??
+        null;
     } else if (type === "aws_iam_openid_connect_provider") {
       id = block.match(/arn:aws:iam::[^"\s]+:oidc-provider\/[^"\s]+/)?.[0] ?? null;
     } else if (type === "aws_iam_instance_profile") {
       id = block.match(/Instance Profile ([A-Za-z0-9+=,.@_-]+)/)?.[1] ?? null;
     } else if (type === "aws_s3_bucket") {
-      id = block.match(/BucketName:\s*([A-Za-z0-9.-]+)/)?.[1]
-        ?? block.match(/bucket \(([^)]+)\) already exists/)?.[1]
-        ?? null;
+      id =
+        block.match(/BucketName:\s*([A-Za-z0-9.-]+)/)?.[1] ??
+        block.match(/bucket \(([^)]+)\) already exists/)?.[1] ??
+        null;
     } else {
       return null;
     }
@@ -728,7 +766,9 @@ async function maybeAutoImportAndRetry(
     }
   }
 
-  applyStage.logs = capLogs(applyStage.logs + "\n[auto-heal] All orphans imported. Retrying apply...\n");
+  applyStage.logs = capLogs(
+    applyStage.logs + "\n[auto-heal] All orphans imported. Retrying apply...\n",
+  );
 
   // Reset the apply stage's fail markers so the retry can succeed cleanly.
   applyStage.status = "running";

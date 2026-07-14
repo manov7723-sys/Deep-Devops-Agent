@@ -12,7 +12,9 @@ export interface ConfigRowProps {
 export function ConfigRow({ label, value }: ConfigRowProps) {
   return (
     <div className="row between dda-config-row" style={{ minHeight: 36 }}>
-      <span className="muted" style={{ fontSize: 13 }}>{label}</span>
+      <span className="muted" style={{ fontSize: 13 }}>
+        {label}
+      </span>
       <span style={{ fontSize: 13, fontWeight: 600 }}>{value}</span>
     </div>
   );

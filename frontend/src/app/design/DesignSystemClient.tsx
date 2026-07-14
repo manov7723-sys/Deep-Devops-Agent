@@ -85,8 +85,12 @@ function TokenSwatch({ name, varName }: { name: string; varName: string }) {
         }}
       />
       <div className="col" style={{ gap: 0 }}>
-        <span className="mono" style={{ fontSize: 11 }}>{name}</span>
-        <span className="faint mono" style={{ fontSize: 10 }}>{varName}</span>
+        <span className="mono" style={{ fontSize: 11 }}>
+          {name}
+        </span>
+        <span className="faint mono" style={{ fontSize: 10 }}>
+          {varName}
+        </span>
       </div>
     </div>
   );
@@ -172,9 +176,7 @@ export function DesignSystemClient() {
                     height: 28,
                     borderRadius: 99,
                     border:
-                      tweaks.accent === a.id
-                        ? `2px solid var(--text)`
-                        : "1px solid var(--border)",
+                      tweaks.accent === a.id ? `2px solid var(--text)` : "1px solid var(--border)",
                     background: `oklch(0.62 0.17 ${a.hue})`,
                     cursor: "pointer",
                   }}
@@ -221,7 +223,9 @@ export function DesignSystemClient() {
 
         <Section id="tokens" title="Tokens">
           <div className="col gap-4">
-            <span className="muted" style={{ fontSize: 12 }}>Surface scale</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Surface scale
+            </span>
             <div className="row gap-3 wrap">
               <TokenSwatch name="bg" varName="--bg" />
               <TokenSwatch name="surface" varName="--surface" />
@@ -229,7 +233,9 @@ export function DesignSystemClient() {
               <TokenSwatch name="surface-3" varName="--surface-3" />
               <TokenSwatch name="border" varName="--border" />
             </div>
-            <span className="muted" style={{ fontSize: 12 }}>Accent + status</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Accent + status
+            </span>
             <div className="row gap-3 wrap">
               <TokenSwatch name="accent" varName="--accent" />
               <TokenSwatch name="accent-strong" varName="--accent-strong" />
@@ -238,7 +244,9 @@ export function DesignSystemClient() {
               <TokenSwatch name="danger" varName="--danger" />
               <TokenSwatch name="info" varName="--info" />
             </div>
-            <span className="muted" style={{ fontSize: 12 }}>Type</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Type
+            </span>
             <div className="card card-pad col gap-2">
               <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>
                 The quick brown fox
@@ -282,7 +290,9 @@ export function DesignSystemClient() {
                     }}
                   >
                     <Icon name={n} size={20} />
-                    <span className="mono faint" style={{ fontSize: 10 }}>{n}</span>
+                    <span className="mono faint" style={{ fontSize: 10 }}>
+                      {n}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -312,13 +322,21 @@ export function DesignSystemClient() {
                 </Btn>
               </VariantRow>
               <VariantRow label="icon">
-                <Btn icon="github" variant="outline">Connect GitHub</Btn>
-                <Btn icon="plus" variant="primary">New project</Btn>
-                <Btn iconRight="chevR" variant="ghost">Continue</Btn>
+                <Btn icon="github" variant="outline">
+                  Connect GitHub
+                </Btn>
+                <Btn icon="plus" variant="primary">
+                  New project
+                </Btn>
+                <Btn iconRight="chevR" variant="ghost">
+                  Continue
+                </Btn>
               </VariantRow>
               <VariantRow label="state">
                 <Btn disabled>Disabled</Btn>
-                <Btn loading variant="primary">Saving</Btn>
+                <Btn loading variant="primary">
+                  Saving
+                </Btn>
                 <Btn block variant="outline" style={{ maxWidth: 320 }}>
                   Block (max-width set for demo)
                 </Btn>
@@ -343,14 +361,26 @@ export function DesignSystemClient() {
                 <Badge tone="solid-ok">Live</Badge>
               </VariantRow>
               <VariantRow label="badge w/ icon">
-                <Badge tone="ok" icon="check">Verified</Badge>
-                <Badge tone="warn" icon="alert">2 alerts</Badge>
-                <Badge tone="info" icon="github">main</Badge>
+                <Badge tone="ok" icon="check">
+                  Verified
+                </Badge>
+                <Badge tone="warn" icon="alert">
+                  2 alerts
+                </Badge>
+                <Badge tone="info" icon="github">
+                  main
+                </Badge>
               </VariantRow>
               <VariantRow label="badge w/ dot">
-                <Badge tone="ok" withDot>release</Badge>
-                <Badge tone="warn" withDot>beta</Badge>
-                <Badge tone="info" withDot>alpha</Badge>
+                <Badge tone="ok" withDot>
+                  release
+                </Badge>
+                <Badge tone="warn" withDot>
+                  beta
+                </Badge>
+                <Badge tone="info" withDot>
+                  alpha
+                </Badge>
               </VariantRow>
               <VariantRow label="status dot">
                 <StatusDot tone="ok" label="API healthy" />
@@ -475,7 +505,9 @@ export function DesignSystemClient() {
                   <MenuItem icon="key">Change password</MenuItem>
                   <MenuItem icon="settings">Account settings</MenuItem>
                   <MenuSeparator />
-                  <MenuItem icon="logout" danger>Log out</MenuItem>
+                  <MenuItem icon="logout" danger>
+                    Log out
+                  </MenuItem>
                 </Menu>
                 <Menu
                   trigger={
@@ -487,7 +519,9 @@ export function DesignSystemClient() {
                 >
                   <MenuItem icon="eye">View</MenuItem>
                   <MenuItem icon="edit">Edit</MenuItem>
-                  <MenuItem icon="trash" danger>Delete</MenuItem>
+                  <MenuItem icon="trash" danger>
+                    Delete
+                  </MenuItem>
                 </Menu>
               </VariantRow>
             </Block.Body>
@@ -567,7 +601,11 @@ export function DesignSystemClient() {
                     label: "Agent reviews",
                     content: <p className="muted">Agent reviews tab.</p>,
                   },
-                  { value: "settings", label: "Settings", content: <p className="muted">Settings tab.</p> },
+                  {
+                    value: "settings",
+                    label: "Settings",
+                    content: <p className="muted">Settings tab.</p>,
+                  },
                 ]}
               />
             </Block.Body>
@@ -608,11 +646,19 @@ export function DesignSystemClient() {
                 </Block.Actions>
               </Block.Header>
               <Block.Toolbar>
-                <Badge tone="info" withDot>alpha</Badge>
-                <Badge tone="warn" withDot>beta</Badge>
-                <Badge tone="ok" withDot>release</Badge>
+                <Badge tone="info" withDot>
+                  alpha
+                </Badge>
+                <Badge tone="warn" withDot>
+                  beta
+                </Badge>
+                <Badge tone="ok" withDot>
+                  release
+                </Badge>
                 <div className="grow" />
-                <span className="faint" style={{ fontSize: 12 }}>3 envs</span>
+                <span className="faint" style={{ fontSize: 12 }}>
+                  3 envs
+                </span>
               </Block.Toolbar>
               <Block.Body>
                 <p className="muted" style={{ fontSize: 13 }}>
@@ -636,7 +682,11 @@ export function DesignSystemClient() {
                 icon="cloud"
                 title="No cloud providers"
                 description="Connect AWS or GCP to start provisioning."
-                action={<Btn size="sm" variant="primary" icon="plus">Connect provider</Btn>}
+                action={
+                  <Btn size="sm" variant="primary" icon="plus">
+                    Connect provider
+                  </Btn>
+                }
               />
             </Block>
 
@@ -659,7 +709,11 @@ export function DesignSystemClient() {
                 icon="search"
                 title="No matches"
                 description="Try clearing filters or searching by repo name."
-                action={<Btn size="sm" variant="outline">Clear filters</Btn>}
+                action={
+                  <Btn size="sm" variant="outline">
+                    Clear filters
+                  </Btn>
+                }
               />
             </Block.Body>
           </Block>

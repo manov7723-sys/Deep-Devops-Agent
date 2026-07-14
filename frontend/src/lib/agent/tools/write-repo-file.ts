@@ -59,14 +59,26 @@ export const writeRepoFileTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'owner/repo, must be attached to the project.' },
-      path: { type: "string", description: 'Path inside the repo (e.g. "chart/values.yaml"). No leading slash.' },
+      repoFullName: { type: "string", description: "owner/repo, must be attached to the project." },
+      path: {
+        type: "string",
+        description: 'Path inside the repo (e.g. "chart/values.yaml"). No leading slash.',
+      },
       content: { type: "string", description: "Full file contents (UTF-8)." },
       message: { type: "string", description: "Commit message. Also used as PR title prefix." },
-      branch: { type: "string", description: 'Branch to commit to. Must differ from the default branch.' },
+      branch: {
+        type: "string",
+        description: "Branch to commit to. Must differ from the default branch.",
+      },
       openPullRequest: { type: "boolean", description: "Open a PR after committing." },
-      targetBranch: { type: "string", description: "PR base branch. Defaults to the repo's default branch." },
-      pullRequestBody: { type: "string", description: "PR body (markdown). Used only when openPullRequest=true." },
+      targetBranch: {
+        type: "string",
+        description: "PR base branch. Defaults to the repo's default branch.",
+      },
+      pullRequestBody: {
+        type: "string",
+        description: "PR body (markdown). Used only when openPullRequest=true.",
+      },
     },
     required: ["repoFullName", "path", "content", "message", "branch"],
     additionalProperties: false,
@@ -113,16 +125,26 @@ export const writeRepoFileTool: Tool<Input, Output> = {
     try {
       await client.ensureBranch(branch, targetBranch);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : `Could not create branch ${branch}.` };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : `Could not create branch ${branch}.`,
+      };
     }
 
     // Step 2 — commit the file (create or update).
     let commitSha: string;
     try {
-      const c = await client.commitFiles({ branch, message: input.message, files: [{ path: cleanPath, content: input.content }] });
+      const c = await client.commitFiles({
+        branch,
+        message: input.message,
+        files: [{ path: cleanPath, content: input.content }],
+      });
       commitSha = c.commitSha;
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? `Commit failed: ${err.message}` : "Commit failed." };
+      return {
+        ok: false,
+        error: err instanceof Error ? `Commit failed: ${err.message}` : "Commit failed.",
+      };
     }
 
     // Step 3 — optionally open a pull request (GitHub) / merge request (GitLab).
@@ -138,7 +160,9 @@ export const writeRepoFileTool: Tool<Input, Output> = {
           sourceBranch: branch,
           targetBranch,
           title: input.message,
-          body: input.pullRequestBody ?? `Authored by DeepAgent for project ${ctx.projectId.slice(0, 8)}.`,
+          body:
+            input.pullRequestBody ??
+            `Authored by DeepAgent for project ${ctx.projectId.slice(0, 8)}.`,
         });
       } catch (err) {
         return {

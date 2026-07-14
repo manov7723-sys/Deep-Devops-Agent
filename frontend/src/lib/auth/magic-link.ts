@@ -13,8 +13,7 @@ const TOKEN_BYTES = 32;
 
 /** PASSWORD_RESET_TTL_MINUTES overrides the default 30-minute reset window.
  *  Other purposes (invite) pass an explicit ttlMs and ignore this default. */
-const RESET_TTL_MS =
-  Number(process.env.PASSWORD_RESET_TTL_MINUTES ?? "30") * 60 * 1000;
+const RESET_TTL_MS = Number(process.env.PASSWORD_RESET_TTL_MINUTES ?? "30") * 60 * 1000;
 
 function generateToken(): string {
   return randomBytes(TOKEN_BYTES).toString("base64url");
@@ -62,7 +61,10 @@ export type RedeemResult =
  * Look up a token (without consuming it). Use for the "validate before showing
  * the reset form" GET request.
  */
-export async function lookupMagicLink(token: string, purpose: MagicLinkPurpose): Promise<RedeemResult> {
+export async function lookupMagicLink(
+  token: string,
+  purpose: MagicLinkPurpose,
+): Promise<RedeemResult> {
   if (!token) return { ok: false, reason: "not_found" };
   const row = await prisma.magicLink.findUnique({
     where: { tokenHash: hashToken(token) },
@@ -77,7 +79,10 @@ export async function lookupMagicLink(token: string, purpose: MagicLinkPurpose):
  * Atomically consume a token. Used by the actual reset POST. Returns the
  * user payload on success, or a reason on failure.
  */
-export async function consumeMagicLink(token: string, purpose: MagicLinkPurpose): Promise<RedeemResult> {
+export async function consumeMagicLink(
+  token: string,
+  purpose: MagicLinkPurpose,
+): Promise<RedeemResult> {
   if (!token) return { ok: false, reason: "not_found" };
   const tokenHash = hashToken(token);
 

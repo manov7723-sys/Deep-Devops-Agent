@@ -65,14 +65,9 @@ function cloudInitYaml(spec: ProxmoxVmSpec): string {
   // the most portable choice across the base images most Proxmox templates use.
   const key = spec.sshPublicKey ?? "";
   const wantDocker = spec.installDocker !== false;
-  const packages = wantDocker
-    ? ["  - docker.io", "  - docker-compose-v2"]
-    : [];
+  const packages = wantDocker ? ["  - docker.io", "  - docker-compose-v2"] : [];
   const runcmd = wantDocker
-    ? [
-        "  - systemctl enable --now docker",
-        "  - usermod -aG docker deploy",
-      ]
+    ? ["  - systemctl enable --now docker", "  - usermod -aG docker deploy"]
     : [];
   return [
     "#cloud-config",
@@ -102,7 +97,10 @@ function snippetTf(spec: ProxmoxVmSpec, resName: string): string {
 
   source_raw {
     data = <<-EOT
-${yaml.split("\n").map((l) => (l.length ? `      ${l}` : "")).join("\n")}
+${yaml
+  .split("\n")
+  .map((l) => (l.length ? `      ${l}` : ""))
+  .join("\n")}
     EOT
     file_name = "${resName}-user-data.yaml"
   }
@@ -119,22 +117,25 @@ function vmTf(spec: ProxmoxVmSpec): string {
     ? `\n  clone {\n    vm_id = ${spec.templateVmId}\n    full  = true\n  }\n`
     : "";
   const cdromBlock =
-    !spec.templateVmId && spec.isoFile ? `\n  cdrom {\n    file_id = ${hcl(spec.isoFile)}\n  }\n` : "";
+    !spec.templateVmId && spec.isoFile
+      ? `\n  cdrom {\n    file_id = ${hcl(spec.isoFile)}\n  }\n`
+      : "";
   const userDataLine = withDeployPrep
     ? `\n    user_data_file_id = proxmox_virtual_environment_file.${res}_cloud_init.id`
     : "";
   // Pin the cloud-init disk to the chosen datastore. Without this, the
   // bpg/proxmox provider defaults it to "local-lvm", which fails on servers
   // that don't have that pool (e.g. a plain "local"-only node).
-  const initBlock = spec.ipv4 || withDeployPrep
-    ? `\n  initialization {\n    datastore_id = ${hcl(spec.datastore)}${userDataLine}${
-        spec.ipv4
-          ? `\n    ip_config {\n      ipv4 {\n        address = ${hcl(spec.ipv4)}${
-              spec.gateway ? `\n        gateway = ${hcl(spec.gateway)}` : ""
-            }\n      }\n    }`
-          : ""
-      }\n  }\n`
-    : "";
+  const initBlock =
+    spec.ipv4 || withDeployPrep
+      ? `\n  initialization {\n    datastore_id = ${hcl(spec.datastore)}${userDataLine}${
+          spec.ipv4
+            ? `\n    ip_config {\n      ipv4 {\n        address = ${hcl(spec.ipv4)}${
+                spec.gateway ? `\n        gateway = ${hcl(spec.gateway)}` : ""
+              }\n      }\n    }`
+            : ""
+        }\n  }\n`
+      : "";
 
   const snippet = withDeployPrep ? snippetTf(spec, res) + "\n" : "";
 

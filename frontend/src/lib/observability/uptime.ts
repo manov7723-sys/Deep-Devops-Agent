@@ -17,18 +17,37 @@ const MAX_HISTORY = 50; // keep the last N checks per monitor
 export type CheckOutcome = { ok: boolean; status?: number; latencyMs?: number; error?: string };
 
 /** Run a single HTTP check (no DB writes). */
-export async function probe(url: string, method: string, expectedStatus: number): Promise<CheckOutcome> {
+export async function probe(
+  url: string,
+  method: string,
+  expectedStatus: number,
+): Promise<CheckOutcome> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   const start = Date.now();
   try {
-    const res = await fetch(url, { method, redirect: "follow", signal: controller.signal, headers: { "User-Agent": "DeepAgent-Uptime/1" } });
+    const res = await fetch(url, {
+      method,
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "User-Agent": "DeepAgent-Uptime/1" },
+    });
     const latencyMs = Date.now() - start;
     const ok = res.status === expectedStatus;
-    return { ok, status: res.status, latencyMs, error: ok ? undefined : `Expected ${expectedStatus}, got ${res.status}` };
+    return {
+      ok,
+      status: res.status,
+      latencyMs,
+      error: ok ? undefined : `Expected ${expectedStatus}, got ${res.status}`,
+    };
   } catch (e) {
     const latencyMs = Date.now() - start;
-    const msg = e instanceof Error ? (e.name === "AbortError" ? `Timed out after ${CHECK_TIMEOUT_MS / 1000}s` : e.message) : "request failed";
+    const msg =
+      e instanceof Error
+        ? e.name === "AbortError"
+          ? `Timed out after ${CHECK_TIMEOUT_MS / 1000}s`
+          : e.message
+        : "request failed";
     return { ok: false, latencyMs, error: msg };
   } finally {
     clearTimeout(timer);
@@ -41,10 +60,22 @@ export async function checkMonitor(monitor: UptimeMonitor): Promise<CheckOutcome
 
   // Record + prune history.
   await prisma.uptimeCheck.create({
-    data: { monitorId: monitor.id, ok: outcome.ok, status: outcome.status ?? null, latencyMs: outcome.latencyMs ?? null, error: outcome.error ?? null },
+    data: {
+      monitorId: monitor.id,
+      ok: outcome.ok,
+      status: outcome.status ?? null,
+      latencyMs: outcome.latencyMs ?? null,
+      error: outcome.error ?? null,
+    },
   });
-  const old = await prisma.uptimeCheck.findMany({ where: { monitorId: monitor.id }, orderBy: { at: "desc" }, skip: MAX_HISTORY, select: { id: true } });
-  if (old.length) await prisma.uptimeCheck.deleteMany({ where: { id: { in: old.map((o) => o.id) } } });
+  const old = await prisma.uptimeCheck.findMany({
+    where: { monitorId: monitor.id },
+    orderBy: { at: "desc" },
+    skip: MAX_HISTORY,
+    select: { id: true },
+  });
+  if (old.length)
+    await prisma.uptimeCheck.deleteMany({ where: { id: { in: old.map((o) => o.id) } } });
 
   const consecutiveFails = outcome.ok ? 0 : monitor.consecutiveFails + 1;
   const sourceLabel = `uptime:${monitor.id}`;
@@ -52,24 +83,32 @@ export async function checkMonitor(monitor: UptimeMonitor): Promise<CheckOutcome
 
   if (!outcome.ok && consecutiveFails >= DOWN_THRESHOLD && !monitor.alertOpen) {
     // Transition → DOWN: raise an alert (needs an env to attach to).
-    const env = await prisma.env.findFirst({ where: { projectId: monitor.projectId }, select: { id: true } });
+    const env = await prisma.env.findFirst({
+      where: { projectId: monitor.projectId },
+      select: { id: true },
+    });
     if (env) {
       await createAlert({
         projectId: monitor.projectId,
         envId: env.id,
         title: `${monitor.name} is DOWN`,
-        detail: `Uptime check failed ${consecutiveFails}× for ${monitor.url}. ${outcome.error ?? ""}`.trim(),
+        detail:
+          `Uptime check failed ${consecutiveFails}× for ${monitor.url}. ${outcome.error ?? ""}`.trim(),
         resource: monitor.url,
         sourceLabel,
         category: "Reliability",
         severity: "high",
-        recommendation: "Check the app's pods/logs, the ingress/DNS, and that the service is listening. Ask the agent to investigate.",
+        recommendation:
+          "Check the app's pods/logs, the ingress/DNS, and that the service is listening. Ask the agent to investigate.",
       });
       alertOpen = true;
     }
   } else if (outcome.ok && monitor.alertOpen) {
     // Transition → UP: resolve the open alert.
-    const open = await prisma.alert.findFirst({ where: { projectId: monitor.projectId, sourceLabel, status: { not: "resolved" } }, select: { id: true } });
+    const open = await prisma.alert.findFirst({
+      where: { projectId: monitor.projectId, sourceLabel, status: { not: "resolved" } },
+      select: { id: true },
+    });
     if (open) await patchAlertStatus(monitor.projectId, open.id, "resolved");
     alertOpen = false;
   }
@@ -85,24 +124,38 @@ export async function checkMonitor(monitor: UptimeMonitor): Promise<CheckOutcome
       const left = daysUntil(exp, now);
       const certLabel = `uptime-cert:${monitor.id}`;
       if (left <= monitor.certDaysWarn && !monitor.certAlertOpen) {
-        const env = await prisma.env.findFirst({ where: { projectId: monitor.projectId }, select: { id: true } });
+        const env = await prisma.env.findFirst({
+          where: { projectId: monitor.projectId },
+          select: { id: true },
+        });
         if (env) {
           await createAlert({
             projectId: monitor.projectId,
             envId: env.id,
-            title: left < 0 ? `${monitor.name} — TLS certificate EXPIRED` : `${monitor.name} — TLS certificate expires in ${left} day${left === 1 ? "" : "s"}`,
+            title:
+              left < 0
+                ? `${monitor.name} — TLS certificate EXPIRED`
+                : `${monitor.name} — TLS certificate expires in ${left} day${left === 1 ? "" : "s"}`,
             detail: `The certificate for ${monitor.url} ${left < 0 ? "has expired" : `expires on ${exp.toUTCString()} (${left} days)`}. Renew it before it lapses to avoid an outage.`,
             resource: monitor.url,
             sourceLabel: certLabel,
             category: "Security",
             severity: left <= 3 ? "high" : "medium",
-            recommendation: "Renew/rotate the TLS certificate (or your cert-manager/ACME automation) before it expires.",
+            recommendation:
+              "Renew/rotate the TLS certificate (or your cert-manager/ACME automation) before it expires.",
           });
           certAlertOpen = true;
         }
       } else if (left > monitor.certDaysWarn && monitor.certAlertOpen) {
         // Renewed → resolve.
-        const open = await prisma.alert.findFirst({ where: { projectId: monitor.projectId, sourceLabel: certLabel, status: { not: "resolved" } }, select: { id: true } });
+        const open = await prisma.alert.findFirst({
+          where: {
+            projectId: monitor.projectId,
+            sourceLabel: certLabel,
+            status: { not: "resolved" },
+          },
+          select: { id: true },
+        });
         if (open) await patchAlertStatus(monitor.projectId, open.id, "resolved");
         certAlertOpen = false;
       }
@@ -134,7 +187,8 @@ export async function runAllDueUptimeChecks(now: Date): Promise<number> {
   const monitors = await prisma.uptimeMonitor.findMany({ where: { enabled: true } });
   let ran = 0;
   for (const m of monitors) {
-    const due = !m.lastCheckedAt || now.getTime() - m.lastCheckedAt.getTime() >= m.intervalSec * 1000;
+    const due =
+      !m.lastCheckedAt || now.getTime() - m.lastCheckedAt.getTime() >= m.intervalSec * 1000;
     if (!due) continue;
     try {
       await checkMonitor(m);
@@ -151,7 +205,8 @@ export async function runDueUptimeChecks(projectId: string, now: Date): Promise<
   const monitors = await prisma.uptimeMonitor.findMany({ where: { projectId, enabled: true } });
   let ran = 0;
   for (const m of monitors) {
-    const due = !m.lastCheckedAt || now.getTime() - m.lastCheckedAt.getTime() >= m.intervalSec * 1000;
+    const due =
+      !m.lastCheckedAt || now.getTime() - m.lastCheckedAt.getTime() >= m.intervalSec * 1000;
     if (!due) continue;
     try {
       await checkMonitor(m);

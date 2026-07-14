@@ -73,7 +73,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   });
   if (!projectRepo) {
     return NextResponse.json(
-      { ok: false, code: "repo_not_in_project", message: "That repo isn't attached to this project." },
+      {
+        ok: false,
+        code: "repo_not_in_project",
+        message: "That repo isn't attached to this project.",
+      },
       { status: 400 },
     );
   }
@@ -85,8 +89,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   // Production envs require approval whenever the project flag is on (default).
   // Non-prod envs are auto-deploy unless the caller explicitly forces approval.
   const requiresApproval =
-    forceApproval === true ||
-    (env.isProduction && (setting?.requireApprovalRelease ?? true));
+    forceApproval === true || (env.isProduction && (setting?.requireApprovalRelease ?? true));
 
   const pipeline = await prisma.pipeline.create({
     data: {
@@ -139,7 +142,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       envId: env.id,
       title: `Deploy ${branch}@${pipeline.sha.slice(0, 7)} to ${env.name}`,
       summary: `Pipeline ${pipeline.id.slice(0, 8)} is waiting for approval before applying changes to ${env.name}.`,
-      changesSummary: env.isProduction ? "Production deploy" : "Non-prod deploy gated by project policy",
+      changesSummary: env.isProduction
+        ? "Production deploy"
+        : "Non-prod deploy gated by project policy",
       risk: env.isProduction ? "high" : "medium",
       repoId,
       diff: [

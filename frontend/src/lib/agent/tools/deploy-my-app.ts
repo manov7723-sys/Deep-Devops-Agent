@@ -24,11 +24,7 @@ import type { Tool } from "./types";
  * multi-segment ref name. Preserve the slash structure, encode each segment.
  */
 function encodeRefPath(ref: string): string {
-  return ref
-    .split("/")
-    .filter(Boolean)
-    .map(encodeURIComponent)
-    .join("/");
+  return ref.split("/").filter(Boolean).map(encodeURIComponent).join("/");
 }
 
 /**
@@ -147,8 +143,14 @@ export const deployMyAppTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'The app repo as "owner/name" (attached to the project).' },
-      envKey: { type: "string", description: "Target env (from list_deploy_targets) — its cluster is the deploy target." },
+      repoFullName: {
+        type: "string",
+        description: 'The app repo as "owner/name" (attached to the project).',
+      },
+      envKey: {
+        type: "string",
+        description: "Target env (from list_deploy_targets) — its cluster is the deploy target.",
+      },
       namespace: {
         type: "string",
         description:
@@ -172,20 +174,39 @@ export const deployMyAppTool: Tool<Input, Output> = {
         items: {
           type: "object",
           properties: {
-            name: { type: "string", description: '"frontend" | "backend" | "app" (matches analyze_app_services).' },
+            name: {
+              type: "string",
+              description: '"frontend" | "backend" | "app" (matches analyze_app_services).',
+            },
             path: { type: "string", description: 'Build-context subdir; "" for repo root.' },
-            imageName: { type: "string", description: "ECR repo name the user chose (existing) or the new name to create." },
-            expose: { type: "boolean", description: "Expose publicly via Ingress (needs host). Usually true for a frontend." },
+            imageName: {
+              type: "string",
+              description: "ECR repo name the user chose (existing) or the new name to create.",
+            },
+            expose: {
+              type: "boolean",
+              description: "Expose publicly via Ingress (needs host). Usually true for a frontend.",
+            },
             host: { type: "string", description: "Public hostname when exposing." },
           },
           required: ["name", "imageName"],
           additionalProperties: false,
         },
       },
-      appName: { type: "string", description: "Base app name (lowercase DNS label). Defaults to the repo name." },
+      appName: {
+        type: "string",
+        description: "Base app name (lowercase DNS label). Defaults to the repo name.",
+      },
       replicas: { type: "number", description: "Replicas. Default 1." },
-      commitMode: { type: "string", enum: ["pr", "direct"], description: "'pr' (default) opens one PR; 'direct' commits to the default branch." },
-      overwriteDockerfile: { type: "boolean", description: "Replace an existing Dockerfile with the vetted template. Default false." },
+      commitMode: {
+        type: "string",
+        enum: ["pr", "direct"],
+        description: "'pr' (default) opens one PR; 'direct' commits to the default branch.",
+      },
+      overwriteDockerfile: {
+        type: "boolean",
+        description: "Replace an existing Dockerfile with the vetted template. Default false.",
+      },
     },
     required: ["repoFullName", "envKey", "namespace", "branch", "services"],
     additionalProperties: false,
@@ -193,13 +214,19 @@ export const deployMyAppTool: Tool<Input, Output> = {
   async execute(input, ctx) {
     // 0 — the repo must be attached; the env must exist.
     const repo = await prisma.repo.findFirst({
-      where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
       select: { id: true, defaultBranch: true },
     });
-    if (!repo) return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
+    if (!repo)
+      return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
     const targets = await listDeployTargets(ctx.projectId);
     const target = targets.find((t) => t.envKey === input.envKey);
-    if (!target) return { ok: false, error: `No deployable env "${input.envKey}" — use list_deploy_targets.` };
+    if (!target)
+      return { ok: false, error: `No deployable env "${input.envKey}" — use list_deploy_targets.` };
 
     // GATE: the namespace is the USER's choice — never default to the env's
     // namespace silently. The model must have asked (options built from
@@ -210,7 +237,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
         ok: false,
         error:
           `Missing the user's namespace choice. Do NOT default to "${target.namespace || "default"}" or any other namespace yourself: ` +
-          "(1) call list_kubernetes_resources(envKey, kind:\"namespaces\"), (2) ask ONE ```options``` question — the " +
+          '(1) call list_kubernetes_resources(envKey, kind:"namespaces"), (2) ask ONE ```options``` question — the ' +
           `existing namespace names plus "Create new: ${sanitizeAppName(input.repoFullName.split("/").pop() || "app")}", ` +
           "(3) call deploy_my_app again with the user's answer as `namespace`.",
       };
@@ -223,11 +250,15 @@ export const deployMyAppTool: Tool<Input, Output> = {
     // GATE: the ECR choice is the USER's — this tool refuses to guess it. The
     // model must have asked (options built from list_ecr_repos) and pass the
     // answer via services[].imageName, even for a single-service repo.
-    if (!input.services || input.services.length === 0 || input.services.some((s) => !(s.imageName || "").trim())) {
+    if (
+      !input.services ||
+      input.services.length === 0 ||
+      input.services.some((s) => !(s.imageName || "").trim())
+    ) {
       return {
         ok: false,
         error:
-          "Missing the user's container-registry choice. Do NOT pick a registry yourself: (1) list the existing registry repos (list_ecr_repos on AWS, list_artifact_registries on GCP), (2) ask the user ONE ```options``` question per detected service — the existing repo names plus \"Create new: <suggestedImageName>\" — services detected here: " +
+          'Missing the user\'s container-registry choice. Do NOT pick a registry yourself: (1) list the existing registry repos (list_ecr_repos on AWS, list_artifact_registries on GCP), (2) ask the user ONE ```options``` question per detected service — the existing repo names plus "Create new: <suggestedImageName>" — services detected here: ' +
           det.services.map((s) => `${s.name} (suggested: ${s.suggestedImageName})`).join(", ") +
           ", (3) call deploy_my_app again with services:[{name, path, imageName: the user's answer, expose}].",
       };
@@ -238,11 +269,21 @@ export const deployMyAppTool: Tool<Input, Output> = {
     const plans: Plan[] = [];
     for (const t of input.services) {
       const svc = matchService(det.services, t);
-      if (!svc) return { ok: false, error: `Service "${t.name ?? t.path ?? "?"}" not found in the repo analysis (detected: ${det.services.map((s) => s.name).join(", ")}).` };
-      plans.push({ svc, imageName: (t.imageName || svc.suggestedImageName).toLowerCase(), expose: !!t.expose, host: t.host });
+      if (!svc)
+        return {
+          ok: false,
+          error: `Service "${t.name ?? t.path ?? "?"}" not found in the repo analysis (detected: ${det.services.map((s) => s.name).join(", ")}).`,
+        };
+      plans.push({
+        svc,
+        imageName: (t.imageName || svc.suggestedImageName).toLowerCase(),
+        expose: !!t.expose,
+        host: t.host,
+      });
     }
     for (const p of plans) {
-      if (p.expose && !(p.host || "").trim()) return { ok: false, error: `A host is required to expose "${p.svc.name}" publicly.` };
+      if (p.expose && !(p.host || "").trim())
+        return { ok: false, error: `A host is required to expose "${p.svc.name}" publicly.` };
     }
 
     const multi = plans.length > 1;
@@ -265,18 +306,29 @@ export const deployMyAppTool: Tool<Input, Output> = {
       };
     }
     const branch = requestedBranch;
-    const branchCreated = await ensureBranchExists(tok, input.repoFullName, branch, repo.defaultBranch || "main");
+    const branchCreated = await ensureBranchExists(
+      tok,
+      input.repoFullName,
+      branch,
+      repo.defaultBranch || "main",
+    );
     if (!branchCreated.ok) return branchCreated;
 
     // Which cloud is this env on? Drives the registry (ECR / Artifact Registry /
     // ACR) and the keyless CD auth (EKS OIDC / GKE WIF / AKS federated OIDC).
     const envRow = await prisma.env.findFirst({
       where: { projectId: ctx.projectId, key: input.envKey },
-      select: { kubeconfigRef: true, cloudProvider: { select: { id: true, kind: true, region: true, accountRef: true } } },
+      select: {
+        kubeconfigRef: true,
+        cloudProvider: { select: { id: true, kind: true, region: true, accountRef: true } },
+      },
     });
     const cloud = envRow?.cloudProvider?.kind;
     if (cloud !== "aws" && cloud !== "gcp" && cloud !== "azure") {
-      return { ok: false, error: `deploy_my_app supports AWS (EKS + ECR), GCP (GKE + Artifact Registry), and Azure (AKS + ACR). The env "${input.envKey}" is on "${cloud ?? "no connected cloud"}".` };
+      return {
+        ok: false,
+        error: `deploy_my_app supports AWS (EKS + ECR), GCP (GKE + Artifact Registry), and Azure (AKS + ACR). The env "${input.envKey}" is on "${cloud ?? "no connected cloud"}".`,
+      };
     }
     const cloudProviderId = envRow!.cloudProvider!.id;
 
@@ -325,7 +377,11 @@ export const deployMyAppTool: Tool<Input, Output> = {
               const tok = await getAzureAccessToken(cloudProviderId);
               const subscription = envRow.cloudProvider!.accountRef?.trim();
               if (tok.ok && subscription) {
-                const found = await findAksClusterByName(tok.accessToken, subscription, parsed.clusterName);
+                const found = await findAksClusterByName(
+                  tok.accessToken,
+                  subscription,
+                  parsed.clusterName,
+                );
                 if (found.ok) rg = found.resourceGroup;
               }
             }
@@ -339,10 +395,20 @@ export const deployMyAppTool: Tool<Input, Output> = {
     const cdNotes: string[] = [];
     // Only when the cluster ref couldn't be resolved does the CD fall back to
     // the KUBECONFIG_B64 secret — EKS/GKE/AKS are otherwise all keyless.
-    const needsSecretFallback = (cloud === "aws" && !eksRef) || (cloud === "gcp" && !gkeRef) || (cloud === "azure" && !aksRef);
+    const needsSecretFallback =
+      (cloud === "aws" && !eksRef) ||
+      (cloud === "gcp" && !gkeRef) ||
+      (cloud === "azure" && !aksRef);
     if (needsSecretFallback) {
-      const kc = await setKubeconfigSecretTool.execute({ repoFullName: input.repoFullName, envKey: input.envKey }, ctx);
-      cdNotes.push(kc.ok ? "Set the KUBECONFIG_B64 repo secret for the CD workflow." : `Could not set KUBECONFIG_B64 (${kc.error}) — set it with set_kubeconfig_secret.`);
+      const kc = await setKubeconfigSecretTool.execute(
+        { repoFullName: input.repoFullName, envKey: input.envKey },
+        ctx,
+      );
+      cdNotes.push(
+        kc.ok
+          ? "Set the KUBECONFIG_B64 repo secret for the CD workflow."
+          : `Could not set KUBECONFIG_B64 (${kc.error}) — set it with set_kubeconfig_secret.`,
+      );
     }
 
     // 2+3 — per service: ensure the registry + keyless auth, then generate files.
@@ -352,7 +418,9 @@ export const deployMyAppTool: Tool<Input, Output> = {
     for (const { svc, imageName, expose, host } of plans) {
       const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
       const cdWorkflowFile = multi ? `deploy-${svc.name}.yml` : "deploy.yml";
-      const cdWorkflowName = multi ? `Deploy ${svc.name} to Kubernetes (CD)` : "Deploy to Kubernetes (CD)";
+      const cdWorkflowName = multi
+        ? `Deploy ${svc.name} to Kubernetes (CD)`
+        : "Deploy to Kubernetes (CD)";
       const manifestDir = multi ? `k8s/${input.envKey}/${svc.name}` : `k8s/${input.envKey}`;
       const keepDockerfile = svc.existingDockerfile && !input.overwriteDockerfile;
       const label = multi ? `[${svc.name}] ` : "";
@@ -375,7 +443,15 @@ export const deployMyAppTool: Tool<Input, Output> = {
           compose: !keepDockerfile,
           cdWorkflow: true,
         },
-        deploy: { appName, namespace, replicas: Math.max(1, input.replicas ?? 1), containerPort: svc.port, env: [], expose, host },
+        deploy: {
+          appName,
+          namespace,
+          replicas: Math.max(1, input.replicas ?? 1),
+          containerPort: svc.port,
+          env: [],
+          expose,
+          host,
+        },
         manifestDir,
       };
 
@@ -385,44 +461,107 @@ export const deployMyAppTool: Tool<Input, Output> = {
 
       if (cloud === "gcp") {
         const location = envRow!.cloudProvider!.region || "us-central1";
-        const gcp = await setupGcpDeployRegistry(cloudProviderId, input.repoFullName, location, imageName);
-        if (!gcp.ok) return { ok: false, error: `Registry/WIF setup for "${svc.name}" failed: ${gcp.error}` };
+        const gcp = await setupGcpDeployRegistry(
+          cloudProviderId,
+          input.repoFullName,
+          location,
+          imageName,
+        );
+        if (!gcp.ok)
+          return { ok: false, error: `Registry/WIF setup for "${svc.name}" failed: ${gcp.error}` };
         registrySteps.push(`${label}Artifact Registry "${imageName}" + keyless WIF ready.`);
-        if (gkeRef) cdNotes.push(`${label}Granted the CI service account GKE deploy access (keyless CD ready).`);
+        if (gkeRef)
+          cdNotes.push(
+            `${label}Granted the CI service account GKE deploy access (keyless CD ready).`,
+          );
         workflowFile = multi ? `build-and-push-${svc.name}-gar.yml` : "build-and-push-gar.yml";
-        const ciWorkflowName = multi ? `Build and push ${svc.name} to Artifact Registry` : "Build and push to Artifact Registry";
+        const ciWorkflowName = multi
+          ? `Build and push ${svc.name} to Artifact Registry`
+          : "Build and push to Artifact Registry";
         registryUri = `${location}-docker.pkg.dev/${gcp.data.projectId}/${imageName}/${appName}`;
         built = buildCicdArtifacts({
           ...commonSpec,
           ciWorkflowName,
           ciFileName: workflowFile,
           registryUseVars: false,
-          registry: { cloud: "gcp", workloadIdentityProvider: gcp.data.workloadIdentityProvider, serviceAccount: gcp.data.serviceAccount, location, projectId: gcp.data.projectId, repository: imageName, image: appName },
-          gkeCluster: gkeRef ? { clusterName: gkeRef.clusterName, location: gkeRef.location } : undefined,
+          registry: {
+            cloud: "gcp",
+            workloadIdentityProvider: gcp.data.workloadIdentityProvider,
+            serviceAccount: gcp.data.serviceAccount,
+            location,
+            projectId: gcp.data.projectId,
+            repository: imageName,
+            image: appName,
+          },
+          gkeCluster: gkeRef
+            ? { clusterName: gkeRef.clusterName, location: gkeRef.location }
+            : undefined,
         });
       } else if (cloud === "azure") {
-        const providerRow = await prisma.cloudProvider.findUnique({ where: { id: cloudProviderId }, select: { resourceGroup: true, region: true } });
+        const providerRow = await prisma.cloudProvider.findUnique({
+          where: { id: cloudProviderId },
+          select: { resourceGroup: true, region: true },
+        });
         const resourceGroup = aksRef?.resourceGroup || providerRow?.resourceGroup;
-        if (!resourceGroup) return { ok: false, error: `No Azure resource group known for "${svc.name}" — connect an AKS cluster on this env or set a default resource group on the Cloud providers tab.` };
+        if (!resourceGroup)
+          return {
+            ok: false,
+            error: `No Azure resource group known for "${svc.name}" — connect an AKS cluster on this env or set a default resource group on the Cloud providers tab.`,
+          };
         const location = providerRow?.region || "eastus";
-        const azureAcrName = imageName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50) || "app";
-        const az = await setupAzureDeployRegistry(cloudProviderId, input.repoFullName, resourceGroup, azureAcrName, location, branch, aksRef ?? undefined);
-        if (!az.ok) return { ok: false, error: `Registry/OIDC setup for "${svc.name}" failed: ${az.error}` };
+        const azureAcrName =
+          imageName
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "")
+            .slice(0, 50) || "app";
+        const az = await setupAzureDeployRegistry(
+          cloudProviderId,
+          input.repoFullName,
+          resourceGroup,
+          azureAcrName,
+          location,
+          branch,
+          aksRef ?? undefined,
+        );
+        if (!az.ok)
+          return { ok: false, error: `Registry/OIDC setup for "${svc.name}" failed: ${az.error}` };
         const keyless = az.data.mode === "keyless";
         registrySteps.push(
           keyless
             ? `${label}ACR "${azureAcrName}" + keyless federated OIDC ready.`
             : `${label}ACR "${azureAcrName}" ready (Azure connection is OAuth — using ACR admin credentials stored as GitHub secrets instead of keyless OIDC).`,
         );
-        if (aksRef && keyless) cdNotes.push(`${label}Granted the CI app AKS admin credential access (keyless CD ready).`);
-        if (aksRef && !keyless) cdNotes.push(`${label}AKS CD via GitHub Actions isn't wired (needs a service-principal Azure connection). Once the image is pushed, use deploy_app to deploy server-side with the stored kubeconfig.`);
+        if (aksRef && keyless)
+          cdNotes.push(
+            `${label}Granted the CI app AKS admin credential access (keyless CD ready).`,
+          );
+        if (aksRef && !keyless)
+          cdNotes.push(
+            `${label}AKS CD via GitHub Actions isn't wired (needs a service-principal Azure connection). Once the image is pushed, use deploy_app to deploy server-side with the stored kubeconfig.`,
+          );
         workflowFile = multi ? `build-and-push-${svc.name}-acr.yml` : "build-and-push-acr.yml";
-        const ciWorkflowName = multi ? `Build and push ${svc.name} to ACR` : "Build and push to ACR";
+        const ciWorkflowName = multi
+          ? `Build and push ${svc.name} to ACR`
+          : "Build and push to ACR";
         registryUri = `${az.data.loginServer}/${appName}`;
         const azureRegistry =
           az.data.mode === "keyless"
-            ? { cloud: "azure" as const, mode: "keyless" as const, clientId: az.data.clientId, tenantId: az.data.tenantId, subscriptionId: az.data.subscriptionId, registry: az.data.registry, image: appName }
-            : { cloud: "azure" as const, mode: "secret" as const, secretPrefix: az.data.secretPrefix, registry: az.data.registry, image: appName };
+            ? {
+                cloud: "azure" as const,
+                mode: "keyless" as const,
+                clientId: az.data.clientId,
+                tenantId: az.data.tenantId,
+                subscriptionId: az.data.subscriptionId,
+                registry: az.data.registry,
+                image: appName,
+              }
+            : {
+                cloud: "azure" as const,
+                mode: "secret" as const,
+                secretPrefix: az.data.secretPrefix,
+                registry: az.data.registry,
+                image: appName,
+              };
         built = buildCicdArtifacts({
           ...commonSpec,
           ciWorkflowName,
@@ -430,35 +569,71 @@ export const deployMyAppTool: Tool<Input, Output> = {
           registryUseVars: false,
           registry: azureRegistry,
           // Only wire the keyless AKS CD when we actually have SP creds.
-          aksCluster: aksRef && keyless ? { clusterName: aksRef.clusterName, resourceGroup: aksRef.resourceGroup } : undefined,
+          aksCluster:
+            aksRef && keyless
+              ? { clusterName: aksRef.clusterName, resourceGroup: aksRef.resourceGroup }
+              : undefined,
         });
       } else {
-        const oidc = await setupGithubOidcEcrTool.execute({ repoFullName: input.repoFullName, ecrRepoName: imageName }, ctx);
-        if (!oidc.ok) return { ok: false, error: `Registry setup for "${svc.name}" failed: ${oidc.error}` };
+        const oidc = await setupGithubOidcEcrTool.execute(
+          { repoFullName: input.repoFullName, ecrRepoName: imageName },
+          ctx,
+        );
+        if (!oidc.ok)
+          return { ok: false, error: `Registry setup for "${svc.name}" failed: ${oidc.error}` };
         registrySteps.push(...oidc.output.steps.map((s) => `${label}${s}`));
         // Single service uses repo-level GitHub vars; a monorepo bakes values in.
         if (!multi && tok.ok) {
-          await setRepoActionsVariable(tok.accessToken, input.repoFullName, "AWS_ROLE_ARN", oidc.output.roleArn);
-          await setRepoActionsVariable(tok.accessToken, input.repoFullName, "AWS_REGION", oidc.output.region);
-          await setRepoActionsVariable(tok.accessToken, input.repoFullName, "ECR_REPOSITORY", oidc.output.ecrRepositoryUri);
+          await setRepoActionsVariable(
+            tok.accessToken,
+            input.repoFullName,
+            "AWS_ROLE_ARN",
+            oidc.output.roleArn,
+          );
+          await setRepoActionsVariable(
+            tok.accessToken,
+            input.repoFullName,
+            "AWS_REGION",
+            oidc.output.region,
+          );
+          await setRepoActionsVariable(
+            tok.accessToken,
+            input.repoFullName,
+            "ECR_REPOSITORY",
+            oidc.output.ecrRepositoryUri,
+          );
         }
         // Keyless CD needs the CI role to have cluster RBAC (idempotent Access Entries).
         if (eksRef) {
-          const grant = await grantEksAccessTool.execute({ envKey: input.envKey, roleArn: oidc.output.roleArn, accessLevel: "admin" }, ctx);
-          cdNotes.push(grant.ok
-            ? `${label}Granted ${oidc.output.roleArn} access to cluster ${eksRef.clusterName} (keyless CD ready).`
-            : `${label}Could not grant cluster access (${grant.error}) — if the CD run fails "Unauthorized", call grant_eks_access(envKey, roleArn).`);
+          const grant = await grantEksAccessTool.execute(
+            { envKey: input.envKey, roleArn: oidc.output.roleArn, accessLevel: "admin" },
+            ctx,
+          );
+          cdNotes.push(
+            grant.ok
+              ? `${label}Granted ${oidc.output.roleArn} access to cluster ${eksRef.clusterName} (keyless CD ready).`
+              : `${label}Could not grant cluster access (${grant.error}) — if the CD run fails "Unauthorized", call grant_eks_access(envKey, roleArn).`,
+          );
         }
         workflowFile = multi ? `build-and-push-${svc.name}.yml` : "build-and-push.yml";
-        const ciWorkflowName = multi ? `Build and push ${svc.name} to ECR` : "Build and push to ECR";
+        const ciWorkflowName = multi
+          ? `Build and push ${svc.name} to ECR`
+          : "Build and push to ECR";
         registryUri = oidc.output.ecrRepositoryUri;
         built = buildCicdArtifacts({
           ...commonSpec,
           ciWorkflowName,
           ciFileName: workflowFile,
-          eksCluster: eksRef ? { clusterName: eksRef.clusterName, region: eksRef.region } : undefined,
+          eksCluster: eksRef
+            ? { clusterName: eksRef.clusterName, region: eksRef.region }
+            : undefined,
           registryUseVars: !multi,
-          registry: { cloud: "aws", roleArn: oidc.output.roleArn, region: oidc.output.region, ecrRepositoryUri: oidc.output.ecrRepositoryUri },
+          registry: {
+            cloud: "aws",
+            roleArn: oidc.output.roleArn,
+            region: oidc.output.region,
+            ecrRepositoryUri: oidc.output.ecrRepositoryUri,
+          },
         });
       }
 
@@ -490,7 +665,9 @@ export const deployMyAppTool: Tool<Input, Output> = {
     const direct = input.commitMode === "direct";
     const runId = process.hrtime.bigint().toString(36).slice(-8);
     const pushBranch = direct ? branch : `deploy/${baseApp}-${runId}`;
-    const svcList = deployed.map((d) => `**${d.name}**${d.path ? ` (\`./${d.path}\`)` : ""} → \`${d.imageRef}\``).join("\n- ");
+    const svcList = deployed
+      .map((d) => `**${d.name}**${d.path ? ` (\`./${d.path}\`)` : ""} → \`${d.imageRef}\``)
+      .join("\n- ");
     const prBody =
       `End-to-end pipeline generated by DeepAgent for **${baseApp}**` +
       (multi ? ` (monorepo — ${deployed.length} services).` : ` (${det.services[0].stackTitle}).`) +
@@ -541,7 +718,10 @@ export const deployMyAppTool: Tool<Input, Output> = {
     }
 
     const watchHint = deployed
-      .map((d) => `wait_for_workflow_run("${d.workflowFile}") then wait_for_workflow_run("${d.cdWorkflowFile}") then deployment_status(envKey:"${input.envKey}", appName:"${d.appName}")`)
+      .map(
+        (d) =>
+          `wait_for_workflow_run("${d.workflowFile}") then wait_for_workflow_run("${d.cdWorkflowFile}") then deployment_status(envKey:"${input.envKey}", appName:"${d.appName}")`,
+      )
       .join("; and for the next service ");
     const next = direct
       ? `Files committed to ${branch} — CI is starting, and the CD workflow will deploy automatically after CI succeeds. Watch it: ${watchHint}. deploy_app is only the fallback if the CD run fails.`
@@ -584,7 +764,11 @@ async function resetBranchToTarget(
   branch: string,
   targetBranch: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!tok.ok) return { ok: false, error: `Couldn't resolve a GitHub token for "${repoFullName}": ${tok.message}` };
+  if (!tok.ok)
+    return {
+      ok: false,
+      error: `Couldn't resolve a GitHub token for "${repoFullName}": ${tok.message}`,
+    };
   const headers = {
     Authorization: `Bearer ${tok.accessToken}`,
     Accept: "application/vnd.github+json",
@@ -596,8 +780,10 @@ async function resetBranchToTarget(
     `https://api.github.com/repos/${repoFullName}/git/refs/heads/${encodeRefPath(targetBranch)}`,
     { headers, cache: "no-store" },
   ).catch(() => null);
-  if (!target || !target.ok) return { ok: false, error: `Couldn't read target branch "${targetBranch}".` };
-  const targetSha = ((await target.json().catch(() => ({}))) as { object?: { sha?: string } }).object?.sha;
+  if (!target || !target.ok)
+    return { ok: false, error: `Couldn't read target branch "${targetBranch}".` };
+  const targetSha = ((await target.json().catch(() => ({}))) as { object?: { sha?: string } })
+    .object?.sha;
   if (!targetSha) return { ok: false, error: `Target branch "${targetBranch}" has no sha.` };
 
   // Does branch exist? If yes, delete it first — no PATCH-force ambiguity.
@@ -612,10 +798,16 @@ async function resetBranchToTarget(
     ).catch(() => null);
     if (!del || (del.status !== 204 && del.status !== 422)) {
       const t = del ? await del.text().catch(() => "") : "network error";
-      return { ok: false, error: `Deleting stale "${branch}" failed (HTTP ${del?.status ?? "?"}). ${t.slice(0, 160)}` };
+      return {
+        ok: false,
+        error: `Deleting stale "${branch}" failed (HTTP ${del?.status ?? "?"}). ${t.slice(0, 160)}`,
+      };
     }
   } else if (existing && existing.status !== 404) {
-    return { ok: false, error: `Unexpected GitHub response reading "${branch}" (HTTP ${existing.status}).` };
+    return {
+      ok: false,
+      error: `Unexpected GitHub response reading "${branch}" (HTTP ${existing.status}).`,
+    };
   }
 
   // Create fresh at target's tip. Retry once on 422 (rare race with a still-
@@ -634,7 +826,10 @@ async function resetBranchToTarget(
       continue;
     }
     const t = await create.text().catch(() => "");
-    return { ok: false, error: `GitHub refused to create "${branch}" (HTTP ${create.status}). ${t.slice(0, 160)}` };
+    return {
+      ok: false,
+      error: `GitHub refused to create "${branch}" (HTTP ${create.status}). ${t.slice(0, 160)}`,
+    };
   }
   return { ok: false, error: `Timed out recreating "${branch}" after DELETE.` };
 }
@@ -652,7 +847,11 @@ async function ensureBranchExists(
   branch: string,
   defaultBranch: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!tok.ok) return { ok: false, error: `Couldn't resolve a GitHub token for "${repoFullName}": ${tok.message}` };
+  if (!tok.ok)
+    return {
+      ok: false,
+      error: `Couldn't resolve a GitHub token for "${repoFullName}": ${tok.message}`,
+    };
   const headers = {
     Authorization: `Bearer ${tok.accessToken}`,
     Accept: "application/vnd.github+json",
@@ -690,5 +889,8 @@ async function ensureBranchExists(
   if (create.status === 201) return { ok: true };
   if (create.status === 422) return { ok: true }; // race — someone created it first
   const t = await create.text().catch(() => "");
-  return { ok: false, error: `GitHub refused to create branch "${branch}" (HTTP ${create.status}). ${t.slice(0, 160)}` };
+  return {
+    ok: false,
+    error: `GitHub refused to create branch "${branch}" (HTTP ${create.status}). ${t.slice(0, 160)}`,
+  };
 }

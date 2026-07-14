@@ -46,13 +46,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   const a = parsed.data;
   if (a.maxNodes < a.minNodes || a.desiredNodes < a.minNodes || a.desiredNodes > a.maxNodes) {
     return NextResponse.json(
-      { ok: false, code: "invalid_request", message: "Node counts must satisfy min ≤ desired ≤ max." },
+      {
+        ok: false,
+        code: "invalid_request",
+        message: "Node counts must satisfy min ≤ desired ≤ max.",
+      },
       { status: 400 },
     );
   }
   if (a.createVpc === false && !a.existingVpcId?.trim()) {
     return NextResponse.json(
-      { ok: false, code: "invalid_request", message: "Provide an existing VPC id when not creating a new VPC." },
+      {
+        ok: false,
+        code: "invalid_request",
+        message: "Provide an existing VPC id when not creating a new VPC.",
+      },
       { status: 400 },
     );
   }
@@ -91,7 +99,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   // Remote state: prefer a bucket entered on this form (and persist it onto the
   // env for future creates), else fall back to whatever the env already has.
   if (a.envKey && a.stateBucket?.trim()) {
-    const backend = { bucket: a.stateBucket.trim(), region: a.region, table: a.stateTable?.trim() || undefined };
+    const backend = {
+      bucket: a.stateBucket.trim(),
+      region: a.region,
+      table: a.stateTable?.trim() || undefined,
+    };
     spec.stateBucket = backend.bucket;
     spec.stateRegion = backend.region;
     spec.stateTable = backend.table;

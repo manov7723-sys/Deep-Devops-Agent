@@ -65,7 +65,10 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string;
   return NextResponse.json({ ok: true, env: res.env });
 }
 
-export async function DELETE(req: Request, ctx: { params: Promise<{ slug: string; key: string }> }) {
+export async function DELETE(
+  req: Request,
+  ctx: { params: Promise<{ slug: string; key: string }> },
+) {
   const { slug, key } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });

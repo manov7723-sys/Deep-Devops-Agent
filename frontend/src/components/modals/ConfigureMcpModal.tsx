@@ -2,7 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Btn, Field, Icon, Input, Modal, Select, type SelectOption, Textarea } from "@/components/ui";
+import {
+  Btn,
+  Field,
+  Icon,
+  Input,
+  Modal,
+  Select,
+  type SelectOption,
+  Textarea,
+} from "@/components/ui";
 import { api } from "@/lib/api/client";
 
 type AuthType = "none" | "oauth" | "credential";
@@ -50,9 +59,7 @@ export function ConfigureMcpModal({ open, onOpenChange, connector }: ConfigureMc
     if (!open) return;
     setName(connector.name);
     setDescription(connector.description);
-    setStatus(
-      connector.status === "warn" || connector.status === "down" ? connector.status : "ok",
-    );
+    setStatus(connector.status === "warn" || connector.status === "down" ? connector.status : "ok");
     setServerError(null);
     setConfirmDelete(false);
   }, [open, connector.id, connector.name, connector.description, connector.status]);
@@ -61,7 +68,8 @@ export function ConfigureMcpModal({ open, onOpenChange, connector }: ConfigureMc
     mutationFn: async () => {
       const patch: Record<string, unknown> = {};
       if (name.trim() && name !== connector.name) patch.name = name.trim();
-      if (description.trim() && description !== connector.description) patch.description = description.trim();
+      if (description.trim() && description !== connector.description)
+        patch.description = description.trim();
       if (status !== connector.status) patch.status = status;
       // authType isn't loaded from the list endpoint — only patch when the
       // user explicitly picked a value other than the default "none".
@@ -102,7 +110,9 @@ export function ConfigureMcpModal({ open, onOpenChange, connector }: ConfigureMc
       footer={
         confirmDelete ? (
           <>
-            <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Btn>
             <Btn
               variant="primary"
               icon="x"
@@ -123,7 +133,9 @@ export function ConfigureMcpModal({ open, onOpenChange, connector }: ConfigureMc
           </>
         ) : (
           <>
-            <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Btn>
             <Btn
               variant="primary"
               icon="check"
@@ -183,12 +195,20 @@ export function ConfigureMcpModal({ open, onOpenChange, connector }: ConfigureMc
             }}
           >
             <div className="col">
-              <span className="faint" style={{ fontSize: 11 }}>Avg calls / day</span>
-              <span className="mono"><b>{connector.callsPerDay ?? "—"}</b></span>
+              <span className="faint" style={{ fontSize: 11 }}>
+                Avg calls / day
+              </span>
+              <span className="mono">
+                <b>{connector.callsPerDay ?? "—"}</b>
+              </span>
             </div>
             <div className="col">
-              <span className="faint" style={{ fontSize: 11 }}>Avg latency</span>
-              <span className="mono"><b>{connector.latency ?? "—"}</b></span>
+              <span className="faint" style={{ fontSize: 11 }}>
+                Avg latency
+              </span>
+              <span className="mono">
+                <b>{connector.latency ?? "—"}</b>
+              </span>
             </div>
           </div>
         )}
@@ -205,8 +225,8 @@ export function ConfigureMcpModal({ open, onOpenChange, connector }: ConfigureMc
         >
           {confirmDelete ? (
             <p style={{ fontSize: 13, color: "var(--danger)" }}>
-              Deleting <b>{connector.name}</b> removes it from every project that connected
-              it. Existing audit rows are kept, but credentials are wiped.
+              Deleting <b>{connector.name}</b> removes it from every project that connected it.
+              Existing audit rows are kept, but credentials are wiped.
             </p>
           ) : (
             <button

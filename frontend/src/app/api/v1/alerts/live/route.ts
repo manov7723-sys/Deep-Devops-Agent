@@ -47,7 +47,13 @@ export async function GET() {
       projectId: { in: projectIds },
       cloudProvider: { is: { kind: { in: ["aws", "azure", "gcp"] } } },
     },
-    select: { id: true, projectId: true, region: true, cloudProviderId: true, cloudProvider: { select: { kind: true } } },
+    select: {
+      id: true,
+      projectId: true,
+      region: true,
+      cloudProviderId: true,
+      cloudProvider: { select: { kind: true } },
+    },
     take: MAX_ENVS_PER_POLL,
   });
 

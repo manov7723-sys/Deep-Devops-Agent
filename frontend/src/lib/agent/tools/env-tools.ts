@@ -3,13 +3,17 @@ import { listEnvs, createEnv, updateEnv, deleteEnv, type EnvRow } from "@/lib/de
 import type { Tool } from "./types";
 
 async function projectOwnerId(projectId: string): Promise<string> {
-  const p = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { ownerId: true } });
+  const p = await prisma.project.findUniqueOrThrow({
+    where: { id: projectId },
+    select: { ownerId: true },
+  });
   return p.ownerId;
 }
 
 export const listEnvironmentsTool: Tool<Record<string, never>, EnvRow[]> = {
   name: "list_environments",
-  description: "List the project's environments (staging, production, …) with their key, namespace and whether they're production.",
+  description:
+    "List the project's environments (staging, production, …) with their key, namespace and whether they're production.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async execute(_input, ctx) {
     return { ok: true, output: await listEnvs(ctx.projectId) };
@@ -17,7 +21,14 @@ export const listEnvironmentsTool: Tool<Record<string, never>, EnvRow[]> = {
 };
 
 export const createEnvironmentTool: Tool<
-  { key: string; name: string; isProduction?: boolean; autoDeploy?: boolean; namespace?: string; region?: string },
+  {
+    key: string;
+    name: string;
+    isProduction?: boolean;
+    autoDeploy?: boolean;
+    namespace?: string;
+    region?: string;
+  },
   EnvRow
 > = {
   name: "create_environment",
@@ -30,16 +41,28 @@ export const createEnvironmentTool: Tool<
     properties: {
       key: { type: "string", description: "Lowercase slug, e.g. 'staging'." },
       name: { type: "string", description: "Display name, e.g. 'Staging'." },
-      isProduction: { type: "boolean", description: "Production envs require deploy approval by default." },
-      autoDeploy: { type: "boolean", description: "Auto-deploy on push. Defaults to true for non-prod, false for prod." },
-      namespace: { type: "string", description: "Kubernetes namespace. Defaults to the key if omitted." },
+      isProduction: {
+        type: "boolean",
+        description: "Production envs require deploy approval by default.",
+      },
+      autoDeploy: {
+        type: "boolean",
+        description: "Auto-deploy on push. Defaults to true for non-prod, false for prod.",
+      },
+      namespace: {
+        type: "string",
+        description: "Kubernetes namespace. Defaults to the key if omitted.",
+      },
       region: { type: "string", description: "Optional cloud region label." },
     },
     required: ["key", "name"],
     additionalProperties: false,
   },
   async execute(input, ctx) {
-    const [ownerId, existing] = await Promise.all([projectOwnerId(ctx.projectId), listEnvs(ctx.projectId)]);
+    const [ownerId, existing] = await Promise.all([
+      projectOwnerId(ctx.projectId),
+      listEnvs(ctx.projectId),
+    ]);
     const isProduction = input.isProduction ?? false;
     const res = await createEnv({
       projectId: ctx.projectId,
@@ -58,11 +81,19 @@ export const createEnvironmentTool: Tool<
 };
 
 export const updateEnvironmentTool: Tool<
-  { key: string; name?: string; isProduction?: boolean; autoDeploy?: boolean; namespace?: string; region?: string },
+  {
+    key: string;
+    name?: string;
+    isProduction?: boolean;
+    autoDeploy?: boolean;
+    namespace?: string;
+    region?: string;
+  },
   EnvRow
 > = {
   name: "update_environment",
-  description: "Update an existing environment's name, production flag, auto-deploy, namespace, or region.",
+  description:
+    "Update an existing environment's name, production flag, auto-deploy, namespace, or region.",
   inputSchema: {
     type: "object",
     properties: {
@@ -87,7 +118,8 @@ export const updateEnvironmentTool: Tool<
 
 export const deleteEnvironmentTool: Tool<{ key: string }, { deleted: true }> = {
   name: "delete_environment",
-  description: "Delete an environment. Fails if it has deployment history — confirm with the user first since this can't be undone.",
+  description:
+    "Delete an environment. Fails if it has deployment history — confirm with the user first since this can't be undone.",
   inputSchema: {
     type: "object",
     properties: { key: { type: "string" } },

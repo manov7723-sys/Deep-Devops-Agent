@@ -163,7 +163,9 @@ export async function retrieveSubscription(subscriptionId: string): Promise<{
     headers: { Authorization: `Bearer ${readEnv("STRIPE_SECRET_KEY")}` },
   });
   if (!res.ok) {
-    const parsed = await res.json().catch(() => ({}) as { error?: { code?: string; message?: string } });
+    const parsed = await res
+      .json()
+      .catch(() => ({}) as { error?: { code?: string; message?: string } });
     throw new StripeApiError(
       res.status,
       parsed.error?.code ?? `http_${res.status}`,
@@ -201,7 +203,12 @@ export async function updateSubscriptionPrice(args: {
   const current = await retrieveSubscription(args.subscriptionId);
   const item = current.items.data[0];
   if (!item) {
-    throw new StripeApiError(400, "no_item", "Subscription has no items to update.", `/subscriptions/${args.subscriptionId}`);
+    throw new StripeApiError(
+      400,
+      "no_item",
+      "Subscription has no items to update.",
+      `/subscriptions/${args.subscriptionId}`,
+    );
   }
   if (item.price.id === args.newPriceId) {
     return { id: args.subscriptionId, status: current.status, stripePriceId: args.newPriceId };

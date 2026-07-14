@@ -3,7 +3,11 @@ import { z } from "zod";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { envBySlugAndKey } from "@/lib/devops/envs";
 import { prisma } from "@/lib/db/prisma";
-import { setupEksCloudWatchAlarms, eksClusterFromEnv, type MetricKey } from "@/lib/cloud/cloudwatch";
+import {
+  setupEksCloudWatchAlarms,
+  eksClusterFromEnv,
+  type MetricKey,
+} from "@/lib/cloud/cloudwatch";
 import { syncEksAlarmsToAlerts } from "@/lib/cloud/cloudwatch-alerts";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
@@ -19,16 +23,39 @@ const Body = z.object({
 
 type AwsEnvResolved =
   | { ok: false; code: string; status: number; message?: string }
-  | { ok: true; env: NonNullable<Awaited<ReturnType<typeof envBySlugAndKey>>> & { cloudProviderId: string }; providerRegion: string };
+  | {
+      ok: true;
+      env: NonNullable<Awaited<ReturnType<typeof envBySlugAndKey>>> & { cloudProviderId: string };
+      providerRegion: string;
+    };
 
 /** Resolve the env's AWS cloud provider, or return an error response shape. */
 async function resolveAwsEnv(projectId: string, key: string): Promise<AwsEnvResolved> {
   const env = await envBySlugAndKey(projectId, key);
   if (!env) return { ok: false, code: "env_not_found", status: 404 };
-  if (!env.cloudProviderId) return { ok: false, code: "no_cloud_provider", status: 400, message: "This environment has no cloud provider connected." };
-  const cp = await prisma.cloudProvider.findUnique({ where: { id: env.cloudProviderId }, select: { kind: true, region: true } });
-  if (cp?.kind !== "aws") return { ok: false, code: "not_aws", status: 400, message: "CloudWatch alarms are AWS/EKS only." };
-  return { ok: true, env: { ...env, cloudProviderId: env.cloudProviderId }, providerRegion: cp.region };
+  if (!env.cloudProviderId)
+    return {
+      ok: false,
+      code: "no_cloud_provider",
+      status: 400,
+      message: "This environment has no cloud provider connected.",
+    };
+  const cp = await prisma.cloudProvider.findUnique({
+    where: { id: env.cloudProviderId },
+    select: { kind: true, region: true },
+  });
+  if (cp?.kind !== "aws")
+    return {
+      ok: false,
+      code: "not_aws",
+      status: 400,
+      message: "CloudWatch alarms are AWS/EKS only.",
+    };
+  return {
+    ok: true,
+    env: { ...env, cloudProviderId: env.cloudProviderId },
+    providerRegion: cp.region,
+  };
 }
 
 /**
@@ -42,15 +69,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request", message: parsed.error.errors[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: parsed.error.errors[0]?.message },
+      { status: 400 },
+    );
 
   const r = await resolveAwsEnv(gate.access.project.id, key);
-  if (!r.ok) return NextResponse.json({ ok: false, code: r.code, message: r.message }, { status: r.status });
+  if (!r.ok)
+    return NextResponse.json({ ok: false, code: r.code, message: r.message }, { status: r.status });
   const { env, providerRegion } = r;
 
   const clusterName = parsed.data.clusterName || (await eksClusterFromEnv(env.id));
   if (!clusterName) {
-    return NextResponse.json({ ok: false, code: "no_cluster", message: "Couldn't determine the EKS cluster name. Pass clusterName." }, { status: 400 });
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "no_cluster",
+        message: "Couldn't determine the EKS cluster name. Pass clusterName.",
+      },
+      { status: 400 },
+    );
   }
   const metrics = (parsed.data.metrics ?? [...METRIC_KEYS]) as MetricKey[];
 
@@ -69,7 +108,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
       const { writeFile } = await import("node:fs/promises");
       const { tmpdir } = await import("node:os");
       const { join } = await import("node:path");
-      await writeFile(join(tmpdir(), `dda-cw-setup-${env.id.replace(/[^a-z0-9-]/gi, "")}.json`), JSON.stringify(result, null, 2));
+      await writeFile(
+        join(tmpdir(), `dda-cw-setup-${env.id.replace(/[^a-z0-9-]/gi, "")}.json`),
+        JSON.stringify(result, null, 2),
+      );
     } catch {
       /* best-effort */
     }
@@ -110,11 +152,17 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; k
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
   const r = await resolveAwsEnv(gate.access.project.id, key);
-  if (!r.ok) return NextResponse.json({ ok: false, code: r.code, message: r.message }, { status: r.status });
+  if (!r.ok)
+    return NextResponse.json({ ok: false, code: r.code, message: r.message }, { status: r.status });
   const { env } = r;
 
-  const clusterName = new URL(req.url).searchParams.get("clusterName") || (await eksClusterFromEnv(env.id));
-  if (!clusterName) return NextResponse.json({ ok: false, code: "no_cluster", message: "Couldn't determine the EKS cluster name." }, { status: 400 });
+  const clusterName =
+    new URL(req.url).searchParams.get("clusterName") || (await eksClusterFromEnv(env.id));
+  if (!clusterName)
+    return NextResponse.json(
+      { ok: false, code: "no_cluster", message: "Couldn't determine the EKS cluster name." },
+      { status: 400 },
+    );
 
   const sync = await syncEksAlarmsToAlerts({
     projectId: gate.access.project.id,

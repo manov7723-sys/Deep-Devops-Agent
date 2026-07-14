@@ -67,11 +67,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     });
   }
   if (!thread) {
-    const created = await createThread(
-      gate.access.project.id,
-      gate.access.session.userId,
-      "Chat",
-    );
+    const created = await createThread(gate.access.project.id, gate.access.session.userId, "Chat");
     thread = { id: created.threadId };
   }
 
@@ -113,9 +109,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     event: string,
     data: unknown,
   ) => {
-    controller.enqueue(
-      encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
-    );
+    controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
   };
 
   const stream = new ReadableStream<Uint8Array>({

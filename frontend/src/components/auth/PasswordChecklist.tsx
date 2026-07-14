@@ -23,7 +23,10 @@ export interface PasswordChecklistProps {
   requirements?: PasswordRequirement[];
 }
 
-export function PasswordChecklist({ password, requirements = PASSWORD_REQS }: PasswordChecklistProps) {
+export function PasswordChecklist({
+  password,
+  requirements = PASSWORD_REQS,
+}: PasswordChecklistProps) {
   return (
     <div className="auth-pwd-checklist" aria-live="polite">
       {requirements.map((r) => {

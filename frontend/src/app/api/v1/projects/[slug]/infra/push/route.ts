@@ -17,7 +17,9 @@ const Body = z.object({
   repoFullName: z.string().trim().min(3),
   /** Folder the files go under, e.g. "terraform/eks/prod". Filenames are kept. */
   basePath: z.string().trim().max(280),
-  files: z.record(z.string(), z.string()).refine((f) => Object.keys(f).length > 0, "No files to push."),
+  files: z
+    .record(z.string(), z.string())
+    .refine((f) => Object.keys(f).length > 0, "No files to push."),
   branch: z.string().trim().min(1).max(200),
   message: z.string().trim().min(1).max(200),
   pullRequestBody: z.string().trim().max(4000).optional(),
@@ -84,5 +86,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     metadata: { basePath: base, branch, fileCount: committed.length },
   });
 
-  return NextResponse.json({ ok: true, repoFullName, branch, basePath: base, committed, pullRequest });
+  return NextResponse.json({
+    ok: true,
+    repoFullName,
+    branch,
+    basePath: base,
+    committed,
+    pullRequest,
+  });
 }

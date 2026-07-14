@@ -14,7 +14,15 @@ import { api, apiErrorMessage } from "@/lib/api/client";
 type EnvCol = { key: string; name: string; isProduction: boolean; connected: boolean };
 type AppVersions = { app: string; versions: Record<string, { image: string; ready: string }> };
 type EnvDiag = { env: string; ok: boolean; count: number; error?: string };
-type ListResp = { ok: true; envs: EnvCol[]; apps: AppVersions[]; namespaces: string[]; namespace: string; diag?: EnvDiag[]; note?: string };
+type ListResp = {
+  ok: true;
+  envs: EnvCol[];
+  apps: AppVersions[];
+  namespaces: string[];
+  namespace: string;
+  diag?: EnvDiag[];
+  note?: string;
+};
 
 /** Best-effort image tag for display (segment after the last colon). */
 function tagOf(image: string): string {
@@ -27,13 +35,17 @@ export function PromotionsClient({ slug }: { slug: string }) {
   const [ns, setNs] = useState("all");
   const q = useQuery<ListResp>({
     queryKey: ["p", slug, "promotions", ns],
-    queryFn: () => api.get<ListResp>(`/projects/${slug}/promotions?namespace=${encodeURIComponent(ns)}`),
+    queryFn: () =>
+      api.get<ListResp>(`/projects/${slug}/promotions?namespace=${encodeURIComponent(ns)}`),
     refetchInterval: 20_000,
   });
   const envs = q.data?.envs ?? [];
   const apps = q.data?.apps ?? [];
   const nsOptions = useMemo(
-    () => [{ value: "all", label: "All namespaces" }, ...(q.data?.namespaces ?? []).map((n) => ({ value: n, label: n }))],
+    () => [
+      { value: "all", label: "All namespaces" },
+      ...(q.data?.namespaces ?? []).map((n) => ({ value: n, label: n })),
+    ],
     [q.data],
   );
 
@@ -42,7 +54,11 @@ export function PromotionsClient({ slug }: { slug: string }) {
       <PageHead
         title="Promotions"
         sub="Promote the exact tested version to the next environment (dev → staging → prod). Same image, no rebuild — and it goes through the approval gate."
-        actions={<Btn variant="outline" icon="refresh" loading={q.isFetching} onClick={() => q.refetch()}>Refresh</Btn>}
+        actions={
+          <Btn variant="outline" icon="refresh" loading={q.isFetching} onClick={() => q.refetch()}>
+            Refresh
+          </Btn>
+        }
       />
 
       {envs.length > 0 && (
@@ -56,16 +72,36 @@ export function PromotionsClient({ slug }: { slug: string }) {
       )}
 
       {envs.length === 0 ? (
-        <Block><Block.Empty icon="globe" title="No environments" description={q.data?.note || "Create an environment on the Environments page first."} /></Block>
+        <Block>
+          <Block.Empty
+            icon="globe"
+            title="No environments"
+            description={q.data?.note || "Create an environment on the Environments page first."}
+          />
+        </Block>
       ) : apps.length === 0 ? (
         <Block>
-          <Block.Empty icon="rocket" title="Nothing to promote yet" description={q.data?.note || "No running app Deployments found. Details per cluster below:"} />
+          <Block.Empty
+            icon="rocket"
+            title="Nothing to promote yet"
+            description={
+              q.data?.note || "No running app Deployments found. Details per cluster below:"
+            }
+          />
           {(q.data?.diag ?? []).length > 0 && (
             <div className="col gap-1" style={{ padding: "0 16px 16px" }}>
               {(q.data?.diag ?? []).map((d) => (
-                <div key={d.env} className="row gap-2" style={{ fontSize: 12.5, alignItems: "center" }}>
+                <div
+                  key={d.env}
+                  className="row gap-2"
+                  style={{ fontSize: 12.5, alignItems: "center" }}
+                >
                   <Badge tone={d.ok ? (d.count > 0 ? "ok" : "warn") : "danger"}>{d.env}</Badge>
-                  <span className="muted">{d.ok ? `${d.count} deployment${d.count === 1 ? "" : "s"} found` : `unreachable — ${d.error}`}</span>
+                  <span className="muted">
+                    {d.ok
+                      ? `${d.count} deployment${d.count === 1 ? "" : "s"} found`
+                      : `unreachable — ${d.error}`}
+                  </span>
                 </div>
               ))}
             </div>
@@ -73,14 +109,26 @@ export function PromotionsClient({ slug }: { slug: string }) {
         </Block>
       ) : (
         <div className="col gap-3">
-          {apps.map((a) => <AppRow key={a.app} slug={slug} app={a} envs={envs} namespace={ns} />)}
+          {apps.map((a) => (
+            <AppRow key={a.app} slug={slug} app={a} envs={envs} namespace={ns} />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function AppRow({ slug, app, envs, namespace }: { slug: string; app: AppVersions; envs: EnvCol[]; namespace: string }) {
+function AppRow({
+  slug,
+  app,
+  envs,
+  namespace,
+}: {
+  slug: string;
+  app: AppVersions;
+  envs: EnvCol[];
+  namespace: string;
+}) {
   const qc = useQueryClient();
   const fromEnvs = useMemo(() => envs.filter((e) => app.versions[e.key]), [envs, app]);
   const [from, setFrom] = useState("");
@@ -92,9 +140,18 @@ function AppRow({ slug, app, envs, namespace }: { slug: string; app: AppVersions
   const activeTo = to || toEnvs[0]?.key || "";
 
   const promote = useMutation({
-    mutationFn: () => api.post<{ ok: boolean; message: string }>(`/projects/${slug}/promotions`, { appName: app.app, fromEnvKey: activeFrom, toEnvKey: activeTo, namespace }),
+    mutationFn: () =>
+      api.post<{ ok: boolean; message: string }>(`/projects/${slug}/promotions`, {
+        appName: app.app,
+        fromEnvKey: activeFrom,
+        toEnvKey: activeTo,
+        namespace,
+      }),
     onMutate: () => setNote(null),
-    onSuccess: (r) => { setNote({ tone: "ok", text: r.message }); qc.invalidateQueries({ queryKey: ["p", slug, "approvals"] }); },
+    onSuccess: (r) => {
+      setNote({ tone: "ok", text: r.message });
+      qc.invalidateQueries({ queryKey: ["p", slug, "approvals"] });
+    },
     onError: (e) => setNote({ tone: "danger", text: apiErrorMessage(e) }),
   });
 
@@ -108,15 +165,29 @@ function AppRow({ slug, app, envs, namespace }: { slug: string; app: AppVersions
             <div className="row gap-2 wrap">
               {envs.map((e) => {
                 const v = app.versions[e.key];
-                const title = v ? v.image : !e.connected ? "No cluster connected to this environment" : "Not deployed here";
+                const title = v
+                  ? v.image
+                  : !e.connected
+                    ? "No cluster connected to this environment"
+                    : "Not deployed here";
                 return (
-                  <span key={e.key} className="row gap-1" style={{ alignItems: "center", fontSize: 12 }} title={title}>
-                    <span className="muted">{e.name}{e.isProduction ? " (prod)" : ""}:</span>
-                    {v
-                      ? <Badge tone={e.isProduction ? "warn" : "ok"}>{tagOf(v.image)}</Badge>
-                      : !e.connected
-                        ? <span className="faint">no cluster</span>
-                        : <span className="faint">—</span>}
+                  <span
+                    key={e.key}
+                    className="row gap-1"
+                    style={{ alignItems: "center", fontSize: 12 }}
+                    title={title}
+                  >
+                    <span className="muted">
+                      {e.name}
+                      {e.isProduction ? " (prod)" : ""}:
+                    </span>
+                    {v ? (
+                      <Badge tone={e.isProduction ? "warn" : "ok"}>{tagOf(v.image)}</Badge>
+                    ) : !e.connected ? (
+                      <span className="faint">no cluster</span>
+                    ) : (
+                      <span className="faint">—</span>
+                    )}
                   </span>
                 );
               })}
@@ -127,25 +198,47 @@ function AppRow({ slug, app, envs, namespace }: { slug: string; app: AppVersions
           <div className="row gap-2 wrap" style={{ alignItems: "flex-end" }}>
             <div style={{ minWidth: 150 }}>
               <Field label="From">
-                <Select value={activeFrom} onValueChange={setFrom} ariaLabel="From env"
-                  options={fromEnvs.map((e) => ({ value: e.key, label: `${e.name} · ${tagOf(app.versions[e.key]!.image)}` }))} />
+                <Select
+                  value={activeFrom}
+                  onValueChange={setFrom}
+                  ariaLabel="From env"
+                  options={fromEnvs.map((e) => ({
+                    value: e.key,
+                    label: `${e.name} · ${tagOf(app.versions[e.key]!.image)}`,
+                  }))}
+                />
               </Field>
             </div>
             <span style={{ paddingBottom: 8, opacity: 0.6 }}>→</span>
             <div style={{ minWidth: 150 }}>
               <Field label="To">
-                <Select value={activeTo} onValueChange={setTo} ariaLabel="To env"
-                  options={toEnvs.map((e) => ({ value: e.key, label: `${e.name}${e.isProduction ? " (prod)" : ""}${e.connected ? "" : " · no cluster"}` }))} />
+                <Select
+                  value={activeTo}
+                  onValueChange={setTo}
+                  ariaLabel="To env"
+                  options={toEnvs.map((e) => ({
+                    value: e.key,
+                    label: `${e.name}${e.isProduction ? " (prod)" : ""}${e.connected ? "" : " · no cluster"}`,
+                  }))}
+                />
               </Field>
             </div>
-            <Btn variant="primary" icon="rocket" loading={promote.isPending}
+            <Btn
+              variant="primary"
+              icon="rocket"
+              loading={promote.isPending}
               disabled={!activeFrom || !activeTo || toEnvs.length === 0 || promote.isPending}
-              onClick={() => promote.mutate()}>
+              onClick={() => promote.mutate()}
+            >
               Promote
             </Btn>
           </div>
 
-          {note && <Badge tone={note.tone} icon={note.tone === "danger" ? "alert" : "check"}>{note.text}</Badge>}
+          {note && (
+            <Badge tone={note.tone} icon={note.tone === "danger" ? "alert" : "check"}>
+              {note.text}
+            </Badge>
+          )}
         </div>
       </Block.Body>
     </Block>

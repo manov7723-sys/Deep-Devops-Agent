@@ -5,7 +5,9 @@ import { getKubeconfigForEnv } from "@/lib/runner/creds";
 import { runStage } from "@/lib/runner/exec";
 import { FALLBACK_RESOURCES, type ApiResource } from "@/lib/devops/manifest-templates";
 
-const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].filter(Boolean).join(":");
+const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+  .filter(Boolean)
+  .join(":");
 
 /**
  * Parse `kubectl api-resources --no-headers` output. Default columns are:
@@ -54,7 +56,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
 
   const kcfg = await getKubeconfigForEnv(env.id);
   if (!kcfg.ok) {
-    return NextResponse.json({ ok: true, source: "builtin", resources: FALLBACK_RESOURCES, note: kcfg.message });
+    return NextResponse.json({
+      ok: true,
+      source: "builtin",
+      resources: FALLBACK_RESOURCES,
+      note: kcfg.message,
+    });
   }
   try {
     const res = await runStage({

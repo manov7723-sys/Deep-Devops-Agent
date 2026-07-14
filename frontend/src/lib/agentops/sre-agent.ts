@@ -11,7 +11,11 @@
  * wrong and the fix" — driven by the agent, not fixed backend code.
  */
 import Anthropic from "@anthropic-ai/sdk";
-import type { MessageParam, ContentBlockParam, ToolResultBlockParam } from "@anthropic-ai/sdk/resources/messages";
+import type {
+  MessageParam,
+  ContentBlockParam,
+  ToolResultBlockParam,
+} from "@anthropic-ai/sdk/resources/messages";
 import { prisma } from "@/lib/db/prisma";
 import { ALL_TOOLS, executeTool, toAnthropicTools } from "@/lib/agent/tools";
 import { createApproval } from "@/lib/devops/approvals";
@@ -51,8 +55,7 @@ export type Diagnosis = {
   confidence: "low" | "medium" | "high";
 };
 export type TriageResult =
-  | { ok: true; diagnosis: Diagnosis; toolsUsed: string[] }
-  | { ok: false; error: string };
+  { ok: true; diagnosis: Diagnosis; toolsUsed: string[] } | { ok: false; error: string };
 
 const SYSTEM = `You are an SRE incident-response agent for a DevOps platform used by NON-DevOps users.
 You are given ONE alert. Investigate it with the read-only tools, then explain plainly what is wrong and how to fix it.
@@ -127,9 +130,18 @@ export async function triageAlert(projectId: string, alertId: string): Promise<T
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let resp;
     try {
-      resp = await anthropic.messages.create({ model: MODEL, max_tokens: 1800, system: SYSTEM, tools, messages });
+      resp = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 1800,
+        system: SYSTEM,
+        tools,
+        messages,
+      });
     } catch (e) {
-      return { ok: false, error: `Investigation LLM error: ${e instanceof Error ? e.message : "unknown"}` };
+      return {
+        ok: false,
+        error: `Investigation LLM error: ${e instanceof Error ? e.message : "unknown"}`,
+      };
     }
 
     messages.push({ role: "assistant", content: resp.content });
@@ -160,7 +172,10 @@ export async function triageAlert(projectId: string, alertId: string): Promise<T
     if (!diagnosis) return { ok: false, error: "The agent didn't return a parseable diagnosis." };
     // Persist so the UI can show it without the user clicking (auto-triage flow).
     await prisma.alert
-      .update({ where: { id: alertId }, data: { aiDiagnosis: diagnosis as object, aiDiagnosedAt: new Date() } })
+      .update({
+        where: { id: alertId },
+        data: { aiDiagnosis: diagnosis as object, aiDiagnosedAt: new Date() },
+      })
       .catch(() => {});
     return { ok: true, diagnosis, toolsUsed };
   }
@@ -178,11 +193,17 @@ export type TriageProposeResult =
  * agentic loop: alert → agent investigates → proposes fixes → human approves →
  * (Phase: execute). Steps marked needsApproval=false are advisory only.
  */
-export async function triageAndPropose(projectId: string, alertId: string): Promise<TriageProposeResult> {
+export async function triageAndPropose(
+  projectId: string,
+  alertId: string,
+): Promise<TriageProposeResult> {
   const res = await triageAlert(projectId, alertId);
   if (!res.ok) return res;
 
-  const alert = await prisma.alert.findFirst({ where: { id: alertId, projectId }, select: { envId: true, title: true } });
+  const alert = await prisma.alert.findFirst({
+    where: { id: alertId, projectId },
+    select: { envId: true, title: true },
+  });
   let approvalsCreated = 0;
   if (alert) {
     for (const step of res.diagnosis.remediation) {
@@ -192,7 +213,11 @@ export async function triageAndPropose(projectId: string, alertId: string): Prom
           projectId,
           envId: alert.envId,
           title: `SRE fix: ${step.action}`.slice(0, 200),
-          summary: `Proposed by the SRE agent for alert "${alert.title}".\nRoot cause: ${res.diagnosis.rootCause}`.slice(0, 1000),
+          summary:
+            `Proposed by the SRE agent for alert "${alert.title}".\nRoot cause: ${res.diagnosis.rootCause}`.slice(
+              0,
+              1000,
+            ),
           changesSummary: step.command ? step.command.slice(0, 200) : `${step.risk} risk`,
           risk: step.risk,
           diff: [

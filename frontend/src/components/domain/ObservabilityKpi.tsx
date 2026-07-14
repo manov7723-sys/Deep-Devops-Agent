@@ -18,11 +18,21 @@ export function ObservabilityKpi({ kpi }: ObservabilityKpiProps) {
   return (
     <div className="card card-pad col gap-3">
       <div className="row between">
-        <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{kpi.name}</span>
+        <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>
+          {kpi.name}
+        </span>
         <StatusDot tone={kpi.tone} />
       </div>
-      <span style={{ fontSize: 26, fontWeight: 800 }} className="tnum">{kpi.value}</span>
-      <Spark data={kpi.data} width={200} height={40} tone={TONE_VAR[kpi.tone]} ariaLabel={`${kpi.name} trend`} />
+      <span style={{ fontSize: 26, fontWeight: 800 }} className="tnum">
+        {kpi.value}
+      </span>
+      <Spark
+        data={kpi.data}
+        width={200}
+        height={40}
+        tone={TONE_VAR[kpi.tone]}
+        ariaLabel={`${kpi.name} trend`}
+      />
     </div>
   );
 }

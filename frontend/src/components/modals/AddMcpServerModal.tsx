@@ -48,10 +48,12 @@ export function AddMcpServerModal({ open, onOpenChange, preset }: AddMcpServerMo
       description: string;
       authType: "none" | "oauth" | "credential";
     }) => {
-      const res = await api.post<{ ok: boolean; connector?: unknown; message?: string; code?: string }>(
-        "/admin/mcp",
-        body,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        connector?: unknown;
+        message?: string;
+        code?: string;
+      }>("/admin/mcp", body);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not connect server.");
       return res.connector;
     },
@@ -88,7 +90,9 @@ export function AddMcpServerModal({ open, onOpenChange, preset }: AddMcpServerMo
       description="Register a Model Context Protocol server agents can call."
       footer={
         <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
+          <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Btn>
           <Btn
             variant="primary"
             icon="plus"
@@ -111,7 +115,11 @@ export function AddMcpServerModal({ open, onOpenChange, preset }: AddMcpServerMo
           name="name"
           validators={{
             onChange: ({ value }) =>
-              !value.trim() ? "Name is required" : value.length > 80 ? "Max 80 characters" : undefined,
+              !value.trim()
+                ? "Name is required"
+                : value.length > 80
+                  ? "Max 80 characters"
+                  : undefined,
           }}
         >
           {(field) => (
@@ -131,7 +139,11 @@ export function AddMcpServerModal({ open, onOpenChange, preset }: AddMcpServerMo
           name="description"
           validators={{
             onChange: ({ value }) =>
-              !value.trim() ? "Description is required" : value.length > 280 ? "Max 280 characters" : undefined,
+              !value.trim()
+                ? "Description is required"
+                : value.length > 280
+                  ? "Max 280 characters"
+                  : undefined,
           }}
         >
           {(field) => (

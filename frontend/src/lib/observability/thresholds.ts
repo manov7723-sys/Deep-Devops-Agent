@@ -35,21 +35,37 @@ function isMetric(m: string): m is MetricKey {
 }
 
 /** Effective thresholds for an env = defaults overlaid with any user rows. */
-export async function getEnvThresholds(envId: string): Promise<Record<MetricKey, ResolvedThreshold>> {
+export async function getEnvThresholds(
+  envId: string,
+): Promise<Record<MetricKey, ResolvedThreshold>> {
   const rows = await prisma.alertThreshold.findMany({ where: { envId } });
   const byMetric = new Map(rows.filter((r) => isMetric(r.metric)).map((r) => [r.metric, r]));
   const out = {} as Record<MetricKey, ResolvedThreshold>;
   for (const m of METRIC_KEYS) {
     const r = byMetric.get(m);
     out[m] = r
-      ? { metric: m, percent: r.percent, severity: r.severity, enabled: r.enabled, isDefault: false }
-      : { metric: m, percent: DEFAULT_THRESHOLDS[m].percent, severity: DEFAULT_THRESHOLDS[m].severity, enabled: true, isDefault: true };
+      ? {
+          metric: m,
+          percent: r.percent,
+          severity: r.severity,
+          enabled: r.enabled,
+          isDefault: false,
+        }
+      : {
+          metric: m,
+          percent: DEFAULT_THRESHOLDS[m].percent,
+          severity: DEFAULT_THRESHOLDS[m].severity,
+          enabled: true,
+          isDefault: true,
+        };
   }
   return out;
 }
 
 /** Just the percent overrides (enabled only) — convenient for cloud alarm setup. */
-export async function getEnvThresholdPercents(envId: string): Promise<Partial<Record<MetricKey, number>>> {
+export async function getEnvThresholdPercents(
+  envId: string,
+): Promise<Partial<Record<MetricKey, number>>> {
   const all = await getEnvThresholds(envId);
   const out: Partial<Record<MetricKey, number>> = {};
   for (const m of METRIC_KEYS) if (all[m].enabled) out[m] = all[m].percent;
@@ -77,7 +93,13 @@ export async function upsertThreshold(
     create: { projectId, envId, metric, percent: p, severity, enabled },
     update: { percent: p, severity, enabled },
   });
-  return { metric, percent: row.percent, severity: row.severity, enabled: row.enabled, isDefault: false };
+  return {
+    metric,
+    percent: row.percent,
+    severity: row.severity,
+    enabled: row.enabled,
+    isDefault: false,
+  };
 }
 
 /** Remove a rule → the metric reverts to its default. */

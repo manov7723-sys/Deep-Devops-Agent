@@ -16,10 +16,7 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
 export async function POST(req: Request) {
   const sess = await getPendingSession();
   if (!sess) {
-    return NextResponse.json(
-      { ok: false, code: "no_pending_session" },
-      { status: 401 },
-    );
+    return NextResponse.json({ ok: false, code: "no_pending_session" }, { status: 401 });
   }
   if (!sess.forcedTotpSetup) {
     return NextResponse.json(

@@ -12,11 +12,7 @@
  *   read:  GET   {addr}/v1/{mount}/data/{path}  -> { data: { data: {...} } }
  *   del:   DELETE{addr}/v1/{mount}/metadata/{path}   (removes all versions)
  */
-import {
-  resolveVaultConn,
-  resolveVaultConnForProvider,
-  type VaultConn,
-} from "./vault-config";
+import { resolveVaultConn, resolveVaultConnForProvider, type VaultConn } from "./vault-config";
 
 export type AwsKeys = {
   accessKeyId: string;
@@ -73,13 +69,16 @@ export async function pingVault(conn: VaultConn): Promise<{ reachable: boolean; 
     // which is unauthenticated and would pass even with a bad token).
     const res = await vaultFetch(conn, "GET", "auth/token/lookup-self");
     if (res.status === 200) return { reachable: true };
-    if (res.status === 403) return { reachable: false, error: "Token rejected (403) — check the Vault token." };
-    if (res.status === 503) return { reachable: false, error: "Vault is sealed (503) — unseal it first." };
+    if (res.status === 403)
+      return { reachable: false, error: "Token rejected (403) — check the Vault token." };
+    if (res.status === 503)
+      return { reachable: false, error: "Vault is sealed (503) — unseal it first." };
     if (res.status === 501) return { reachable: false, error: "Vault is not initialised (501)." };
     return { reachable: false, error: `Vault returned ${res.status}.` };
   } catch (e) {
     // Network-level failure — almost always Vault isn't running / not reachable.
-    const msg = e instanceof Error ? (e.cause ? `${e.message} (${String(e.cause)})` : e.message) : String(e);
+    const msg =
+      e instanceof Error ? (e.cause ? `${e.message} (${String(e.cause)})` : e.message) : String(e);
     return {
       reachable: false,
       error: `Could not reach Vault at ${conn.addr} — is it running and reachable from the server? [${msg}]`,

@@ -41,7 +41,11 @@ function Title({ children, sub }: { children: ReactNode; sub?: ReactNode }) {
   return (
     <div className="col" style={{ gap: 2 }}>
       <span className="card-title">{children}</span>
-      {sub && <span className="faint" style={{ fontSize: 12 }}>{sub}</span>}
+      {sub && (
+        <span className="faint" style={{ fontSize: 12 }}>
+          {sub}
+        </span>
+      )}
     </div>
   );
 }

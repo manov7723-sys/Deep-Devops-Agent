@@ -37,11 +37,22 @@ export async function commitFiles(
   const base = `${API}/repos/${gh.repoFullName}`;
   try {
     // 1 — current branch head + its tree.
-    const refRes = await fetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, { headers: h, cache: "no-store" });
-    if (!refRes.ok) return { ok: false, error: `Could not read branch ${branch}: ${refRes.status} ${(await refRes.text()).slice(0, 160)}` };
+    const refRes = await fetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, {
+      headers: h,
+      cache: "no-store",
+    });
+    if (!refRes.ok)
+      return {
+        ok: false,
+        error: `Could not read branch ${branch}: ${refRes.status} ${(await refRes.text()).slice(0, 160)}`,
+      };
     const baseSha = ((await refRes.json()) as { object: { sha: string } }).object.sha;
-    const commitRes = await fetch(`${base}/git/commits/${baseSha}`, { headers: h, cache: "no-store" });
-    if (!commitRes.ok) return { ok: false, error: `Could not read base commit: ${commitRes.status}` };
+    const commitRes = await fetch(`${base}/git/commits/${baseSha}`, {
+      headers: h,
+      cache: "no-store",
+    });
+    if (!commitRes.ok)
+      return { ok: false, error: `Could not read base commit: ${commitRes.status}` };
     const baseTreeSha = ((await commitRes.json()) as { tree: { sha: string } }).tree.sha;
 
     // 2 — blob per file.
@@ -50,39 +61,54 @@ export async function commitFiles(
       const blobRes = await fetch(`${base}/git/blobs`, {
         method: "POST",
         headers: h,
-        body: JSON.stringify({ content: Buffer.from(f.content, "utf8").toString("base64"), encoding: "base64" }),
+        body: JSON.stringify({
+          content: Buffer.from(f.content, "utf8").toString("base64"),
+          encoding: "base64",
+        }),
       });
-      if (!blobRes.ok) return { ok: false, error: `Blob create failed for ${f.path}: ${blobRes.status}` };
+      if (!blobRes.ok)
+        return { ok: false, error: `Blob create failed for ${f.path}: ${blobRes.status}` };
       const blobSha = ((await blobRes.json()) as { sha: string }).sha;
       tree.push({ path: f.path.replace(/^\/+/, ""), mode: "100644", type: "blob", sha: blobSha });
     }
 
     // 3 — tree, 4 — commit, 5 — move ref.
     const treeRes = await fetch(`${base}/git/trees`, {
-      method: "POST", headers: h,
+      method: "POST",
+      headers: h,
       body: JSON.stringify({ base_tree: baseTreeSha, tree }),
     });
     if (!treeRes.ok) return { ok: false, error: `Tree create failed: ${treeRes.status}` };
     const newTreeSha = ((await treeRes.json()) as { sha: string }).sha;
 
     const newCommitRes = await fetch(`${base}/git/commits`, {
-      method: "POST", headers: h,
+      method: "POST",
+      headers: h,
       body: JSON.stringify({ message, tree: newTreeSha, parents: [baseSha] }),
     });
-    if (!newCommitRes.ok) return { ok: false, error: `Commit create failed: ${newCommitRes.status}` };
+    if (!newCommitRes.ok)
+      return { ok: false, error: `Commit create failed: ${newCommitRes.status}` };
     const newCommitSha = ((await newCommitRes.json()) as { sha: string }).sha;
 
     const moveRes = await fetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, {
-      method: "PATCH", headers: h,
+      method: "PATCH",
+      headers: h,
       body: JSON.stringify({ sha: newCommitSha, force: false }),
     });
     if (!moveRes.ok) {
       const body = await moveRes.text();
       // 422 with "workflow" in the message = missing `workflow` OAuth scope.
       if (body.includes("workflow")) {
-        return { ok: false, error: "GitHub rejected the workflow file — the connection is missing the `workflow` scope. Reconnect GitHub to grant it." };
+        return {
+          ok: false,
+          error:
+            "GitHub rejected the workflow file — the connection is missing the `workflow` scope. Reconnect GitHub to grant it.",
+        };
       }
-      return { ok: false, error: `Could not update ${branch}: ${moveRes.status} ${body.slice(0, 160)}` };
+      return {
+        ok: false,
+        error: `Could not update ${branch}: ${moveRes.status} ${body.slice(0, 160)}`,
+      };
     }
     return { ok: true, sha: newCommitSha };
   } catch (err) {
@@ -91,13 +117,20 @@ export async function commitFiles(
 }
 
 /** Fire workflow_dispatch (best-effort; ignored if the workflow lacks the trigger). */
-export async function dispatchWorkflow(gh: GH, workflowFileName: string, ref: string): Promise<void> {
+export async function dispatchWorkflow(
+  gh: GH,
+  workflowFileName: string,
+  ref: string,
+): Promise<void> {
   try {
-    await fetch(`${API}/repos/${gh.repoFullName}/actions/workflows/${encodeURIComponent(workflowFileName)}/dispatches`, {
-      method: "POST",
-      headers: headers(gh.token),
-      body: JSON.stringify({ ref }),
-    });
+    await fetch(
+      `${API}/repos/${gh.repoFullName}/actions/workflows/${encodeURIComponent(workflowFileName)}/dispatches`,
+      {
+        method: "POST",
+        headers: headers(gh.token),
+        body: JSON.stringify({ ref }),
+      },
+    );
   } catch {
     /* best-effort — the push trigger usually starts the run anyway */
   }
@@ -106,15 +139,36 @@ export async function dispatchWorkflow(gh: GH, workflowFileName: string, ref: st
 export type RunRef = { id: number; url: string; status: string; conclusion: string | null };
 
 /** Find the most recent Actions run for a workflow on a branch (optionally matching a commit sha). */
-export async function findRun(gh: GH, workflowFileName: string, branch: string, headSha?: string): Promise<RunRef | null> {
+export async function findRun(
+  gh: GH,
+  workflowFileName: string,
+  branch: string,
+  headSha?: string,
+): Promise<RunRef | null> {
   try {
     const url = `${API}/repos/${gh.repoFullName}/actions/workflows/${encodeURIComponent(workflowFileName)}/runs?branch=${encodeURIComponent(branch)}&per_page=10`;
     const res = await fetch(url, { headers: headers(gh.token), cache: "no-store" });
     if (!res.ok) return null;
-    const runs = ((await res.json()) as { workflow_runs?: Array<{ id: number; html_url: string; status: string; conclusion: string | null; head_sha: string }> }).workflow_runs ?? [];
-    const match = headSha ? runs.find((r) => r.head_sha === headSha) ?? runs[0] : runs[0];
+    const runs =
+      (
+        (await res.json()) as {
+          workflow_runs?: Array<{
+            id: number;
+            html_url: string;
+            status: string;
+            conclusion: string | null;
+            head_sha: string;
+          }>;
+        }
+      ).workflow_runs ?? [];
+    const match = headSha ? (runs.find((r) => r.head_sha === headSha) ?? runs[0]) : runs[0];
     if (!match) return null;
-    return { id: match.id, url: match.html_url, status: match.status, conclusion: match.conclusion };
+    return {
+      id: match.id,
+      url: match.html_url,
+      status: match.status,
+      conclusion: match.conclusion,
+    };
   } catch {
     return null;
   }
@@ -141,16 +195,36 @@ export async function getRunStatus(gh: GH, runId: string | number): Promise<RunS
     const base = `${API}/repos/${gh.repoFullName}`;
     const runRes = await fetch(`${base}/actions/runs/${runId}`, { headers: h, cache: "no-store" });
     if (!runRes.ok) return null;
-    const run = (await runRes.json()) as { status: string; conclusion: string | null; html_url: string };
-    const jobsRes = await fetch(`${base}/actions/runs/${runId}/jobs`, { headers: h, cache: "no-store" });
+    const run = (await runRes.json()) as {
+      status: string;
+      conclusion: string | null;
+      html_url: string;
+    };
+    const jobsRes = await fetch(`${base}/actions/runs/${runId}/jobs`, {
+      headers: h,
+      cache: "no-store",
+    });
     const jobs = jobsRes.ok
-      ? ((await jobsRes.json()) as { jobs?: Array<{ name: string; status: string; conclusion: string | null; steps?: Array<{ name: string; status: string; conclusion: string | null }> }> }).jobs ?? []
+      ? ((
+          (await jobsRes.json()) as {
+            jobs?: Array<{
+              name: string;
+              status: string;
+              conclusion: string | null;
+              steps?: Array<{ name: string; status: string; conclusion: string | null }>;
+            }>;
+          }
+        ).jobs ?? [])
       : [];
     const stages: StageStatus[] = jobs.map((j) => ({
       name: j.name,
       status: j.status,
       conclusion: j.conclusion,
-      steps: (j.steps ?? []).map((s) => ({ name: s.name, status: s.status, conclusion: s.conclusion })),
+      steps: (j.steps ?? []).map((s) => ({
+        name: s.name,
+        status: s.status,
+        conclusion: s.conclusion,
+      })),
     }));
     return { status: run.status, conclusion: run.conclusion, url: run.html_url, stages };
   } catch {
@@ -163,12 +237,21 @@ export async function getFailedJobLog(gh: GH, runId: string | number): Promise<s
   try {
     const h = headers(gh.token);
     const base = `${API}/repos/${gh.repoFullName}`;
-    const jobsRes = await fetch(`${base}/actions/runs/${runId}/jobs`, { headers: h, cache: "no-store" });
+    const jobsRes = await fetch(`${base}/actions/runs/${runId}/jobs`, {
+      headers: h,
+      cache: "no-store",
+    });
     if (!jobsRes.ok) return null;
-    const jobs = ((await jobsRes.json()) as { jobs?: Array<{ id: number; conclusion: string | null }> }).jobs ?? [];
+    const jobs =
+      ((await jobsRes.json()) as { jobs?: Array<{ id: number; conclusion: string | null }> })
+        .jobs ?? [];
     const failed = jobs.find((j) => j.conclusion === "failure");
     if (!failed) return null;
-    const logRes = await fetch(`${base}/actions/jobs/${failed.id}/logs`, { headers: h, redirect: "follow", cache: "no-store" });
+    const logRes = await fetch(`${base}/actions/jobs/${failed.id}/logs`, {
+      headers: h,
+      redirect: "follow",
+      cache: "no-store",
+    });
     if (!logRes.ok) return null;
     const text = await logRes.text();
     // Keep the tail — that's where the error is.

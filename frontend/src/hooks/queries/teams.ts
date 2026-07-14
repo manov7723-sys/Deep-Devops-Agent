@@ -49,11 +49,17 @@ void ({} as SeedTeamMember | undefined);
 export function useInviteMember() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { email: string; role: "developer" | "viewer"; projectIds: string[] }) => {
-      const res = await api.post<{ ok: boolean; member?: TeamMember; message?: string; code?: string }>(
-        "/teams",
-        input,
-      );
+    mutationFn: async (input: {
+      email: string;
+      role: "developer" | "viewer";
+      projectIds: string[];
+    }) => {
+      const res = await api.post<{
+        ok: boolean;
+        member?: TeamMember;
+        message?: string;
+        code?: string;
+      }>("/teams", input);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not send invite.");
       return res.member;
     },
@@ -92,10 +98,12 @@ export function useResendInvitation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { projectSlug: string; invitationId: string }) => {
-      const res = await api.post<{ ok: boolean; expiresAt?: string; message?: string; code?: string }>(
-        `/projects/${input.projectSlug}/invitations/${input.invitationId}/resend`,
-        {},
-      );
+      const res = await api.post<{
+        ok: boolean;
+        expiresAt?: string;
+        message?: string;
+        code?: string;
+      }>(`/projects/${input.projectSlug}/invitations/${input.invitationId}/resend`, {});
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not resend invitation.");
       return res;
     },

@@ -37,7 +37,8 @@ export const generateK8sManifestTool: Tool<Input, Output> = {
       namespaced: { type: "boolean", description: "Whether the kind is namespaced. Optional." },
       values: {
         type: "object",
-        description: 'Field values, e.g. {"name":"web","namespace":"default","image":"nginx:1.27","replicas":"2"}.',
+        description:
+          'Field values, e.g. {"name":"web","namespace":"default","image":"nginx:1.27","replicas":"2"}.',
         additionalProperties: { type: "string" },
       },
     },

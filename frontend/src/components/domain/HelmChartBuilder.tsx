@@ -73,7 +73,9 @@ export function HelmChartBuilder({ slug }: { slug: string }) {
     if (!chartDirTouched) setChartDir(`charts/${name || "<chart>"}`);
   }, [name, chartDirTouched]);
 
-  const missing = HELM_FIELDS.filter((f) => f.required && !(values[f.name] ?? "").trim()).map((f) => f.label);
+  const missing = HELM_FIELDS.filter((f) => f.required && !(values[f.name] ?? "").trim()).map(
+    (f) => f.label,
+  );
   const canGenerate = nameOk && missing.length === 0;
 
   async function generateAndPush() {
@@ -133,132 +135,238 @@ export function HelmChartBuilder({ slug }: { slug: string }) {
       </Block.Header>
 
       <Block.Body>
-      <div className="col gap-4">
-        {/* Fields */}
-        <div className="row gap-3 wrap">
-          {HELM_FIELDS.map((f) => (
-            <div key={f.name} style={{ minWidth: f.type === "keyvalue" ? 360 : 220, flex: f.type === "keyvalue" ? "1 1 360px" : "0 1 240px" }}>
-              <HelmFieldInput field={f} value={values[f.name] ?? ""} onChange={(v) => setVal(f.name, v)} />
-            </div>
-          ))}
-        </div>
-
-        {!nameOk && name && <span style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }}>Invalid chart name (lowercase letters, digits, hyphens; start with a letter).</span>}
-
-        {/* Chart tree preview (editable per file) */}
-        <Field
-          label="Chart files (editable)"
-          hint={activeEdited ? "You've edited this file — form changes won't overwrite it. Reset to re-sync." : "Production-style chart. Edit any file; it commits/deploys exactly as shown."}
-        >
-          <div className="col gap-2">
-            <div className="row gap-2 wrap">
-              {filePaths.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setActiveFile(p)}
-                  className="mono"
-                  style={{
-                    fontSize: 11.5,
-                    padding: "3px 8px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    border: "1px solid var(--border)",
-                    background: p === activeFile ? "var(--accent-soft, var(--accent, #5b8cff)22)" : "var(--surface-2, #0000000a)",
-                    fontWeight: p === activeFile ? 700 : 400,
-                  }}
-                >
-                  {p}{p in edits ? " •" : ""}
-                </button>
-              ))}
-            </div>
-            <Textarea
-              className="mono"
-              rows={18}
-              value={activeContent}
-              spellCheck={false}
-              onChange={(e) => setEdits((p) => ({ ...p, [activeFile]: e.target.value }))}
-              style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: "pre", overflowWrap: "normal", overflowX: "auto" }}
-            />
-            {activeEdited && (
-              <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Btn variant="ghost" size="sm" icon="refresh" onClick={() => setEdits((p) => { const n = { ...p }; delete n[activeFile]; return n; })}>
-                  Reset this file
-                </Btn>
-                <span className="faint" style={{ fontSize: 11.5 }}>Discards manual edits to {activeFile}.</span>
+        <div className="col gap-4">
+          {/* Fields */}
+          <div className="row gap-3 wrap">
+            {HELM_FIELDS.map((f) => (
+              <div
+                key={f.name}
+                style={{
+                  minWidth: f.type === "keyvalue" ? 360 : 220,
+                  flex: f.type === "keyvalue" ? "1 1 360px" : "0 1 240px",
+                }}
+              >
+                <HelmFieldInput
+                  field={f}
+                  value={values[f.name] ?? ""}
+                  onChange={(v) => setVal(f.name, v)}
+                />
               </div>
-            )}
+            ))}
           </div>
-        </Field>
 
-        {/* Step 1 — generate & push to GitHub */}
-        <div className="col gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-          <span className="text-sm" style={{ fontWeight: 600 }}>1 · Generate &amp; push to GitHub</span>
-          {!repos || repos.length === 0 ? (
-            <span className="muted" style={{ fontSize: 13 }}>Attach a repo to this project first (CI/CD &amp; Repos tab).</span>
-          ) : (
-            <>
-              <div className="row gap-3 wrap">
-                <div style={{ minWidth: 240 }}>
-                  <Field label="Repository" required>
-                    <Select value={repoFullName} onValueChange={setRepoFullName} ariaLabel="Repository"
-                      options={repos.map((r) => ({ value: r.fullName, label: r.fullName }))} />
-                  </Field>
-                </div>
-                <div style={{ minWidth: 240, flex: "1 1 280px" }}>
-                  <Field label="Chart directory" required hint="Where the chart tree is committed.">
-                    <Input className="mono" value={chartDir}
-                      onChange={(e) => { setChartDir(e.target.value); setChartDirTouched(true); }}
-                      placeholder="charts/my-app" />
-                  </Field>
-                </div>
+          {!nameOk && name && (
+            <span style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }}>
+              Invalid chart name (lowercase letters, digits, hyphens; start with a letter).
+            </span>
+          )}
+
+          {/* Chart tree preview (editable per file) */}
+          <Field
+            label="Chart files (editable)"
+            hint={
+              activeEdited
+                ? "You've edited this file — form changes won't overwrite it. Reset to re-sync."
+                : "Production-style chart. Edit any file; it commits/deploys exactly as shown."
+            }
+          >
+            <div className="col gap-2">
+              <div className="row gap-2 wrap">
+                {filePaths.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setActiveFile(p)}
+                    className="mono"
+                    style={{
+                      fontSize: 11.5,
+                      padding: "3px 8px",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      border: "1px solid var(--border)",
+                      background:
+                        p === activeFile
+                          ? "var(--accent-soft, var(--accent, #5b8cff)22)"
+                          : "var(--surface-2, #0000000a)",
+                      fontWeight: p === activeFile ? 700 : 400,
+                    }}
+                  >
+                    {p}
+                    {p in edits ? " •" : ""}
+                  </button>
+                ))}
               </div>
-              {missing.length > 0 && (
-                <span style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }}>
-                  Fill required field{missing.length > 1 ? "s" : ""}: {missing.join(", ")}.
-                </span>
+              <Textarea
+                className="mono"
+                rows={18}
+                value={activeContent}
+                spellCheck={false}
+                onChange={(e) => setEdits((p) => ({ ...p, [activeFile]: e.target.value }))}
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre",
+                  overflowWrap: "normal",
+                  overflowX: "auto",
+                }}
+              />
+              {activeEdited && (
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  <Btn
+                    variant="ghost"
+                    size="sm"
+                    icon="refresh"
+                    onClick={() =>
+                      setEdits((p) => {
+                        const n = { ...p };
+                        delete n[activeFile];
+                        return n;
+                      })
+                    }
+                  >
+                    Reset this file
+                  </Btn>
+                  <span className="faint" style={{ fontSize: 11.5 }}>
+                    Discards manual edits to {activeFile}.
+                  </span>
+                </div>
               )}
-              <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Btn variant="primary" icon="github" loading={push.isPending} disabled={!canGenerate || !repoFullName || !chartDir.trim() || push.isPending} onClick={generateAndPush}>
-                  {pushed ? "Regenerate & push" : `Generate & push (${chart.fileCount} files)`}
-                </Btn>
-                {pushed && (
-                  <span style={{ fontSize: 13, color: "var(--ok)" }}>
-                    ✓ Pushed to {repoFullName} ({pushed.branch}).{" "}
-                    {pushed.url && <a href={pushed.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>View PR</a>}
+            </div>
+          </Field>
+
+          {/* Step 1 — generate & push to GitHub */}
+          <div
+            className="col gap-3"
+            style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}
+          >
+            <span className="text-sm" style={{ fontWeight: 600 }}>
+              1 · Generate &amp; push to GitHub
+            </span>
+            {!repos || repos.length === 0 ? (
+              <span className="muted" style={{ fontSize: 13 }}>
+                Attach a repo to this project first (CI/CD &amp; Repos tab).
+              </span>
+            ) : (
+              <>
+                <div className="row gap-3 wrap">
+                  <div style={{ minWidth: 240 }}>
+                    <Field label="Repository" required>
+                      <Select
+                        value={repoFullName}
+                        onValueChange={setRepoFullName}
+                        ariaLabel="Repository"
+                        options={repos.map((r) => ({ value: r.fullName, label: r.fullName }))}
+                      />
+                    </Field>
+                  </div>
+                  <div style={{ minWidth: 240, flex: "1 1 280px" }}>
+                    <Field
+                      label="Chart directory"
+                      required
+                      hint="Where the chart tree is committed."
+                    >
+                      <Input
+                        className="mono"
+                        value={chartDir}
+                        onChange={(e) => {
+                          setChartDir(e.target.value);
+                          setChartDirTouched(true);
+                        }}
+                        placeholder="charts/my-app"
+                      />
+                    </Field>
+                  </div>
+                </div>
+                {missing.length > 0 && (
+                  <span style={{ fontSize: 12.5, color: "var(--warn, #b8860b)" }}>
+                    Fill required field{missing.length > 1 ? "s" : ""}: {missing.join(", ")}.
                   </span>
                 )}
-              </div>
-            </>
-          )}
-        </div>
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  <Btn
+                    variant="primary"
+                    icon="github"
+                    loading={push.isPending}
+                    disabled={!canGenerate || !repoFullName || !chartDir.trim() || push.isPending}
+                    onClick={generateAndPush}
+                  >
+                    {pushed ? "Regenerate & push" : `Generate & push (${chart.fileCount} files)`}
+                  </Btn>
+                  {pushed && (
+                    <span style={{ fontSize: 13, color: "var(--ok)" }}>
+                      ✓ Pushed to {repoFullName} ({pushed.branch}).{" "}
+                      {pushed.url && (
+                        <a
+                          href={pushed.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "var(--accent)" }}
+                        >
+                          View PR
+                        </a>
+                      )}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
 
-        {/* Step 2 — deploy */}
-        <div className="col gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-          <span className="text-sm" style={{ fontWeight: 600 }}>2 · Deploy to a cluster</span>
-          {!envs || envs.length === 0 ? (
-            <span className="muted" style={{ fontSize: 13 }}>Create an environment with a connected cluster first.</span>
-          ) : (
-            <>
-              <div style={{ minWidth: 240, maxWidth: 320 }}>
-                <Field label="Environment" required hint="Target cluster (uses its kubeconfig + AWS creds).">
-                  <Select value={envKey} onValueChange={setEnvKey} ariaLabel="Environment"
-                    options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))} />
-                </Field>
-              </div>
-              <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Btn variant={pushed ? "primary" : "outline"} icon="server" loading={deploy.isPending} disabled={!pushed || !envKey || deploy.isPending} onClick={runDeploy}>
-                  Deploy via Helm
-                </Btn>
-                {!pushed && <span className="faint" style={{ fontSize: 12 }}>Generate &amp; push first, then deploy.</span>}
-                {deployMsg && (
-                  <span style={{ fontSize: 13, color: deployMsg.ok ? "var(--ok)" : "var(--danger)" }}>{deployMsg.text}</span>
-                )}
-              </div>
-            </>
-          )}
+          {/* Step 2 — deploy */}
+          <div
+            className="col gap-3"
+            style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}
+          >
+            <span className="text-sm" style={{ fontWeight: 600 }}>
+              2 · Deploy to a cluster
+            </span>
+            {!envs || envs.length === 0 ? (
+              <span className="muted" style={{ fontSize: 13 }}>
+                Create an environment with a connected cluster first.
+              </span>
+            ) : (
+              <>
+                <div style={{ minWidth: 240, maxWidth: 320 }}>
+                  <Field
+                    label="Environment"
+                    required
+                    hint="Target cluster (uses its kubeconfig + AWS creds)."
+                  >
+                    <Select
+                      value={envKey}
+                      onValueChange={setEnvKey}
+                      ariaLabel="Environment"
+                      options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))}
+                    />
+                  </Field>
+                </div>
+                <div className="row gap-2" style={{ alignItems: "center" }}>
+                  <Btn
+                    variant={pushed ? "primary" : "outline"}
+                    icon="server"
+                    loading={deploy.isPending}
+                    disabled={!pushed || !envKey || deploy.isPending}
+                    onClick={runDeploy}
+                  >
+                    Deploy via Helm
+                  </Btn>
+                  {!pushed && (
+                    <span className="faint" style={{ fontSize: 12 }}>
+                      Generate &amp; push first, then deploy.
+                    </span>
+                  )}
+                  {deployMsg && (
+                    <span
+                      style={{ fontSize: 13, color: deployMsg.ok ? "var(--ok)" : "var(--danger)" }}
+                    >
+                      {deployMsg.text}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
       </Block.Body>
     </Block>
   );
@@ -276,29 +384,48 @@ function HelmFieldInput({
   if (field.type === "select") {
     return (
       <Field label={field.label} required={field.required} hint={field.hint}>
-        <Select value={value || field.default || ""} onValueChange={onChange} ariaLabel={field.label}
-          options={(field.options ?? []).map((o) => ({ value: o, label: o }))} />
+        <Select
+          value={value || field.default || ""}
+          onValueChange={onChange}
+          ariaLabel={field.label}
+          options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
+        />
       </Field>
     );
   }
   if (field.type === "toggle") {
     return (
       <Field label={field.label} hint={field.hint}>
-        <Toggle checked={(value || field.default) === "true"} onCheckedChange={(c) => onChange(c ? "true" : "false")} ariaLabel={field.label} />
+        <Toggle
+          checked={(value || field.default) === "true"}
+          onCheckedChange={(c) => onChange(c ? "true" : "false")}
+          ariaLabel={field.label}
+        />
       </Field>
     );
   }
   if (field.type === "keyvalue") {
     return (
       <Field label={field.label} hint={field.hint ?? "One KEY=VALUE per line"}>
-        <Textarea rows={3} className="mono" value={value} onChange={(e) => onChange(e.target.value)} placeholder={"KEY=value\nANOTHER=value"} />
+        <Textarea
+          rows={3}
+          className="mono"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={"KEY=value\nANOTHER=value"}
+        />
       </Field>
     );
   }
   return (
     <Field label={field.label} required={field.required} hint={field.hint}>
-      <Input type={field.type === "number" ? "number" : "text"} className={field.name === "image" ? "mono" : undefined}
-        value={value} onChange={(e) => onChange(e.target.value)} placeholder={field.placeholder ?? field.default} />
+      <Input
+        type={field.type === "number" ? "number" : "text"}
+        className={field.name === "image" ? "mono" : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={field.placeholder ?? field.default}
+      />
     </Field>
   );
 }

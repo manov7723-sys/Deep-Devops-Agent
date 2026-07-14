@@ -44,7 +44,11 @@ export async function GET(req: Request) {
       });
   if (!oauth) {
     return NextResponse.json(
-      { ok: false, code: "gitlab_not_connected", message: "Connect GitLab first to list your projects." },
+      {
+        ok: false,
+        code: "gitlab_not_connected",
+        message: "Connect GitLab first to list your projects.",
+      },
       { status: 409 },
     );
   }
@@ -73,7 +77,12 @@ export async function GET(req: Request) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     return NextResponse.json(
-      { ok: false, code: `gitlab_${res.status}`, message: `GitLab returned ${res.status}.`, details: text.slice(0, 300) },
+      {
+        ok: false,
+        code: `gitlab_${res.status}`,
+        message: `GitLab returned ${res.status}.`,
+        details: text.slice(0, 300),
+      },
       { status: 502 },
     );
   }

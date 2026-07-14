@@ -11,14 +11,22 @@ import { queryClusterPrometheus } from "@/lib/observability/cluster-monitoring";
 import { getAwsCostByService } from "@/lib/cloud/aws-cost";
 import { getAzureCostByService } from "@/lib/cloud/azure-cost";
 
-export type Recommendation = { id: string; severity: "high" | "medium" | "low"; title: string; detail: string; estimate?: string };
+export type Recommendation = {
+  id: string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  estimate?: string;
+};
 export type Driver = { service: string; cents: number; pct: number };
 export type CostOptimReport =
   | { ok: true; recommendations: Recommendation[]; drivers: Driver[]; currency: string }
   | { ok: false; error: string };
 
-const CPU_UTIL_Q = '100 * sum(rate(container_cpu_usage_seconds_total{container!=""}[5m])) / sum(kube_node_status_capacity{resource="cpu"})';
-const MEM_UTIL_Q = '100 * sum(container_memory_working_set_bytes{container!=""}) / sum(kube_node_status_capacity{resource="memory"})';
+const CPU_UTIL_Q =
+  '100 * sum(rate(container_cpu_usage_seconds_total{container!=""}[5m])) / sum(kube_node_status_capacity{resource="cpu"})';
+const MEM_UTIL_Q =
+  '100 * sum(container_memory_working_set_bytes{container!=""}) / sum(kube_node_status_capacity{resource="memory"})';
 const NODE_COUNT_Q = 'count(kube_node_status_capacity{resource="cpu"})';
 const PER_NODE_CPU_Q =
   '100 * sum by (node) (rate(container_cpu_usage_seconds_total{container!=""}[5m])) / on(node) group_left sum by (node) (kube_node_status_capacity{resource="cpu"})';
@@ -36,17 +44,26 @@ async function scalar(envId: string, q: string): Promise<number | null> {
 
 function driverTip(service: string): string {
   const s = service.toLowerCase();
-  if (/ec2|compute|virtual machine|gce|instance/.test(s)) return "Right-size instances to their real usage, or use Spot/Savings Plans for steady workloads.";
-  if (/ebs|disk|volume|storage|blob|bucket|s3/.test(s)) return "Delete unattached volumes and old snapshots; move cold data to cheaper storage tiers.";
-  if (/rds|sql|database|cosmos|cloud sql/.test(s)) return "Right-size the DB tier, and use reserved capacity if usage is steady.";
-  if (/load balancer|elb|gateway/.test(s)) return "Consolidate load balancers and remove unused ones.";
-  if (/nat|data transfer|egress|bandwidth/.test(s)) return "Review cross-AZ/egress traffic — it's often avoidable data-transfer cost.";
-  if (/kubernetes|eks|aks|gke|container/.test(s)) return "Right-size the node pool to actual utilization (see the cluster recommendation).";
+  if (/ec2|compute|virtual machine|gce|instance/.test(s))
+    return "Right-size instances to their real usage, or use Spot/Savings Plans for steady workloads.";
+  if (/ebs|disk|volume|storage|blob|bucket|s3/.test(s))
+    return "Delete unattached volumes and old snapshots; move cold data to cheaper storage tiers.";
+  if (/rds|sql|database|cosmos|cloud sql/.test(s))
+    return "Right-size the DB tier, and use reserved capacity if usage is steady.";
+  if (/load balancer|elb|gateway/.test(s))
+    return "Consolidate load balancers and remove unused ones.";
+  if (/nat|data transfer|egress|bandwidth/.test(s))
+    return "Review cross-AZ/egress traffic — it's often avoidable data-transfer cost.";
+  if (/kubernetes|eks|aks|gke|container/.test(s))
+    return "Right-size the node pool to actual utilization (see the cluster recommendation).";
   return "Review this service's usage — it's your largest cost driver.";
 }
 
 export async function analyzeCostOptimization(projectId: string): Promise<CostOptimReport> {
-  const cp = await prisma.cloudProvider.findFirst({ where: { projectId, kind: { in: ["aws", "azure", "gcp"] } }, select: { id: true, kind: true } });
+  const cp = await prisma.cloudProvider.findFirst({
+    where: { projectId, kind: { in: ["aws", "azure", "gcp"] } },
+    select: { id: true, kind: true },
+  });
   const recommendations: Recommendation[] = [];
   let drivers: Driver[] = [];
   const currency = "USD";
@@ -54,10 +71,19 @@ export async function analyzeCostOptimization(projectId: string): Promise<CostOp
   // 1 — Cost drivers (by service).
   if (cp) {
     try {
-      const bd = cp.kind === "aws" ? await getAwsCostByService(cp.id, new Date()) : cp.kind === "azure" ? await getAzureCostByService(cp.id) : null;
+      const bd =
+        cp.kind === "aws"
+          ? await getAwsCostByService(cp.id, new Date())
+          : cp.kind === "azure"
+            ? await getAzureCostByService(cp.id)
+            : null;
       if (bd?.ok && bd.services.length) {
         const total = bd.services.reduce((sum, x) => sum + x.cents, 0) || 1;
-        drivers = bd.services.slice(0, 5).map((x) => ({ service: x.service, cents: x.cents, pct: Math.round((x.cents / total) * 100) }));
+        drivers = bd.services.slice(0, 5).map((x) => ({
+          service: x.service,
+          cents: x.cents,
+          pct: Math.round((x.cents / total) * 100),
+        }));
         const top = drivers[0];
         if (top && top.pct >= 25) {
           recommendations.push({
@@ -75,7 +101,10 @@ export async function analyzeCostOptimization(projectId: string): Promise<CostOp
   }
 
   // 2 — Cluster right-sizing + idle nodes (from live Prometheus utilization).
-  const clusterEnvs = await prisma.env.findMany({ where: { projectId, kubeconfigRef: { not: null } }, select: { id: true, key: true } });
+  const clusterEnvs = await prisma.env.findMany({
+    where: { projectId, kubeconfigRef: { not: null } },
+    select: { id: true, key: true },
+  });
   for (const env of clusterEnvs) {
     const cpu = await scalar(env.id, CPU_UTIL_Q);
     const mem = await scalar(env.id, MEM_UTIL_Q);
@@ -124,7 +153,8 @@ export async function analyzeCostOptimization(projectId: string): Promise<CostOp
       id: "none",
       severity: "low",
       title: "No obvious savings found",
-      detail: "Your clusters look reasonably utilised and no single service dominates your spend. Re-run this after usage changes, or once GCP/Azure cost is fully wired.",
+      detail:
+        "Your clusters look reasonably utilised and no single service dominates your spend. Re-run this after usage changes, or once GCP/Azure cost is fully wired.",
     });
   }
 

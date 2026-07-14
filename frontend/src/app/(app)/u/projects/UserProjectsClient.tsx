@@ -70,12 +70,23 @@ export function UserProjectsClient() {
 
       <TileGrid minTile={300}>
         {sorted.map((p) => (
-          <ProjectCard key={p.id} project={p} variant="tile" onDelete={() => setToDelete({ slug: p.slug, name: p.name })} />
+          <ProjectCard
+            key={p.id}
+            project={p}
+            variant="tile"
+            onDelete={() => setToDelete({ slug: p.slug, name: p.name })}
+          />
         ))}
         <ProjectCard variant="create-new" onCreate={() => setWizard(true)} />
       </TileGrid>
 
-      <DeleteProjectModal open={!!toDelete} onOpenChange={(o) => { if (!o) setToDelete(null); }} project={toDelete} />
+      <DeleteProjectModal
+        open={!!toDelete}
+        onOpenChange={(o) => {
+          if (!o) setToDelete(null);
+        }}
+        project={toDelete}
+      />
 
       {wizardOpen && draftId && (
         <CreateProjectWizard

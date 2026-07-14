@@ -75,10 +75,12 @@ export function CreateAddonModal({ open, onOpenChange }: CreateAddonModalProps) 
       stripeProductId?: string;
       stripePriceId?: string;
     }) => {
-      const res = await api.post<{ ok: boolean; addon?: CreatedAddon; message?: string; code?: string }>(
-        "/admin/addons",
-        body,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        addon?: CreatedAddon;
+        message?: string;
+        code?: string;
+      }>("/admin/addons", body);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not create add-on.");
       return res.addon;
     },
@@ -134,7 +136,9 @@ export function CreateAddonModal({ open, onOpenChange }: CreateAddonModalProps) 
       description="Add a new purchasable add-on to the catalog. Users see it on the Subscription page."
       footer={
         <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
+          <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Btn>
           <Btn
             variant="primary"
             icon="plus"
@@ -157,7 +161,11 @@ export function CreateAddonModal({ open, onOpenChange }: CreateAddonModalProps) 
           name="name"
           validators={{
             onChange: ({ value }) =>
-              !value.trim() ? "Name is required" : value.length > 80 ? "Max 80 characters" : undefined,
+              !value.trim()
+                ? "Name is required"
+                : value.length > 80
+                  ? "Max 80 characters"
+                  : undefined,
           }}
         >
           {(field) => (
@@ -177,7 +185,11 @@ export function CreateAddonModal({ open, onOpenChange }: CreateAddonModalProps) 
           name="description"
           validators={{
             onChange: ({ value }) =>
-              !value.trim() ? "Description is required" : value.length > 280 ? "Max 280 characters" : undefined,
+              !value.trim()
+                ? "Description is required"
+                : value.length > 280
+                  ? "Max 280 characters"
+                  : undefined,
           }}
         >
           {(field) => (
@@ -232,7 +244,12 @@ export function CreateAddonModal({ open, onOpenChange }: CreateAddonModalProps) 
             }}
           >
             {(field) => (
-              <Field label="Price" hint="One-time charge" required error={field.state.meta.errors[0]}>
+              <Field
+                label="Price"
+                hint="One-time charge"
+                required
+                error={field.state.meta.errors[0]}
+              >
                 <Input
                   type="number"
                   inputMode="decimal"

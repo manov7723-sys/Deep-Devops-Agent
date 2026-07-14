@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { envBySlugAndKey } from "@/lib/devops/envs";
-import { monitoringStatus, appDashboardUid, installPhaseView } from "@/lib/observability/cluster-monitoring";
+import {
+  monitoringStatus,
+  appDashboardUid,
+  installPhaseView,
+} from "@/lib/observability/cluster-monitoring";
 
 /**
  * GET /projects/[slug]/envs/[key]/monitoring/status

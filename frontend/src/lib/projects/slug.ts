@@ -7,13 +7,15 @@ import { prisma } from "@/lib/db/prisma";
 const MAX_SLUG_LEN = 60;
 
 export function baseSlug(input: string): string {
-  return input
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "") // strip combining marks
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-+|-+$)/g, "")
-    .slice(0, MAX_SLUG_LEN) || "project";
+  return (
+    input
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "") // strip combining marks
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-+|-+$)/g, "")
+      .slice(0, MAX_SLUG_LEN) || "project"
+  );
 }
 
 export async function generateUniqueSlug(name: string): Promise<string> {

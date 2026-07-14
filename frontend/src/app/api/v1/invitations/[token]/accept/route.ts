@@ -20,10 +20,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const { token } = await ctx.params;
   const res = await acceptInvitation(token, sess.userId, sess.user.email);
   if (!res.ok) {
-    const status =
-      res.code === "email_mismatch" ? 403 :
-      res.code === "already_member" ? 409 :
-      400;
+    const status = res.code === "email_mismatch" ? 403 : res.code === "already_member" ? 409 : 400;
     return NextResponse.json(
       { ok: false, code: res.code, message: messageFor(res.code) },
       { status },

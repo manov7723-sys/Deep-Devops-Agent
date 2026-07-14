@@ -60,7 +60,11 @@ export type EksSpec = {
   accessEntries?: EksAccessEntry[];
 };
 
-export type EksAccessPolicy = "AmazonEKSClusterAdminPolicy" | "AmazonEKSAdminPolicy" | "AmazonEKSEditPolicy" | "AmazonEKSViewPolicy";
+export type EksAccessPolicy =
+  | "AmazonEKSClusterAdminPolicy"
+  | "AmazonEKSAdminPolicy"
+  | "AmazonEKSEditPolicy"
+  | "AmazonEKSViewPolicy";
 export type EksAccessEntry = { principalArn: string; policy: EksAccessPolicy };
 
 export type EksDefaults = Omit<EksSpec, "name">;
@@ -89,7 +93,14 @@ export const EKS_DEFAULTS: EksDefaults = {
   appDesiredNodes: 3,
 };
 
-export const EKS_INSTANCE_TYPES = ["t3.medium", "t3.large", "m5.large", "m5.xlarge", "m5.2xlarge", "c5.xlarge"];
+export const EKS_INSTANCE_TYPES = [
+  "t3.medium",
+  "t3.large",
+  "m5.large",
+  "m5.xlarge",
+  "m5.2xlarge",
+  "c5.xlarge",
+];
 export const EKS_K8S_VERSIONS = ["1.36", "1.35", "1.34", "1.33", "1.32", "1.31", "1.30"];
 export const EKS_DISK_SIZES = [50, 100, 150, 200];
 export const EKS_CAPACITY_TYPES = ["ON_DEMAND", "SPOT"];
@@ -130,7 +141,8 @@ provider "aws" {
 `;
 
   const useExisting = spec.createVpc === false;
-  const nodeSubnetsOverride = spec.nodeSubnetIds && spec.nodeSubnetIds.length > 0 ? spec.nodeSubnetIds : undefined;
+  const nodeSubnetsOverride =
+    spec.nodeSubnetIds && spec.nodeSubnetIds.length > 0 ? spec.nodeSubnetIds : undefined;
 
   // VPC source: a fresh VPC module, or wiring to an existing VPC. When reusing
   // an existing VPC we either take explicit subnet ids or auto-discover them.
@@ -139,15 +151,15 @@ provider "aws" {
   // ones (only offered when reusing an existing VPC; a freshly-created VPC has
   // one subnet set, so nodes always share it there).
   const vpcSection = useExisting
-    ? (spec.existingSubnetIds && spec.existingSubnetIds.length > 0
-        ? `# Reusing existing VPC ${spec.existingVpcId ?? ""} with the given subnets.
+    ? spec.existingSubnetIds && spec.existingSubnetIds.length > 0
+      ? `# Reusing existing VPC ${spec.existingVpcId ?? ""} with the given subnets.
 locals {
   vpc_id         = "${spec.existingVpcId ?? ""}"
   subnet_ids     = [${spec.existingSubnetIds.map((s) => `"${s}"`).join(", ")}]
   node_subnet_ids = ${nodeSubnetsOverride ? `[${nodeSubnetsOverride.map((s) => `"${s}"`).join(", ")}]` : "local.subnet_ids"}
 }
 `
-        : `# Reusing existing VPC ${spec.existingVpcId ?? ""}; subnets auto-discovered.
+      : `# Reusing existing VPC ${spec.existingVpcId ?? ""}; subnets auto-discovered.
 data "aws_subnets" "cluster" {
   filter {
     name   = "vpc-id"
@@ -160,7 +172,7 @@ locals {
   subnet_ids     = data.aws_subnets.cluster.ids
   node_subnet_ids = ${nodeSubnetsOverride ? `[${nodeSubnetsOverride.map((s) => `"${s}"`).join(", ")}]` : "local.subnet_ids"}
 }
-`)
+`
     : `module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.0"
@@ -205,7 +217,11 @@ locals {
   const encrypt = spec.secretsEncryption !== false;
   const systemDisk = spec.systemDiskSize ?? 100;
   const hasApp = spec.appNodeGroup === true;
-  const appTypes = (spec.appInstanceTypes && spec.appInstanceTypes.length > 0 ? spec.appInstanceTypes : ["m5.large", "m5.xlarge"])
+  const appTypes = (
+    spec.appInstanceTypes && spec.appInstanceTypes.length > 0
+      ? spec.appInstanceTypes
+      : ["m5.large", "m5.xlarge"]
+  )
     .map((t) => `"${t}"`)
     .join(", ");
   const appCapacity = spec.appCapacityType || "SPOT";
@@ -222,7 +238,9 @@ locals {
     `    Environment = "${env}"`,
     `    Team        = "${team}"`,
     costCenter ? `    CostCenter  = "${costCenter}"` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   // System node group is tainted ONLY when an application group exists to take
   // general workloads (otherwise nothing could schedule).
@@ -294,12 +312,16 @@ module "eks" {
 
   # Control-plane logging → CloudWatch (api, audit, authenticator, controllerManager, scheduler).
   cluster_enabled_log_types = ${logs ? `["api", "audit", "authenticator", "controllerManager", "scheduler"]` : "[]"}
-${encrypt ? `
+${
+  encrypt
+    ? `
   # Encrypt Kubernetes secrets at rest with a dedicated KMS key (module-managed).
   cluster_encryption_config = {
     resources = ["secrets"]
   }
-` : ""}
+`
+    : ""
+}
   cluster_addons = {
     coredns    = { most_recent = true }
     kube-proxy = { most_recent = true }

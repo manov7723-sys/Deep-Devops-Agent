@@ -15,7 +15,10 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
 const Body = z.object({
   repoFullName: z.string().trim().min(3),
   path: z.string().trim().min(1).max(300),
-  content: z.string().min(1).max(256 * 1024),
+  content: z
+    .string()
+    .min(1)
+    .max(256 * 1024),
   branch: z.string().trim().min(1).max(200),
   message: z.string().trim().min(1).max(200),
   pullRequestBody: z.string().trim().max(4000).optional(),
@@ -49,7 +52,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   );
 
   if (!result.ok) {
-    return NextResponse.json({ ok: false, code: "commit_failed", message: result.error }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "commit_failed", message: result.error },
+      { status: 400 },
+    );
   }
 
   const meta = extractRequestMeta(req);

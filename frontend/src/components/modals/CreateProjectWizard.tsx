@@ -3,7 +3,18 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Badge, Btn, Field, Icon, Input, Modal, Select, Textarea, Toggle, WizardSteps } from "@/components/ui";
+import {
+  Badge,
+  Btn,
+  Field,
+  Icon,
+  Input,
+  Modal,
+  Select,
+  Textarea,
+  Toggle,
+  WizardSteps,
+} from "@/components/ui";
 import { HuePicker } from "@/components/ui/HuePicker";
 import { ProjectAvatar } from "@/components/domain/ProjectAvatar";
 import { useGitHubMe, useGitHubRepos } from "@/hooks/queries/repos";
@@ -108,8 +119,7 @@ export function CreateProjectWizard({
   const router = useRouter();
   const qc = useQueryClient();
   const ghAccounts = useConnectedOAuthAccounts();
-  const githubAccounts =
-    ghAccounts.data?.filter((a) => a.provider === "github") ?? [];
+  const githubAccounts = ghAccounts.data?.filter((a) => a.provider === "github") ?? [];
   const create = useCreateProjectWithSetup();
   const [serverError, setServerError] = useState<string | null>(null);
   const [ghNote, setGhNote] = useState<string | null>(null);
@@ -121,13 +131,18 @@ export function CreateProjectWizard({
   // the callback closes it and postMessages back here — see the listener below.
   function openGithubPopup() {
     setGhNote(null);
-    const w = 640, h = 760;
+    const w = 640,
+      h = 760;
     const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
     const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
     const url = `/api/v1/auth/oauth/github/start?popup=1&next=${encodeURIComponent(
       `/u/projects?new=1&step=2&draft=${draftId}`,
     )}`;
-    const popup = window.open(url, "dda_github_oauth", `width=${w},height=${h},left=${left},top=${top}`);
+    const popup = window.open(
+      url,
+      "dda_github_oauth",
+      `width=${w},height=${h},left=${left},top=${top}`,
+    );
     if (!popup) {
       // Popup blocked — fall back to a full-page redirect to the same flow.
       window.location.href = url.replace("&popup=1", "").replace("?popup=1&", "?");
@@ -164,8 +179,7 @@ export function CreateProjectWizard({
   // Active account drives which token the repo-list query uses. Defaults to
   // the draft's chosen one (so it persists across re-opens), then falls back
   // to the first connected GitHub account.
-  const effectiveGhAccountId =
-    draft.ghAccountId ?? githubAccounts[0]?.id ?? null;
+  const effectiveGhAccountId = draft.ghAccountId ?? githubAccounts[0]?.id ?? null;
   const ghQuery = useGitHubRepos(open && !!effectiveGhAccountId, effectiveGhAccountId);
   const ghMe = useGitHubMe(open && !!effectiveGhAccountId, effectiveGhAccountId);
   const repos = ghQuery.data ?? [];
@@ -180,17 +194,18 @@ export function CreateProjectWizard({
       setDraft((d) => ({ ...d, ghConnected: true }));
     }
   }, [githubAccounts.length, draft.ghConnected]);
-  const repoCode = (repoError as { details?: unknown } | null)?.details &&
+  const repoCode =
+    (repoError as { details?: unknown } | null)?.details &&
     typeof (repoError as { details?: unknown }).details === "string"
-    ? (() => {
-        try {
-          const j = JSON.parse((repoError as { details: string }).details);
-          return typeof j?.code === "string" ? (j.code as string) : null;
-        } catch {
-          return null;
-        }
-      })()
-    : null;
+      ? (() => {
+          try {
+            const j = JSON.parse((repoError as { details: string }).details);
+            return typeof j?.code === "string" ? (j.code as string) : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null;
 
   // Restore from localStorage when the wizard opens.
   useEffect(() => {
@@ -212,7 +227,10 @@ export function CreateProjectWizard({
   const stepIdx = Math.max(0, Math.min(STEPS.length - 1, step - 1));
   const initial = useMemo(() => (draft.name.trim()[0] || "N").toUpperCase(), [draft.name]);
   const selectedRepoIds = useMemo(
-    () => Object.entries(draft.repoIds).filter(([, on]) => on).map(([id]) => id),
+    () =>
+      Object.entries(draft.repoIds)
+        .filter(([, on]) => on)
+        .map(([id]) => id),
     [draft.repoIds],
   );
   const selectedEnvs = useMemo(
@@ -327,7 +345,9 @@ export function CreateProjectWizard({
               variant="ghost"
               icon="chevL"
               style={{ marginRight: "auto" }}
-              onClick={() => (stepIdx === 0 ? setDraft((d) => ({ ...d, mode: null })) : onStepChange(stepIdx))}
+              onClick={() =>
+                stepIdx === 0 ? setDraft((d) => ({ ...d, mode: null })) : onStepChange(stepIdx)
+              }
             >
               Back
             </Btn>
@@ -355,13 +375,16 @@ export function CreateProjectWizard({
       {!draft.mode && (
         <div className="col gap-3">
           <p className="muted" style={{ fontSize: 13 }}>
-            Where will this project run? Pick one — you&apos;ll connect the account or server in the following steps.
+            Where will this project run? Pick one — you&apos;ll connect the account or server in the
+            following steps.
           </p>
           <div className="row gap-3 wrap">
-            {([
-              { m: "cloud", icon: "cloud", title: "Cloud", sub: "AWS · GCP · Azure" },
-              { m: "onprem", icon: "server", title: "On-prem", sub: "Proxmox VE (self-hosted)" },
-            ] as const).map((o) => (
+            {(
+              [
+                { m: "cloud", icon: "cloud", title: "Cloud", sub: "AWS · GCP · Azure" },
+                { m: "onprem", icon: "server", title: "On-prem", sub: "Proxmox VE (self-hosted)" },
+              ] as const
+            ).map((o) => (
               <button
                 key={o.m}
                 type="button"
@@ -386,7 +409,9 @@ export function CreateProjectWizard({
               >
                 <Icon name={o.icon} size={22} />
                 <strong style={{ fontSize: 15 }}>{o.title}</strong>
-                <span className="muted" style={{ fontSize: 12.5 }}>{o.sub}</span>
+                <span className="muted" style={{ fontSize: 12.5 }}>
+                  {o.sub}
+                </span>
               </button>
             ))}
           </div>
@@ -400,11 +425,10 @@ export function CreateProjectWizard({
           <div className="row gap-4" style={{ alignItems: "center" }}>
             <ProjectAvatar name={initial} hue={draft.hue} size={60} radius={15} />
             <div className="col gap-2">
-              <span className="field-label" style={{ marginBottom: 0 }}>Project icon</span>
-              <HuePicker
-                value={draft.hue}
-                onChange={(hue) => setDraft((d) => ({ ...d, hue }))}
-              />
+              <span className="field-label" style={{ marginBottom: 0 }}>
+                Project icon
+              </span>
+              <HuePicker value={draft.hue} onChange={(hue) => setDraft((d) => ({ ...d, hue }))} />
             </div>
           </div>
           <Field label="Project name" required>
@@ -430,7 +454,10 @@ export function CreateProjectWizard({
         <div className="col gap-4">
           {!draft.ghConnected ? (
             <div className="col center gap-3 dda-wizard-gh-card">
-              <span className="row center" style={{ width: 48, height: 48, borderRadius: 12, background: "var(--surface-3)" }}>
+              <span
+                className="row center"
+                style={{ width: 48, height: 48, borderRadius: 12, background: "var(--surface-3)" }}
+              >
                 <Icon name="github" size={24} />
               </span>
               <div className="col gap-1" style={{ textAlign: "center" }}>
@@ -461,11 +488,7 @@ export function CreateProjectWizard({
                       popup. On GitHub's page use "Not you? Switch account" to pick
                       a different login; the new account appears in the selector
                       below once the popup closes. */}
-                  <button
-                    type="button"
-                    className="btn outline sm"
-                    onClick={openGithubPopup}
-                  >
+                  <button type="button" className="btn outline sm" onClick={openGithubPopup}>
                     <Icon name="refresh" size={13} /> Change account
                   </button>
                   <button
@@ -498,7 +521,9 @@ export function CreateProjectWizard({
               )}
               <Field label="Select repositories" hint={`${selectedRepoIds.length} selected`}>
                 {ghQuery.isLoading ? (
-                  <span className="muted" style={{ fontSize: 13 }}>Loading your GitHub repositories…</span>
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    Loading your GitHub repositories…
+                  </span>
                 ) : repoError ? (
                   <div
                     className="col gap-2"
@@ -546,14 +571,20 @@ export function CreateProjectWizard({
                           type="button"
                           key={r.id}
                           onClick={() =>
-                            setDraft((d) => ({ ...d, repoIds: { ...d.repoIds, [r.id]: !d.repoIds[r.id] } }))
+                            setDraft((d) => ({
+                              ...d,
+                              repoIds: { ...d.repoIds, [r.id]: !d.repoIds[r.id] },
+                            }))
                           }
                           className="row gap-3 between dda-wizard-repo-row"
                           data-on={on}
                         >
                           <div className="row gap-3" style={{ minWidth: 0 }}>
                             <Icon name="github" size={17} />
-                            <div className="col" style={{ lineHeight: 1.3, minWidth: 0, textAlign: "left" }}>
+                            <div
+                              className="col"
+                              style={{ lineHeight: 1.3, minWidth: 0, textAlign: "left" }}
+                            >
                               <span style={{ fontWeight: 600, fontSize: 13 }}>{r.name}</span>
                               <span className="faint" style={{ fontSize: 11.5 }}>
                                 {r.lang} · {r.kind}
@@ -577,32 +608,32 @@ export function CreateProjectWizard({
       {draft.mode && stepIdx === 2 && (
         <div className="col gap-4">
           <p className="muted" style={{ fontSize: 13 }}>
-            Each environment listens to a specific branch. Pushes to that branch trigger a
-            deploy. <b>Release</b> (your <span className="mono">main</span>/production) is on by
-            default; only enable Alpha or Beta if your repo actually maintains long-lived{" "}
-            <span className="mono">develop</span> / <span className="mono">release/*</span> branches.
-            You can add more envs later.
+            Each environment listens to a specific branch. Pushes to that branch trigger a deploy.{" "}
+            <b>Release</b> (your <span className="mono">main</span>/production) is on by default;
+            only enable Alpha or Beta if your repo actually maintains long-lived{" "}
+            <span className="mono">develop</span> / <span className="mono">release/*</span>{" "}
+            branches. You can add more envs later.
           </p>
           <div className="col gap-2">
             {(Object.keys(ENV_META) as EnvKey[]).map((e) => {
               const on = draft.envs[e];
               const meta = ENV_META[e];
               return (
-                <div
-                  key={e}
-                  className="row gap-3 between dda-wizard-env-row"
-                  data-on={on}
-                >
+                <div key={e} className="row gap-3 between dda-wizard-env-row" data-on={on}>
                   <div className="row gap-3">
                     <span className={`dot ${meta.tone}`} />
                     <div className="col" style={{ lineHeight: 1.3 }}>
                       <span style={{ fontWeight: 700, fontSize: 13 }}>{meta.label}</span>
-                      <span className="faint mono" style={{ fontSize: 11.5 }}>{meta.branch}</span>
+                      <span className="faint mono" style={{ fontSize: 11.5 }}>
+                        {meta.branch}
+                      </span>
                     </div>
                   </div>
                   <Toggle
                     checked={on}
-                    onCheckedChange={(v) => setDraft((d) => ({ ...d, envs: { ...d.envs, [e]: v } }))}
+                    onCheckedChange={(v) =>
+                      setDraft((d) => ({ ...d, envs: { ...d.envs, [e]: v } }))
+                    }
                     ariaLabel={meta.label}
                   />
                 </div>
@@ -618,12 +649,18 @@ export function CreateProjectWizard({
             <Field label="On-prem infrastructure">
               <div
                 className="row gap-2"
-                style={{ alignItems: "center", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}
+                style={{
+                  alignItems: "center",
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  padding: 12,
+                }}
               >
                 <Icon name="server" size={18} style={{ flex: "none" }} />
                 <span style={{ fontSize: 13 }}>
-                  <strong>Proxmox VE</strong> — after creating the project, connect your server (host URL + API
-                  token) on the <b>Cloud providers</b> tab, then create VMs with Terraform.
+                  <strong>Proxmox VE</strong> — after creating the project, connect your server
+                  (host URL + API token) on the <b>Cloud providers</b> tab, then create VMs with
+                  Terraform.
                 </span>
               </div>
             </Field>
@@ -654,14 +691,17 @@ export function CreateProjectWizard({
             </Field>
           )}
           {(() => {
-            const meta =
-              CLOUD_FIELD_META[draft.cloud] ?? CLOUD_FIELD_META.AWS;
+            const meta = CLOUD_FIELD_META[draft.cloud] ?? CLOUD_FIELD_META.AWS;
             return (
               <>
                 <div style={{ maxWidth: 240 }}>
                   <Field
                     label={draft.cloud === "Proxmox" ? "Default node" : "Default region"}
-                    hint={draft.cloud === "Proxmox" ? "Proxmox node new VMs land on (e.g. pve)." : "You can change this per environment later."}
+                    hint={
+                      draft.cloud === "Proxmox"
+                        ? "Proxmox node new VMs land on (e.g. pve)."
+                        : "You can change this per environment later."
+                    }
                   >
                     <Input
                       value={draft.region}
@@ -681,7 +721,15 @@ export function CreateProjectWizard({
             );
           })()}
           <div className="card dda-wizard-summary">
-            <span className="faint" style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            <span
+              className="faint"
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
               Summary
             </span>
             <div className="row gap-3" style={{ marginTop: 10, alignItems: "center" }}>
@@ -692,12 +740,14 @@ export function CreateProjectWizard({
                 </span>
                 <span className="faint" style={{ fontSize: 11.5 }}>
                   {selectedRepoIds.length} {selectedRepoIds.length === 1 ? "repo" : "repos"} ·{" "}
-                  {selectedEnvs.length}{" "}
-                  {selectedEnvs.length === 1 ? "environment" : "environments"} · {draft.cloud}
+                  {selectedEnvs.length} {selectedEnvs.length === 1 ? "environment" : "environments"}{" "}
+                  · {draft.cloud}
                 </span>
               </div>
               <div style={{ marginLeft: "auto" }}>
-                <Badge tone="accent">Step {stepIdx + 1} / {STEPS.length}</Badge>
+                <Badge tone="accent">
+                  Step {stepIdx + 1} / {STEPS.length}
+                </Badge>
               </div>
             </div>
           </div>

@@ -15,7 +15,10 @@ export interface PlanCardProps {
   onAction?: () => void;
 }
 
-function defaultCta(plan: SeedPlan, current: boolean): { label: string; variant: "primary" | "outline" } {
+function defaultCta(
+  plan: SeedPlan,
+  current: boolean,
+): { label: string; variant: "primary" | "outline" } {
   if (current) return { label: "Current plan", variant: "outline" };
   if (plan.name === "Free") return { label: "Downgrade", variant: "outline" };
   if (plan.name === "Enterprise") return { label: "Contact sales", variant: "primary" };
@@ -36,9 +39,7 @@ export function PlanCard({ plan, current = false, popular = false, cta, onAction
         position: "relative",
       }}
     >
-      {accent && !current && (
-        <span className="badge accent dda-plan-pop">Most popular</span>
-      )}
+      {accent && !current && <span className="badge accent dda-plan-pop">Most popular</span>}
       {current && <span className="badge accent dda-plan-pop">Current</span>}
       <span style={{ fontWeight: 700, fontSize: 15 }}>{plan.name}</span>
       <div className="row gap-1" style={{ alignItems: "baseline" }}>

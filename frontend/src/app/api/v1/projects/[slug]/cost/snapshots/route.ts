@@ -25,7 +25,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       const env = await envBySlugAndKey(gate.access.project.id, e.envKey);
       if (!env) {
         return NextResponse.json(
-          { ok: false, code: "env_not_found", message: `byEnv references unknown env "${e.envKey}"` },
+          {
+            ok: false,
+            code: "env_not_found",
+            message: `byEnv references unknown env "${e.envKey}"`,
+          },
           { status: 400 },
         );
       }

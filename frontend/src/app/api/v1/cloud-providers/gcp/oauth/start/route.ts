@@ -15,7 +15,11 @@ export async function GET(req: Request) {
   if (!sess) return NextResponse.redirect(new URL("/auth/login", req.url));
   if (!gcpOAuthConfigured()) {
     return NextResponse.json(
-      { ok: false, code: "oauth_not_configured", message: "GCP OAuth isn't configured (set GCP_OAUTH_CLIENT_ID / GCP_OAUTH_CLIENT_SECRET)." },
+      {
+        ok: false,
+        code: "oauth_not_configured",
+        message: "GCP OAuth isn't configured (set GCP_OAUTH_CLIENT_ID / GCP_OAUTH_CLIENT_SECRET).",
+      },
       { status: 400 },
     );
   }

@@ -18,12 +18,7 @@ export const DENSITY_SCALE: Record<Density, number> = {
   comfy: 1.16,
 };
 
-export const FONTS = [
-  "Plus Jakarta Sans",
-  "Manrope",
-  "Hanken Grotesk",
-  "Inter",
-] as const;
+export const FONTS = ["Plus Jakarta Sans", "Manrope", "Hanken Grotesk", "Inter"] as const;
 export type FontFamily = (typeof FONTS)[number];
 
 export type TweaksState = {
@@ -61,7 +56,9 @@ export const useTweaks = create<TweaksState>()(
   ),
 );
 
-export function applyTweaksToDocument(t: Pick<TweaksState, "theme" | "accent" | "density" | "font">) {
+export function applyTweaksToDocument(
+  t: Pick<TweaksState, "theme" | "accent" | "density" | "font">,
+) {
   if (typeof document === "undefined") return;
   const accent = ACCENTS.find((a) => a.id === t.accent) ?? ACCENTS[0];
   document.documentElement.dataset.theme = t.theme;

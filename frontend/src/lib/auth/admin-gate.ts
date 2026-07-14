@@ -5,9 +5,7 @@
 import { NextResponse } from "next/server";
 import { getActiveSession, type LoadedSession } from "./session";
 
-export type AdminGate =
-  | { ok: true; session: LoadedSession }
-  | { ok: false; status: 401 | 404 };
+export type AdminGate = { ok: true; session: LoadedSession } | { ok: false; status: 401 | 404 };
 
 export async function requireSuperAdmin(): Promise<AdminGate> {
   const session = await getActiveSession();

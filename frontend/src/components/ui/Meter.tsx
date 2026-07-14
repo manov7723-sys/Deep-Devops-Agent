@@ -21,7 +21,12 @@ export function Meter({ label, value, height = 5, tone }: MeterProps) {
         <span className="muted">{label}</span>
         <b className="tnum">{Math.round(value)}%</b>
       </div>
-      <Progress value={value} tone={tone ?? auto} height={height} ariaLabel={typeof label === "string" ? label : undefined} />
+      <Progress
+        value={value}
+        tone={tone ?? auto}
+        height={height}
+        ariaLabel={typeof label === "string" ? label : undefined}
+      />
     </div>
   );
 }

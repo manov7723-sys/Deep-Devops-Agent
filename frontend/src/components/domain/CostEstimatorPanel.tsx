@@ -12,15 +12,31 @@ import { Badge, Block, Btn, Field, Input, Select, Toggle } from "@/components/ui
 import { api, apiErrorMessage } from "@/lib/api/client";
 
 type LineItem = { label: string; monthly: number };
-type Result = { ok: true; currency: string; monthly: number; lineItems: LineItem[]; assumptions: string[]; notes: string[] };
-type Meta = { ok: true; clouds: string[]; instanceTypes: Record<string, string[]>; defaults: Record<string, string> };
+type Result = {
+  ok: true;
+  currency: string;
+  monthly: number;
+  lineItems: LineItem[];
+  assumptions: string[];
+  notes: string[];
+};
+type Meta = {
+  ok: true;
+  clouds: string[];
+  instanceTypes: Record<string, string[]>;
+  defaults: Record<string, string>;
+};
 
 const CLOUD_LABEL: Record<string, string> = { aws: "AWS", azure: "Azure", gcp: "GCP" };
 const K8S_LABEL: Record<string, string> = { aws: "EKS", azure: "AKS", gcp: "GKE" };
-const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (n: number) =>
+  `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function CostEstimatorPanel({ slug }: { slug: string }) {
-  const meta = useQuery<Meta>({ queryKey: ["p", slug, "cost-estimate-meta"], queryFn: () => api.get<Meta>(`/projects/${slug}/cost/estimate`) });
+  const meta = useQuery<Meta>({
+    queryKey: ["p", slug, "cost-estimate-meta"],
+    queryFn: () => api.get<Meta>(`/projects/${slug}/cost/estimate`),
+  });
   const clouds = meta.data?.clouds ?? [];
 
   const [cloud, setCloud] = useState("");
@@ -37,18 +53,22 @@ export function CostEstimatorPanel({ slug }: { slug: string }) {
     [meta.data, activeCloud],
   );
   useEffect(() => {
-    if (activeCloud && meta.data) setInstanceType(meta.data.defaults?.[activeCloud] ?? meta.data.instanceTypes?.[activeCloud]?.[0] ?? "");
+    if (activeCloud && meta.data)
+      setInstanceType(
+        meta.data.defaults?.[activeCloud] ?? meta.data.instanceTypes?.[activeCloud]?.[0] ?? "",
+      );
   }, [activeCloud, meta.data]);
 
   const est = useMutation({
-    mutationFn: () => api.post<Result>(`/projects/${slug}/cost/estimate`, {
-      cloud: activeCloud,
-      instanceType: instanceType.trim() || undefined,
-      nodeCount: Number(nodeCount) || 0,
-      managedK8s,
-      storageGb: Number(storageGb) || 0,
-      loadBalancers: Number(loadBalancers) || 0,
-    }),
+    mutationFn: () =>
+      api.post<Result>(`/projects/${slug}/cost/estimate`, {
+        cloud: activeCloud,
+        instanceType: instanceType.trim() || undefined,
+        nodeCount: Number(nodeCount) || 0,
+        managedK8s,
+        storageGb: Number(storageGb) || 0,
+        loadBalancers: Number(loadBalancers) || 0,
+      }),
   });
   const r = est.data;
 
@@ -58,13 +78,24 @@ export function CostEstimatorPanel({ slug }: { slug: string }) {
         <Block.Title sub="Estimate the monthly cost BEFORE you create infrastructure — priced for this project's cloud. Approximate on-demand US list prices, no AI.">
           Cost estimator
         </Block.Title>
-        {activeCloud && <Block.Actions><Badge tone="info" icon="cloud">{CLOUD_LABEL[activeCloud] ?? activeCloud}</Badge></Block.Actions>}
+        {activeCloud && (
+          <Block.Actions>
+            <Badge tone="info" icon="cloud">
+              {CLOUD_LABEL[activeCloud] ?? activeCloud}
+            </Badge>
+          </Block.Actions>
+        )}
       </Block.Header>
       <Block.Body>
         {meta.isLoading ? (
-          <span className="muted" style={{ fontSize: 13 }}>Loading…</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Loading…
+          </span>
         ) : clouds.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>Connect a cloud provider (AWS, Azure, or GCP) on the Cloud providers page first — the estimator prices infra for your project's cloud.</span>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Connect a cloud provider (AWS, Azure, or GCP) on the Cloud providers page first — the
+            estimator prices infra for your project's cloud.
+          </span>
         ) : (
           <div className="col gap-3">
             <div className="row gap-3 wrap" style={{ alignItems: "flex-end" }}>
@@ -72,41 +103,90 @@ export function CostEstimatorPanel({ slug }: { slug: string }) {
               {clouds.length > 1 && (
                 <div style={{ minWidth: 120 }}>
                   <Field label="Cloud">
-                    <Select value={activeCloud} onValueChange={setCloud} ariaLabel="Cloud"
-                      options={clouds.map((c) => ({ value: c, label: CLOUD_LABEL[c] ?? c }))} />
+                    <Select
+                      value={activeCloud}
+                      onValueChange={setCloud}
+                      ariaLabel="Cloud"
+                      options={clouds.map((c) => ({ value: c, label: CLOUD_LABEL[c] ?? c }))}
+                    />
                   </Field>
                 </div>
               )}
               <div style={{ minWidth: 170 }}>
                 <Field label="Instance type">
-                  <Select value={instanceType} onValueChange={setInstanceType} ariaLabel="Instance type" options={typeOptions} />
+                  <Select
+                    value={instanceType}
+                    onValueChange={setInstanceType}
+                    ariaLabel="Instance type"
+                    options={typeOptions}
+                  />
                 </Field>
               </div>
               <div style={{ minWidth: 90 }}>
-                <Field label="Nodes"><Input type="number" value={nodeCount} onChange={(e) => setNodeCount(e.target.value)} /></Field>
+                <Field label="Nodes">
+                  <Input
+                    type="number"
+                    value={nodeCount}
+                    onChange={(e) => setNodeCount(e.target.value)}
+                  />
+                </Field>
               </div>
               <div style={{ minWidth: 110 }}>
-                <Field label="Storage (GB)"><Input type="number" value={storageGb} onChange={(e) => setStorageGb(e.target.value)} /></Field>
+                <Field label="Storage (GB)">
+                  <Input
+                    type="number"
+                    value={storageGb}
+                    onChange={(e) => setStorageGb(e.target.value)}
+                  />
+                </Field>
               </div>
               <div style={{ minWidth: 110 }}>
-                <Field label="Load balancers"><Input type="number" value={loadBalancers} onChange={(e) => setLoadBalancers(e.target.value)} /></Field>
+                <Field label="Load balancers">
+                  <Input
+                    type="number"
+                    value={loadBalancers}
+                    onChange={(e) => setLoadBalancers(e.target.value)}
+                  />
+                </Field>
               </div>
               <div className="row gap-2" style={{ alignItems: "center", paddingBottom: 8 }}>
-                <Toggle checked={managedK8s} onCheckedChange={setManagedK8s} ariaLabel="Managed Kubernetes" />
-                <span style={{ fontSize: 13 }}>Managed K8s ({K8S_LABEL[activeCloud] ?? "EKS/AKS/GKE"})</span>
+                <Toggle
+                  checked={managedK8s}
+                  onCheckedChange={setManagedK8s}
+                  ariaLabel="Managed Kubernetes"
+                />
+                <span style={{ fontSize: 13 }}>
+                  Managed K8s ({K8S_LABEL[activeCloud] ?? "EKS/AKS/GKE"})
+                </span>
               </div>
-              <Btn variant="primary" icon="dollar" loading={est.isPending} onClick={() => est.mutate()}>Estimate</Btn>
+              <Btn
+                variant="primary"
+                icon="dollar"
+                loading={est.isPending}
+                onClick={() => est.mutate()}
+              >
+                Estimate
+              </Btn>
             </div>
 
-            {est.isError && <Badge tone="danger" icon="alert">{apiErrorMessage(est.error)}</Badge>}
+            {est.isError && (
+              <Badge tone="danger" icon="alert">
+                {apiErrorMessage(est.error)}
+              </Badge>
+            )}
 
             {r && (
               <div className="col gap-2" style={{ marginTop: 4 }}>
                 <div className="row gap-2" style={{ alignItems: "baseline" }}>
                   <span style={{ fontSize: 26, fontWeight: 700 }}>{money(r.monthly)}</span>
-                  <span className="muted" style={{ fontSize: 13 }}>/ month (est.) · {CLOUD_LABEL[activeCloud] ?? activeCloud}</span>
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    / month (est.) · {CLOUD_LABEL[activeCloud] ?? activeCloud}
+                  </span>
                 </div>
-                <div className="col gap-1" style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 8 }}>
+                <div
+                  className="col gap-1"
+                  style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 8 }}
+                >
                   {r.lineItems.map((li, i) => (
                     <div key={i} className="row between" style={{ fontSize: 13 }}>
                       <span className="muted">{li.label}</span>
@@ -115,9 +195,16 @@ export function CostEstimatorPanel({ slug }: { slug: string }) {
                   ))}
                 </div>
                 {(r.assumptions.length > 0 || r.notes.length > 0) && (
-                  <ul className="faint" style={{ fontSize: 11.5, margin: "6px 0 0", paddingLeft: 16 }}>
-                    {r.assumptions.map((a, i) => <li key={`a${i}`}>{a}</li>)}
-                    {r.notes.map((n, i) => <li key={`n${i}`}>{n}</li>)}
+                  <ul
+                    className="faint"
+                    style={{ fontSize: 11.5, margin: "6px 0 0", paddingLeft: 16 }}
+                  >
+                    {r.assumptions.map((a, i) => (
+                      <li key={`a${i}`}>{a}</li>
+                    ))}
+                    {r.notes.map((n, i) => (
+                      <li key={`n${i}`}>{n}</li>
+                    ))}
                   </ul>
                 )}
               </div>

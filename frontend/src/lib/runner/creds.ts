@@ -155,7 +155,11 @@ export async function getKubeconfigForEnv(envId: string): Promise<KubeconfigResu
 
 export type CloudCredsResult =
   | { ok: true; env: Record<string, string>; kind: "aws" | "gcp" | "azure" | "proxmox" }
-  | { ok: false; code: "provider_not_found" | "decrypt_failed" | "kind_unsupported"; message: string };
+  | {
+      ok: false;
+      code: "provider_not_found" | "decrypt_failed" | "kind_unsupported";
+      message: string;
+    };
 
 /**
  * Decrypt a CloudProvider's credentials into the shape each provider's CLI
@@ -166,14 +170,17 @@ export type CloudCredsResult =
  *
  * The shape returned here is what the runner merges into `runStage({env})`.
  */
-export async function getDecryptedCloudCreds(
-  cloudProviderId: string,
-): Promise<CloudCredsResult> {
+export async function getDecryptedCloudCreds(cloudProviderId: string): Promise<CloudCredsResult> {
   const cp = await prisma.cloudProvider.findUnique({
     where: { id: cloudProviderId },
     select: {
-      id: true, kind: true, region: true, roleArn: true,
-      externalId: true, accountId: true, credVaultPath: true,
+      id: true,
+      kind: true,
+      region: true,
+      roleArn: true,
+      externalId: true,
+      accountId: true,
+      credVaultPath: true,
     },
   });
   if (!cp) {

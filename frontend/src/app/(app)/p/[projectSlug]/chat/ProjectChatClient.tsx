@@ -99,115 +99,114 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
 
   return (
     <div className={`dda-chat-shell${railOpen ? "" : " is-rail-closed"}`}>
-    <div className="dda-chat-page">
-      <header className="dda-chat-head">
-        <div className="row gap-3">
-          <span className="dda-chat-head-icon">
-            <Icon name="bot" size={18} />
-          </span>
-          <div className="col" style={{ lineHeight: 1.3 }}>
-            <span className="row gap-2" style={{ fontWeight: 700, fontSize: 14 }}>
-              Deep Agent <StatusDot tone="ok" pulse />
+      <div className="dda-chat-page">
+        <header className="dda-chat-head">
+          <div className="row gap-3">
+            <span className="dda-chat-head-icon">
+              <Icon name="bot" size={18} />
             </span>
-            <span className="faint" style={{ fontSize: 11.5 }}>
-              Claude Sonnet 4.5 · sees all repos &amp; cloud state
-            </span>
+            <div className="col" style={{ lineHeight: 1.3 }}>
+              <span className="row gap-2" style={{ fontWeight: 700, fontSize: 14 }}>
+                Deep Agent <StatusDot tone="ok" pulse />
+              </span>
+              <span className="faint" style={{ fontSize: 11.5 }}>
+                Claude Sonnet 4.5 · sees all repos &amp; cloud state
+              </span>
+            </div>
+          </div>
+          <div className="row gap-2">
+            <Badge icon="layers">{slug}</Badge>
+            <Btn
+              size="sm"
+              variant="outline"
+              icon="trash"
+              loading={clearChat.isPending}
+              disabled={clearChat.isPending || busy || messages.length === 0}
+              onClick={handleClear}
+            >
+              Clear
+            </Btn>
+            <Btn
+              size="icon"
+              variant="outline"
+              aria-label={railOpen ? "Hide recent chats" : "Show recent chats"}
+              aria-pressed={railOpen}
+              title={railOpen ? "Hide recent chats" : "Show recent chats"}
+              onClick={() => setRailOpen((v) => !v)}
+            >
+              <Icon name={railOpen ? "chevR" : "chevL"} size={16} />
+            </Btn>
+          </div>
+        </header>
+
+        <div ref={scrollRef} className="dda-chat-scroll">
+          <div className="dda-chat-inner">
+            {messages.map((m, i) => (
+              <ChatMsg
+                key={m.id}
+                message={m}
+                slug={slug}
+                interactive={
+                  i === messages.length - 1 && m.role === "agent" && !isThinking && !isStreaming
+                }
+                onOption={handleSend}
+              />
+            ))}
+            {toolCalls.length > 0 && (
+              <div className="col gap-1" style={{ padding: "6px 0 0 44px" }}>
+                {toolCalls.map((t) => (
+                  <ToolCallChip key={t.toolUseId} call={t} />
+                ))}
+              </div>
+            )}
+            {isStreaming && partial && (
+              <div className="dda-chat-streaming-wrap">
+                <ChatMsg message={{ id: "streaming", role: "agent", text: partial }} slug={slug} />
+                <span className="dda-chat-streaming-cursor" aria-hidden>
+                  ▍
+                </span>
+              </div>
+            )}
+            {isThinking && (
+              <div className="row gap-3 dda-chat-row">
+                <span className="row center dda-chat-agent-tile">
+                  <Icon name="bot" size={16} />
+                </span>
+                <span className="dda-chat-thinking" aria-label="Agent is thinking">
+                  <span className="dot" />
+                  <span className="dot" />
+                  <span className="dot" />
+                </span>
+              </div>
+            )}
           </div>
         </div>
-        <div className="row gap-2">
-          <Badge icon="layers">{slug}</Badge>
-          <Btn
-            size="sm"
-            variant="outline"
-            icon="trash"
-            loading={clearChat.isPending}
-            disabled={clearChat.isPending || busy || messages.length === 0}
-            onClick={handleClear}
-          >
-            Clear
-          </Btn>
-          <Btn
-            size="icon"
-            variant="outline"
-            aria-label={railOpen ? "Hide recent chats" : "Show recent chats"}
-            aria-pressed={railOpen}
-            title={railOpen ? "Hide recent chats" : "Show recent chats"}
-            onClick={() => setRailOpen((v) => !v)}
-          >
-            <Icon name={railOpen ? "chevR" : "chevL"} size={16} />
-          </Btn>
-        </div>
-      </header>
 
-      <div ref={scrollRef} className="dda-chat-scroll">
-        <div className="dda-chat-inner">
-          {messages.map((m, i) => (
-            <ChatMsg
-              key={m.id}
-              message={m}
-              slug={slug}
-              interactive={i === messages.length - 1 && m.role === "agent" && !isThinking && !isStreaming}
-              onOption={handleSend}
-            />
-          ))}
-          {toolCalls.length > 0 && (
-            <div className="col gap-1" style={{ padding: "6px 0 0 44px" }}>
-              {toolCalls.map((t) => (
-                <ToolCallChip key={t.toolUseId} call={t} />
-              ))}
-            </div>
-          )}
-          {isStreaming && partial && (
-            <div className="dda-chat-streaming-wrap">
-              <ChatMsg
-                message={{ id: "streaming", role: "agent", text: partial }}
-                slug={slug}
-              />
-              <span className="dda-chat-streaming-cursor" aria-hidden>
-                ▍
-              </span>
-            </div>
-          )}
-          {isThinking && (
-            <div className="row gap-3 dda-chat-row">
-              <span className="row center dda-chat-agent-tile">
-                <Icon name="bot" size={16} />
-              </span>
-              <span className="dda-chat-thinking" aria-label="Agent is thinking">
-                <span className="dot" />
-                <span className="dot" />
-                <span className="dot" />
-              </span>
-            </div>
-          )}
+        {agentError && (
+          <div
+            role="alert"
+            style={{
+              margin: "0 24px 12px",
+              padding: "10px 12px",
+              background: "var(--danger-soft)",
+              color: "var(--danger)",
+              borderRadius: 8,
+              fontSize: 12.5,
+            }}
+          >
+            {agentError}
+          </div>
+        )}
+
+        <div style={{ padding: "0 24px 20px", flex: "none" }}>
+          <ChatComposer
+            suggestions={suggestions}
+            showSuggestions
+            onSend={handleSend}
+            disabled={isThinking || isStreaming}
+          />
         </div>
       </div>
-
-      {agentError && (
-        <div
-          role="alert"
-          style={{
-            margin: "0 24px 12px",
-            padding: "10px 12px",
-            background: "var(--danger-soft)",
-            color: "var(--danger)",
-            borderRadius: 8,
-            fontSize: 12.5,
-          }}
-        >
-          {agentError}
-        </div>
-      )}
-
-      <div style={{ padding: "0 24px 20px", flex: "none" }}>
-        <ChatComposer
-          suggestions={suggestions}
-          showSuggestions
-          onSend={handleSend}
-          disabled={isThinking || isStreaming}
-        />
-      </div>
-    </div>
       <ChatHistoryRail
         slug={slug}
         activeThreadId={activeThreadId}
@@ -247,11 +246,7 @@ function ToolCallChip({ call }: { call: ToolCallView }) {
   const target = describeToolInput(call.name, call.input);
   const pending = !call.result;
   const failed = call.result && !call.result.ok;
-  const dotColor = pending
-    ? "var(--text-faint)"
-    : failed
-      ? "var(--danger)"
-      : "var(--ok)";
+  const dotColor = pending ? "var(--text-faint)" : failed ? "var(--danger)" : "var(--ok)";
   return (
     <div
       className="row gap-2"
@@ -283,7 +278,11 @@ function ToolCallChip({ call }: { call: ToolCallView }) {
           {target}
         </span>
       )}
-      {pending && <span className="faint" style={{ fontSize: 11 }}>…</span>}
+      {pending && (
+        <span className="faint" style={{ fontSize: 11 }}>
+          …
+        </span>
+      )}
       {failed && <span style={{ fontSize: 11 }}>failed</span>}
     </div>
   );
@@ -303,9 +302,13 @@ function describeToolInput(name: string, input: unknown): string {
     case "scaffold_helm_chart":
       return str("repoFullName");
     case "list_kubernetes_resources":
-      return str("envKey") && str("kind") ? `${str("envKey")} · ${str("kind")}` : str("envKey") || str("kind");
+      return str("envKey") && str("kind")
+        ? `${str("envKey")} · ${str("kind")}`
+        : str("envKey") || str("kind");
     case "get_kubernetes_logs":
-      return str("envKey") && str("podName") ? `${str("envKey")} · ${str("podName")}` : str("envKey") || str("podName");
+      return str("envKey") && str("podName")
+        ? `${str("envKey")} · ${str("podName")}`
+        : str("envKey") || str("podName");
     case "run_helm_upgrade":
       return str("envKey") && str("releaseName")
         ? `${str("releaseName")} → ${str("envKey")}`

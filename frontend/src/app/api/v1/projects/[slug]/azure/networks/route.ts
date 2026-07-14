@@ -22,17 +22,35 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
     select: { id: true, accountRef: true },
   });
   if (!cp?.accountRef) {
-    return NextResponse.json({ ok: true, connected: false, resourceGroups: [], vnets: [], note: "Connect an Azure subscription on the Cloud providers page first." });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      resourceGroups: [],
+      vnets: [],
+      note: "Connect an Azure subscription on the Cloud providers page first.",
+    });
   }
 
   const tok = await getAzureAccessToken(cp.id);
   if (!tok.ok) {
-    return NextResponse.json({ ok: true, connected: false, resourceGroups: [], vnets: [], note: tok.error });
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      resourceGroups: [],
+      vnets: [],
+      note: tok.error,
+    });
   }
 
   const groups = await listAzureResourceGroups(tok.accessToken, cp.accountRef);
   if (!groups.ok) {
-    return NextResponse.json({ ok: true, connected: true, resourceGroups: [], vnets: [], note: groups.error });
+    return NextResponse.json({
+      ok: true,
+      connected: true,
+      resourceGroups: [],
+      vnets: [],
+      note: groups.error,
+    });
   }
   const vnets = await listAzureVnets(tok.accessToken, cp.accountRef);
 

@@ -1,6 +1,6 @@
-@import 'tailwindcss';
-@import './tokens.css';
-@import './primitives.css';
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./primitives.css";
 
 /* Tailwind v4 — expose design tokens as theme variables for utility classes. */
 @theme inline {

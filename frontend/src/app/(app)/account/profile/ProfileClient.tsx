@@ -18,9 +18,7 @@ export interface ProfileClientProps {
 export function ProfileClient({ name, email, isSuperAdmin }: ProfileClientProps) {
   const { data: projects } = useProjects();
   const { data: profile } = useProfile();
-  const displayName = profile
-    ? `${profile.firstName} ${profile.lastName}`.trim()
-    : name;
+  const displayName = profile ? `${profile.firstName} ${profile.lastName}`.trim() : name;
 
   return (
     <div className="col gap-5">

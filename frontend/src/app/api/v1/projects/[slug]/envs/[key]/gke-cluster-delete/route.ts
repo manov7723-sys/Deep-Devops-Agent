@@ -29,10 +29,7 @@ const Body = z.object({
  * or 504 if the operation is still going when the poll timeout hits (the
  * delete keeps running on Google's side; user can retry to keep polling).
  */
-export async function POST(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; key: string }> },
-) {
+export async function POST(req: Request, ctx: { params: Promise<{ slug: string; key: string }> }) {
   const { slug, key } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
@@ -61,7 +58,11 @@ export async function POST(
   });
   if (cp?.kind !== "gcp") {
     return NextResponse.json(
-      { ok: false, code: "wrong_cloud", message: `Env's cloud is ${cp?.kind ?? "unknown"}, not GCP.` },
+      {
+        ok: false,
+        code: "wrong_cloud",
+        message: `Env's cloud is ${cp?.kind ?? "unknown"}, not GCP.`,
+      },
       { status: 409 },
     );
   }
@@ -131,7 +132,11 @@ export async function POST(
       if (opState.status === "DONE") {
         if (opState.error) {
           return NextResponse.json(
-            { ok: false, code: "delete_op_failed", message: JSON.stringify(opState.error).slice(0, 800) },
+            {
+              ok: false,
+              code: "delete_op_failed",
+              message: JSON.stringify(opState.error).slice(0, 800),
+            },
             { status: 502 },
           );
         }

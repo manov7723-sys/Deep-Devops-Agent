@@ -17,7 +17,10 @@ import { getGcpAccessToken } from "./gcp";
 type Res<T> = { ok: true; data: T } | { ok: false; error: string };
 
 async function resolve(cloudProviderId: string): Promise<Res<{ token: string; project: string }>> {
-  const cp = await prisma.cloudProvider.findUnique({ where: { id: cloudProviderId }, select: { kind: true, accountRef: true } });
+  const cp = await prisma.cloudProvider.findUnique({
+    where: { id: cloudProviderId },
+    select: { kind: true, accountRef: true },
+  });
   if (cp?.kind !== "gcp") return { ok: false, error: "Not a GCP provider." };
   const project = cp.accountRef?.trim();
   if (!project) return { ok: false, error: "GCP provider has no project id." };
@@ -26,7 +29,12 @@ async function resolve(cloudProviderId: string): Promise<Res<{ token: string; pr
   return { ok: true, data: { token: tok.accessToken, project } };
 }
 
-async function gapi<T = Record<string, unknown>>(token: string, url: string, method = "GET", body?: unknown): Promise<Res<T>> {
+async function gapi<T = Record<string, unknown>>(
+  token: string,
+  url: string,
+  method = "GET",
+  body?: unknown,
+): Promise<Res<T>> {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -35,12 +43,18 @@ async function gapi<T = Record<string, unknown>>(token: string, url: string, met
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    return { ok: false, error: `Network error reaching GCP: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GCP: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   const text = await res.text();
   const data = text ? (JSON.parse(text) as T & { error?: { message?: string } }) : ({} as T);
   if (!res.ok) {
-    const msg = (data as { error?: { message?: string } })?.error?.message || text.slice(0, 300) || `HTTP ${res.status}`;
+    const msg =
+      (data as { error?: { message?: string } })?.error?.message ||
+      text.slice(0, 300) ||
+      `HTTP ${res.status}`;
     return { ok: false, error: msg };
   }
   return { ok: true, data };
@@ -48,28 +62,46 @@ async function gapi<T = Record<string, unknown>>(token: string, url: string, met
 
 /** Enable the BigQuery API + create the export dataset. The billing-export
  *  toggle itself has no API and stays manual. */
-export async function prepareGcpForCost(cloudProviderId: string, datasetId: string, location: string): Promise<Res<{ project: string; datasetId: string }>> {
+export async function prepareGcpForCost(
+  cloudProviderId: string,
+  datasetId: string,
+  location: string,
+): Promise<Res<{ project: string; datasetId: string }>> {
   const r = await resolve(cloudProviderId);
   if (!r.ok) return r;
   const { token, project } = r.data;
 
   // 1 — enable the BigQuery API (idempotent).
-  const enable = await gapi(token, `https://serviceusage.googleapis.com/v1/projects/${project}/services/bigquery.googleapis.com:enable`, "POST", {});
+  const enable = await gapi(
+    token,
+    `https://serviceusage.googleapis.com/v1/projects/${project}/services/bigquery.googleapis.com:enable`,
+    "POST",
+    {},
+  );
   if (!enable.ok && !/already enabled|ALREADY_EXISTS/i.test(enable.error)) return enable;
 
   // 2 — create the dataset (ignore ALREADY_EXISTS).
-  const ds = await gapi(token, `https://bigquery.googleapis.com/bigquery/v2/projects/${project}/datasets`, "POST", {
-    datasetReference: { datasetId, projectId: project },
-    location,
-    description: "Cloud Billing export — created by DeepAgent cost automation.",
-  });
+  const ds = await gapi(
+    token,
+    `https://bigquery.googleapis.com/bigquery/v2/projects/${project}/datasets`,
+    "POST",
+    {
+      datasetReference: { datasetId, projectId: project },
+      location,
+      description: "Cloud Billing export — created by DeepAgent cost automation.",
+    },
+  );
   if (!ds.ok && !/already exists|Already Exists|duplicate/i.test(ds.error)) return ds;
 
   return { ok: true, data: { project, datasetId } };
 }
 
 /** Find the billing-export table in the dataset (gcp_billing_export_*). */
-async function findBillingTable(token: string, project: string, datasetId: string): Promise<Res<string>> {
+async function findBillingTable(
+  token: string,
+  project: string,
+  datasetId: string,
+): Promise<Res<string>> {
   const list = await gapi<{ tables?: Array<{ tableReference?: { tableId?: string } }> }>(
     token,
     `https://bigquery.googleapis.com/bigquery/v2/projects/${project}/datasets/${datasetId}/tables?maxResults=1000`,
@@ -80,14 +112,24 @@ async function findBillingTable(token: string, project: string, datasetId: strin
   const detailed = tables.find((t) => t.startsWith("gcp_billing_export_resource_v1_"));
   const standard = tables.find((t) => t.startsWith("gcp_billing_export_v1_"));
   const table = detailed || standard;
-  if (!table) return { ok: false, error: "No billing-export table yet. Enable Billing → BigQuery export in the console; the table appears within a few hours." };
+  if (!table)
+    return {
+      ok: false,
+      error:
+        "No billing-export table yet. Enable Billing → BigQuery export in the console; the table appears within a few hours.",
+    };
   return { ok: true, data: table };
 }
 
-export type GcpCostResult = { ok: true; totalCents: number; currency: string } | { ok: false; error: string };
+export type GcpCostResult =
+  { ok: true; totalCents: number; currency: string } | { ok: false; error: string };
 
 /** Month-to-date GCP spend from the billing export (net of credits). */
-export async function getGcpCost(cloudProviderId: string, datasetId: string, now: Date): Promise<GcpCostResult> {
+export async function getGcpCost(
+  cloudProviderId: string,
+  datasetId: string,
+  now: Date,
+): Promise<GcpCostResult> {
   const r = await resolve(cloudProviderId);
   if (!r.ok) return r;
   const { token, project } = r.data;
@@ -113,7 +155,10 @@ export async function getGcpCost(cloudProviderId: string, datasetId: string, now
   // BigQuery can return jobComplete=false (still running) with no rows — don't
   // silently report $0 in that case.
   if (job.data.jobComplete === false) {
-    return { ok: false, error: "The BigQuery cost query didn't finish in time. Try refreshing again in a moment." };
+    return {
+      ok: false,
+      error: "The BigQuery cost query didn't finish in time. Try refreshing again in a moment.",
+    };
   }
   const row = job.data.rows?.[0]?.f ?? [];
   const value = Number(row[0]?.v ?? "0") || 0;
@@ -143,7 +188,16 @@ async function listDatasets(token: string, project: string): Promise<string[]> {
 
 export type GcpCostDiag =
   | { stage: "ok"; totalCents: number; currency: string; table: string; message: string }
-  | { stage: "auth" | "no_dataset" | "no_export" | "error"; message: string; details?: { project: string; datasetId: string; tablesInDataset: string[]; otherDatasets: string[] } };
+  | {
+      stage: "auth" | "no_dataset" | "no_export" | "error";
+      message: string;
+      details?: {
+        project: string;
+        datasetId: string;
+        tablesInDataset: string[];
+        otherDatasets: string[];
+      };
+    };
 
 /**
  * Diagnose the GCP cost setup so the user knows exactly where they are:
@@ -153,16 +207,26 @@ export type GcpCostDiag =
  *                console toggle; the table + data appear within a few hours)
  *   ok         — the export is live; returns the month-to-date spend
  */
-export async function verifyGcpCost(cloudProviderId: string, datasetId: string, now: Date): Promise<GcpCostDiag> {
+export async function verifyGcpCost(
+  cloudProviderId: string,
+  datasetId: string,
+  now: Date,
+): Promise<GcpCostDiag> {
   const r = await resolve(cloudProviderId);
   if (!r.ok) return { stage: "auth", message: r.error };
   const { token, project } = r.data;
 
   // 1 — dataset exists?
-  const ds = await gapi(token, `https://bigquery.googleapis.com/bigquery/v2/projects/${project}/datasets/${datasetId}`);
+  const ds = await gapi(
+    token,
+    `https://bigquery.googleapis.com/bigquery/v2/projects/${project}/datasets/${datasetId}`,
+  );
   if (!ds.ok) {
     if (/not found|404/i.test(ds.error)) {
-      return { stage: "no_dataset", message: `BigQuery dataset "${datasetId}" doesn't exist yet. Click "Prepare GCP for cost" to create it.` };
+      return {
+        stage: "no_dataset",
+        message: `BigQuery dataset "${datasetId}" doesn't exist yet. Click "Prepare GCP for cost" to create it.`,
+      };
     }
     return { stage: "error", message: ds.error };
   }
@@ -170,7 +234,10 @@ export async function verifyGcpCost(cloudProviderId: string, datasetId: string, 
   // 2 — billing-export table present?
   const tbl = await findBillingTable(token, project, datasetId);
   if (!tbl.ok) {
-    const [tablesInDataset, allDatasets] = await Promise.all([listTables(token, project, datasetId), listDatasets(token, project)]);
+    const [tablesInDataset, allDatasets] = await Promise.all([
+      listTables(token, project, datasetId),
+      listDatasets(token, project),
+    ]);
     const otherDatasets = allDatasets.filter((d) => d !== datasetId);
     const tablesLine = tablesInDataset.length
       ? `Tables currently in "${datasetId}": ${tablesInDataset.join(", ")}.`

@@ -47,13 +47,23 @@ export function ProjectAlertsClient({ slug }: { slug: string }) {
         sub="Security findings and operational alarms across this project — raised by the agents."
         actions={
           <>
-            <Btn variant="outline" icon="settings">Alert rules</Btn>
-            <Btn variant="outline" icon="check">Acknowledge all</Btn>
+            <Btn variant="outline" icon="settings">
+              Alert rules
+            </Btn>
+            <Btn variant="outline" icon="check">
+              Acknowledge all
+            </Btn>
           </>
         }
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 14,
+        }}
+      >
         <Stat label="Open alerts" value={open} icon="alert" sub={`${totals.length} total`} />
         <Stat label="High severity" value={high} icon="shield" sub="needs action now" />
         <Stat label="Security findings" value={security} icon="lock" sub="by Security Sentinel" />

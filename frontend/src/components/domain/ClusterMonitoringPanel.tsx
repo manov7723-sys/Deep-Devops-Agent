@@ -21,7 +21,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Block, Btn, Field, Input, Select, StatusDot } from "@/components/ui";
 import { api, apiErrorMessage } from "@/lib/api/client";
 import { useProjectEnvs } from "@/hooks/queries/project";
-import { PrometheusMetricsPanel, type MetricPreset, type QueryPreset } from "@/components/domain/PrometheusMetricsPanel";
+import {
+  PrometheusMetricsPanel,
+  type MetricPreset,
+  type QueryPreset,
+} from "@/components/domain/PrometheusMetricsPanel";
 import { AppMetricsScrapeForm } from "@/components/domain/AppMetricsScrapeForm";
 import { AppHealthPanel } from "@/components/domain/AppHealthPanel";
 import type { EnvFilterValue } from "@/components/domain/EnvFilter";
@@ -52,11 +56,37 @@ function appPresets(namespace: string, workload: string): MetricPreset[] {
   const pod = workload ? `,pod=~"${workload}-.*"` : "";
   const dep = workload ? `${ns},deployment="${workload}"` : ns;
   return [
-    { key: "cpu", label: "CPU cores", unit: "cores", query: `sum(rate(container_cpu_usage_seconds_total{${ns}${pod},container!=""}[5m]))` },
-    { key: "mem", label: "Memory (GiB)", unit: "GiB", scale: 1 / 1024 ** 3, query: `sum(container_memory_working_set_bytes{${ns}${pod},container!=""})` },
-    { key: "pods", label: "Running pods", unit: "", query: `count(kube_pod_status_phase{${ns}${pod},phase="Running"} == 1)` },
-    { key: "ready", label: "Replicas ready", unit: "", query: `sum(kube_deployment_status_replicas_ready{${dep}})` },
-    { key: "restarts", label: "Restarts (1h)", unit: "", query: `sum(increase(kube_pod_container_status_restarts_total{${ns}${pod}}[1h]))` },
+    {
+      key: "cpu",
+      label: "CPU cores",
+      unit: "cores",
+      query: `sum(rate(container_cpu_usage_seconds_total{${ns}${pod},container!=""}[5m]))`,
+    },
+    {
+      key: "mem",
+      label: "Memory (GiB)",
+      unit: "GiB",
+      scale: 1 / 1024 ** 3,
+      query: `sum(container_memory_working_set_bytes{${ns}${pod},container!=""})`,
+    },
+    {
+      key: "pods",
+      label: "Running pods",
+      unit: "",
+      query: `count(kube_pod_status_phase{${ns}${pod},phase="Running"} == 1)`,
+    },
+    {
+      key: "ready",
+      label: "Replicas ready",
+      unit: "",
+      query: `sum(kube_deployment_status_replicas_ready{${dep}})`,
+    },
+    {
+      key: "restarts",
+      label: "Restarts (1h)",
+      unit: "",
+      query: `sum(increase(kube_pod_container_status_restarts_total{${ns}${pod}}[1h]))`,
+    },
   ];
 }
 
@@ -64,14 +94,41 @@ function appPresets(namespace: string, workload: string): MetricPreset[] {
 function friendlyQueries(namespace: string): QueryPreset[] {
   const ns = `namespace="${namespace}"`;
   return [
-    { label: "Running pods", query: `count(kube_pod_status_phase{${ns},phase="Running"})`, unit: "pods" },
-    { label: "Pod restarts (1h)", query: `sum(increase(kube_pod_container_status_restarts_total{${ns}}[1h]))` },
-    { label: "CPU used", query: `sum(rate(container_cpu_usage_seconds_total{${ns},container!=""}[5m]))`, unit: "cores" },
-    { label: "Memory used", query: `sum(container_memory_working_set_bytes{${ns},container!=""}) / 1024^2`, unit: "MiB" },
-    { label: "Total requests (so far)", query: `sum(http_requests_total{${ns}})`, unit: "requests" },
+    {
+      label: "Running pods",
+      query: `count(kube_pod_status_phase{${ns},phase="Running"})`,
+      unit: "pods",
+    },
+    {
+      label: "Pod restarts (1h)",
+      query: `sum(increase(kube_pod_container_status_restarts_total{${ns}}[1h]))`,
+    },
+    {
+      label: "CPU used",
+      query: `sum(rate(container_cpu_usage_seconds_total{${ns},container!=""}[5m]))`,
+      unit: "cores",
+    },
+    {
+      label: "Memory used",
+      query: `sum(container_memory_working_set_bytes{${ns},container!=""}) / 1024^2`,
+      unit: "MiB",
+    },
+    {
+      label: "Total requests (so far)",
+      query: `sum(http_requests_total{${ns}})`,
+      unit: "requests",
+    },
     { label: "Request rate", query: `sum(rate(http_requests_total{${ns}}[5m]))`, unit: "req/s" },
-    { label: "Error rate (5xx)", query: `sum(rate(http_requests_total{${ns},status=~"5.."}[5m]))`, unit: "req/s" },
-    { label: "p95 latency", query: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{${ns}}[5m])) by (le))`, unit: "s" },
+    {
+      label: "Error rate (5xx)",
+      query: `sum(rate(http_requests_total{${ns},status=~"5.."}[5m]))`,
+      unit: "req/s",
+    },
+    {
+      label: "p95 latency",
+      query: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{${ns}}[5m])) by (le))`,
+      unit: "s",
+    },
     { label: "Apps being monitored", query: `count(up{${ns}} == 1)` },
   ];
 }
@@ -87,11 +144,37 @@ function servicePresets(namespace: string): MetricPreset[] {
   const ns = `namespace="${namespace}"`;
   return [
     { key: "up", label: "Targets up", unit: "", query: `sum(up{${ns}})` },
-    { key: "req", label: "Request rate (req/s)", unit: "/s", query: `sum(rate(http_requests_total{${ns}}[5m]))` },
-    { key: "err", label: "5xx errors (req/s)", unit: "/s", query: `sum(rate(http_requests_total{${ns},status=~"5.."}[5m]))` },
-    { key: "p95", label: "p95 latency (s)", unit: "s", query: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{${ns}}[5m])) by (le))` },
-    { key: "appcpu", label: "App CPU (cores)", unit: "cores", query: `sum(rate(process_cpu_seconds_total{${ns}}[5m]))` },
-    { key: "appmem", label: "App memory (MiB)", unit: "MiB", scale: 1 / 1024 ** 2, query: `sum(process_resident_memory_bytes{${ns}})` },
+    {
+      key: "req",
+      label: "Request rate (req/s)",
+      unit: "/s",
+      query: `sum(rate(http_requests_total{${ns}}[5m]))`,
+    },
+    {
+      key: "err",
+      label: "5xx errors (req/s)",
+      unit: "/s",
+      query: `sum(rate(http_requests_total{${ns},status=~"5.."}[5m]))`,
+    },
+    {
+      key: "p95",
+      label: "p95 latency (s)",
+      unit: "s",
+      query: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{${ns}}[5m])) by (le))`,
+    },
+    {
+      key: "appcpu",
+      label: "App CPU (cores)",
+      unit: "cores",
+      query: `sum(rate(process_cpu_seconds_total{${ns}}[5m]))`,
+    },
+    {
+      key: "appmem",
+      label: "App memory (MiB)",
+      unit: "MiB",
+      scale: 1 / 1024 ** 2,
+      query: `sum(process_resident_memory_bytes{${ns}})`,
+    },
   ];
 }
 
@@ -131,7 +214,11 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
   });
 
   const install = useMutation({
-    mutationFn: () => api.post<{ ok: boolean; message?: string }>(`/projects/${slug}/envs/${activeKey}/monitoring/install`, {}),
+    mutationFn: () =>
+      api.post<{ ok: boolean; message?: string }>(
+        `/projects/${slug}/envs/${activeKey}/monitoring/install`,
+        {},
+      ),
     onMutate: () => setError(null),
     onSuccess: (res) => {
       if (!res.ok) setError((res as { message?: string }).message ?? "Install failed.");
@@ -152,7 +239,11 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
   const nsQ = useQuery<{ ok: boolean; namespaces?: string[] }>({
     queryKey: ["p", slug, "mon-ns", activeKey],
     queryFn: () => api.get(`/projects/${slug}/envs/${activeKey}/logs/namespaces`),
-    enabled: !!activeKey && !!activeEnv?.hasKubeconfig && !!status?.prometheusReady && !!status?.grafanaReady,
+    enabled:
+      !!activeKey &&
+      !!activeEnv?.hasKubeconfig &&
+      !!status?.prometheusReady &&
+      !!status?.grafanaReady,
     staleTime: 60_000,
   });
 
@@ -179,8 +270,8 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
         </Block.Header>
         <Block.Body>
           <span className="muted" style={{ fontSize: 13 }}>
-            This project has no environments yet. Create an environment and connect its cluster, then come back to install
-            monitoring.
+            This project has no environments yet. Create an environment and connect its cluster,
+            then come back to install monitoring.
           </span>
         </Block.Body>
       </Block>
@@ -240,7 +331,12 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
                     title={e.hasKubeconfig ? "Cluster connected" : "No cluster connected"}
                   >
                     {e.name}
-                    {!e.hasKubeconfig && <span className="faint" style={{ fontSize: 11 }}> · no cluster</span>}
+                    {!e.hasKubeconfig && (
+                      <span className="faint" style={{ fontSize: 11 }}>
+                        {" "}
+                        · no cluster
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -248,39 +344,48 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
 
             {noKubeconfig ? (
               <span className="muted" style={{ fontSize: 13 }}>
-                <b>{activeEnv?.name}</b> has no cluster connected yet. Connect its cluster on the Connection tab first, then
-                install monitoring here.
+                <b>{activeEnv?.name}</b> has no cluster connected yet. Connect its cluster on the
+                Connection tab first, then install monitoring here.
               </span>
             ) : (
               <>
                 {!status?.installed && !installing && !isLoading && (
                   <span className="muted" style={{ fontSize: 13 }}>
-                    Click below and the app deploys Prometheus + Grafana + Loki (logs) into <b>{activeEnv?.name}</b>&apos;s
-                    cluster via Helm, and auto-provisions a dashboard (metrics + logs) scoped to this application. It runs as
-                    pods in your cluster (not on our servers, not exposed publicly) and is shown in-app through the cluster
-                    connection. Pods come up over ~2–5 minutes.
+                    Click below and the app deploys Prometheus + Grafana + Loki (logs) into{" "}
+                    <b>{activeEnv?.name}</b>&apos;s cluster via Helm, and auto-provisions a
+                    dashboard (metrics + logs) scoped to this application. It runs as pods in your
+                    cluster (not on our servers, not exposed publicly) and is shown in-app through
+                    the cluster connection. Pods come up over ~2–5 minutes.
                   </span>
                 )}
                 {installing && (
                   <div className="col gap-1">
                     <span style={{ fontSize: 13 }}>⏳ {status?.installStep ?? "Installing…"}</span>
                     <span className="muted" style={{ fontSize: 12.5 }}>
-                      Installing Prometheus + Grafana into <b>{activeEnv?.name}</b>&apos;s cluster via Helm — this can take a few
-                      minutes (longer if a previous attempt has to be cleaned up first). You can leave this page; it keeps
-                      running. The panel updates on its own.
+                      Installing Prometheus + Grafana into <b>{activeEnv?.name}</b>&apos;s cluster
+                      via Helm — this can take a few minutes (longer if a previous attempt has to be
+                      cleaned up first). You can leave this page; it keeps running. The panel
+                      updates on its own.
                     </span>
                   </div>
                 )}
                 {provisioning && (
                   <span className="muted" style={{ fontSize: 13 }}>
-                    Monitoring is provisioning — {status!.ready}/{status!.total} pods ready. Prometheus{" "}
-                    {status!.prometheusReady ? "✅" : "⏳"} · Grafana {status!.grafanaReady ? "✅" : "⏳"}. This panel switches
-                    to live metrics automatically.
+                    Monitoring is provisioning — {status!.ready}/{status!.total} pods ready.
+                    Prometheus {status!.prometheusReady ? "✅" : "⏳"} · Grafana{" "}
+                    {status!.grafanaReady ? "✅" : "⏳"}. This panel switches to live metrics
+                    automatically.
                   </span>
                 )}
-                {status?.note && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12 }}>{status.note}</span>}
+                {status?.note && (
+                  <span style={{ color: "var(--danger, #e5484d)", fontSize: 12 }}>
+                    {status.note}
+                  </span>
+                )}
                 {(error || status?.installError) && (
-                  <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error ?? status?.installError}</span>
+                  <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>
+                    ❌ {error ?? status?.installError}
+                  </span>
                 )}
                 <div className="row gap-2">
                   <Btn
@@ -289,7 +394,11 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
                     loading={install.isPending}
                     onClick={() => install.mutate()}
                   >
-                    {installing ? "Installing… (click to retry)" : status?.installed ? "Re-run / upgrade" : "Install monitoring"}
+                    {installing
+                      ? "Installing… (click to retry)"
+                      : status?.installed
+                        ? "Re-run / upgrade"
+                        : "Install monitoring"}
                   </Btn>
                 </div>
               </>
@@ -303,24 +412,38 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
           {activeKey && <AppHealthPanel slug={slug} envKey={activeKey} namespace={namespace} />}
           <Block>
             <Block.Header>
-              <Block.Title sub={`Locked to namespace "${namespace}"${workload ? `, workload "${workload}"` : ""} — metrics, logs and Grafana all scope to it.`}>
+              <Block.Title
+                sub={`Locked to namespace "${namespace}"${workload ? `, workload "${workload}"` : ""} — metrics, logs and Grafana all scope to it.`}
+              >
                 Scope
               </Block.Title>
             </Block.Header>
             <Block.Body>
               <div className="row gap-3 wrap">
-                <Field label="Namespace (lock)" hint="The embedded Grafana logs + metrics follow this namespace.">
+                <Field
+                  label="Namespace (lock)"
+                  hint="The embedded Grafana logs + metrics follow this namespace."
+                >
                   <div style={{ minWidth: 220 }}>
                     <Select
                       ariaLabel="Namespace"
                       value={namespace}
-                      options={Array.from(new Set([namespace, ...(nsQ.data?.namespaces ?? [])])).map((n) => ({ value: n, label: n }))}
+                      options={Array.from(
+                        new Set([namespace, ...(nsQ.data?.namespaces ?? [])]),
+                      ).map((n) => ({ value: n, label: n }))}
                       onValueChange={(v) => lockNamespace(v)}
                     />
                   </div>
                 </Field>
-                <Field label="Workload (optional)" hint="Deployment / Helm release name. Blank = whole namespace.">
-                  <Input value={workload} placeholder="all workloads" onChange={(e) => setWorkload(e.target.value.trim())} />
+                <Field
+                  label="Workload (optional)"
+                  hint="Deployment / Helm release name. Blank = whole namespace."
+                >
+                  <Input
+                    value={workload}
+                    placeholder="all workloads"
+                    onChange={(e) => setWorkload(e.target.value.trim())}
+                  />
                 </Field>
               </div>
             </Block.Body>
@@ -343,15 +466,25 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
             title="Service metrics (app)"
             queryPresets={friendlyQueries(namespace)}
           />
-          {activeKey && <AppMetricsScrapeForm slug={slug} envKey={activeKey} defaultNamespace={namespace} />}
+          {activeKey && (
+            <AppMetricsScrapeForm slug={slug} envKey={activeKey} defaultNamespace={namespace} />
+          )}
           {status?.grafanaUid && (
             <Block>
               <Block.Header>
-                <Block.Title sub={`Live Grafana dashboard for this application — metrics and logs${status?.loggingReady ? "" : " (logs panel populates once Loki is ready)"}.`}>
+                <Block.Title
+                  sub={`Live Grafana dashboard for this application — metrics and logs${status?.loggingReady ? "" : " (logs panel populates once Loki is ready)"}.`}
+                >
                   Grafana
                 </Block.Title>
                 <Block.Actions>
-                  <a className="btn ghost sm" style={{ textDecoration: "none" }} href={grafanaBase} target="_blank" rel="noopener noreferrer">
+                  <a
+                    className="btn ghost sm"
+                    style={{ textDecoration: "none" }}
+                    href={grafanaBase}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     Open full Grafana ↗
                   </a>
                 </Block.Actions>
@@ -361,7 +494,13 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
                   // var-namespace locks the dashboard to the chosen namespace (works in kiosk mode).
                   title="Application Grafana dashboard"
                   src={`${grafanaBase}d/${status.grafanaUid}/app?kiosk&theme=light&from=now-6h&to=now&refresh=30s&var-namespace=${encodeURIComponent(namespace)}`}
-                  style={{ width: "100%", height: 560, border: "none", borderRadius: 10, background: "var(--surface-2)" }}
+                  style={{
+                    width: "100%",
+                    height: 560,
+                    border: "none",
+                    borderRadius: 10,
+                    background: "var(--surface-2)",
+                  }}
                 />
               </Block.Body>
             </Block>

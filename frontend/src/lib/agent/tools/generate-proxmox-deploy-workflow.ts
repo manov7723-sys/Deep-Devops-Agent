@@ -48,12 +48,22 @@ export const generateProxmoxDeployWorkflowTool: Tool<Input, OutputFiles> = {
   inputSchema: {
     type: "object",
     properties: {
-      appName: { type: "string", description: "App name — used as container name + systemd unit + image name (lowercase-hyphen)." },
-      port: { type: "number", description: "Container port to expose on the host (same on both sides for simplicity)." },
+      appName: {
+        type: "string",
+        description:
+          "App name — used as container name + systemd unit + image name (lowercase-hyphen).",
+      },
+      port: {
+        type: "number",
+        description: "Container port to expose on the host (same on both sides for simplicity).",
+      },
       branch: { type: "string", description: "Branch that triggers the workflow. Default 'main'." },
       dockerContext: { type: "string", description: "Docker build context. Default '.'." },
       dockerfile: { type: "string", description: "Path to the Dockerfile. Default 'Dockerfile'." },
-      extraDockerArgs: { type: "string", description: "Extra flags for `docker run`, e.g. '-e FOO=bar -v /data:/data'." },
+      extraDockerArgs: {
+        type: "string",
+        description: "Extra flags for `docker run`, e.g. '-e FOO=bar -v /data:/data'.",
+      },
     },
     required: ["appName", "port"],
     additionalProperties: false,
@@ -63,7 +73,8 @@ export const generateProxmoxDeployWorkflowTool: Tool<Input, OutputFiles> = {
     if (!NAME_RE.test(app)) {
       return {
         ok: false,
-        error: "Invalid appName. Use lowercase letters, digits, hyphens; start with a letter (2-39 chars).",
+        error:
+          "Invalid appName. Use lowercase letters, digits, hyphens; start with a letter (2-39 chars).",
       };
     }
     if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) {

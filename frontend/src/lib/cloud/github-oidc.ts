@@ -73,11 +73,7 @@ export type GithubOidcSetupResult =
     }
   | { ok: false; code: GithubOidcErrorCode; message: string; stderr?: string };
 
-export type GithubOidcErrorCode =
-  | "cli_not_installed"
-  | "creds_missing"
-  | "bad_input"
-  | "aws_error";
+export type GithubOidcErrorCode = "cli_not_installed" | "creds_missing" | "bad_input" | "aws_error";
 
 /** Run one `aws` CLI invocation with the resolved creds + region. */
 async function aws(
@@ -115,10 +111,18 @@ export async function setupGithubOidcEcr(
 ): Promise<GithubOidcSetupResult> {
   const parsed = parseRepo(input.repoFullName);
   if (!parsed) {
-    return { ok: false, code: "bad_input", message: `"${input.repoFullName}" is not a valid owner/repo.` };
+    return {
+      ok: false,
+      code: "bad_input",
+      message: `"${input.repoFullName}" is not a valid owner/repo.`,
+    };
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9_./-]{1,255}$/.test(input.ecrRepoName)) {
-    return { ok: false, code: "bad_input", message: `Invalid ECR repository name "${input.ecrRepoName}".` };
+    return {
+      ok: false,
+      code: "bad_input",
+      message: `Invalid ECR repository name "${input.ecrRepoName}".`,
+    };
   }
   if (!/^[A-Za-z0-9_+=,.@-]{1,64}$/.test(input.roleName)) {
     return { ok: false, code: "bad_input", message: `Invalid IAM role name "${input.roleName}".` };
@@ -133,14 +137,27 @@ export async function setupGithubOidcEcr(
     // 0 — Who are we? Need the account id for ARNs + the ECR URI.
     const ident = await aws(["sts", "get-caller-identity"], awsEnv, region, workdir);
     if (ident.notInstalled) {
-      return { ok: false, code: "cli_not_installed", message: "The `aws` CLI isn't on the server's PATH." };
+      return {
+        ok: false,
+        code: "cli_not_installed",
+        message: "The `aws` CLI isn't on the server's PATH.",
+      };
     }
     if (!ident.ok) {
       const lower = ident.stderr.toLowerCase();
       if (lower.includes("unable to locate credentials") || lower.includes("no credentials")) {
-        return { ok: false, code: "creds_missing", message: "No usable AWS credentials for this account." };
+        return {
+          ok: false,
+          code: "creds_missing",
+          message: "No usable AWS credentials for this account.",
+        };
       }
-      return { ok: false, code: "aws_error", message: "sts get-caller-identity failed.", stderr: tail(ident.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: "sts get-caller-identity failed.",
+        stderr: tail(ident.stderr),
+      };
     }
     let accountId: string;
     try {
@@ -154,9 +171,19 @@ export async function setupGithubOidcEcr(
     const ecrRepositoryUri = `${accountId}.dkr.ecr.${region}.amazonaws.com/${input.ecrRepoName}`;
 
     // 1 — Ensure the GitHub OIDC identity provider exists (account-wide).
-    const listProviders = await aws(["iam", "list-open-id-connect-providers"], awsEnv, region, workdir);
+    const listProviders = await aws(
+      ["iam", "list-open-id-connect-providers"],
+      awsEnv,
+      region,
+      workdir,
+    );
     if (!listProviders.ok) {
-      return { ok: false, code: "aws_error", message: "iam list-open-id-connect-providers failed.", stderr: tail(listProviders.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: "iam list-open-id-connect-providers failed.",
+        stderr: tail(listProviders.stderr),
+      };
     }
     const providerExists = listProviders.stdout.includes(GITHUB_OIDC_ISSUER);
     if (providerExists) {
@@ -164,18 +191,33 @@ export async function setupGithubOidcEcr(
     } else {
       const create = await aws(
         [
-          "iam", "create-open-id-connect-provider",
-          "--url", `https://${GITHUB_OIDC_ISSUER}`,
-          "--client-id-list", GITHUB_OIDC_AUDIENCE,
-          "--thumbprint-list", ...GITHUB_OIDC_THUMBPRINTS,
+          "iam",
+          "create-open-id-connect-provider",
+          "--url",
+          `https://${GITHUB_OIDC_ISSUER}`,
+          "--client-id-list",
+          GITHUB_OIDC_AUDIENCE,
+          "--thumbprint-list",
+          ...GITHUB_OIDC_THUMBPRINTS,
         ],
-        awsEnv, region, workdir,
+        awsEnv,
+        region,
+        workdir,
       );
       // A concurrent run may have created it — treat "already exists" as success.
       if (!create.ok && !create.stderr.includes("EntityAlreadyExists")) {
-        return { ok: false, code: "aws_error", message: "Could not create the GitHub OIDC provider.", stderr: tail(create.stderr) };
+        return {
+          ok: false,
+          code: "aws_error",
+          message: "Could not create the GitHub OIDC provider.",
+          stderr: tail(create.stderr),
+        };
       }
-      steps.push(create.ok ? `Created OIDC provider for ${GITHUB_OIDC_ISSUER}.` : "OIDC provider already existed.");
+      steps.push(
+        create.ok
+          ? `Created OIDC provider for ${GITHUB_OIDC_ISSUER}.`
+          : "OIDC provider already existed.",
+      );
     }
 
     // 2 — Trust policy: only this repo's Actions runs may assume the role.
@@ -198,41 +240,82 @@ export async function setupGithubOidcEcr(
     const trustPath = join(workdir, "trust.json");
     await writeFile(trustPath, JSON.stringify(trustPolicy), "utf8");
 
-    const getRole = await aws(["iam", "get-role", "--role-name", input.roleName], awsEnv, region, workdir);
+    const getRole = await aws(
+      ["iam", "get-role", "--role-name", input.roleName],
+      awsEnv,
+      region,
+      workdir,
+    );
     if (getRole.ok) {
       // Role exists — reconcile its trust policy so the repo scope is current.
       const upd = await aws(
-        ["iam", "update-assume-role-policy", "--role-name", input.roleName, "--policy-document", `file://${trustPath}`],
-        awsEnv, region, workdir,
+        [
+          "iam",
+          "update-assume-role-policy",
+          "--role-name",
+          input.roleName,
+          "--policy-document",
+          `file://${trustPath}`,
+        ],
+        awsEnv,
+        region,
+        workdir,
       );
       if (!upd.ok) {
-        return { ok: false, code: "aws_error", message: "Could not update the role's trust policy.", stderr: tail(upd.stderr) };
+        return {
+          ok: false,
+          code: "aws_error",
+          message: "Could not update the role's trust policy.",
+          stderr: tail(upd.stderr),
+        };
       }
       steps.push(`IAM role ${input.roleName} already existed — trust policy refreshed.`);
     } else if (getRole.stderr.includes("NoSuchEntity")) {
       const created = await aws(
         [
-          "iam", "create-role",
-          "--role-name", input.roleName,
-          "--assume-role-policy-document", `file://${trustPath}`,
-          "--description", `GitHub Actions OIDC push to ECR for ${input.repoFullName}`,
-          "--max-session-duration", "3600",
+          "iam",
+          "create-role",
+          "--role-name",
+          input.roleName,
+          "--assume-role-policy-document",
+          `file://${trustPath}`,
+          "--description",
+          `GitHub Actions OIDC push to ECR for ${input.repoFullName}`,
+          "--max-session-duration",
+          "3600",
         ],
-        awsEnv, region, workdir,
+        awsEnv,
+        region,
+        workdir,
       );
       if (!created.ok) {
-        return { ok: false, code: "aws_error", message: "Could not create the IAM role.", stderr: tail(created.stderr) };
+        return {
+          ok: false,
+          code: "aws_error",
+          message: "Could not create the IAM role.",
+          stderr: tail(created.stderr),
+        };
       }
       steps.push(`Created IAM role ${input.roleName}.`);
     } else {
-      return { ok: false, code: "aws_error", message: "iam get-role failed.", stderr: tail(getRole.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: "iam get-role failed.",
+        stderr: tail(getRole.stderr),
+      };
     }
 
     // 3 — Inline permission policy: ECR auth (account-wide) + push to one repo.
     const permPolicy = {
       Version: "2012-10-17",
       Statement: [
-        { Sid: "EcrAuthToken", Effect: "Allow", Action: "ecr:GetAuthorizationToken", Resource: "*" },
+        {
+          Sid: "EcrAuthToken",
+          Effect: "Allow",
+          Action: "ecr:GetAuthorizationToken",
+          Resource: "*",
+        },
         {
           Sid: "EcrPushPull",
           Effect: "Allow",
@@ -253,41 +336,70 @@ export async function setupGithubOidcEcr(
     await writeFile(permPath, JSON.stringify(permPolicy), "utf8");
     const putPolicy = await aws(
       [
-        "iam", "put-role-policy",
-        "--role-name", input.roleName,
-        "--policy-name", "ecr-push",
-        "--policy-document", `file://${permPath}`,
+        "iam",
+        "put-role-policy",
+        "--role-name",
+        input.roleName,
+        "--policy-name",
+        "ecr-push",
+        "--policy-document",
+        `file://${permPath}`,
       ],
-      awsEnv, region, workdir,
+      awsEnv,
+      region,
+      workdir,
     );
     if (!putPolicy.ok) {
-      return { ok: false, code: "aws_error", message: "Could not attach the ECR push policy.", stderr: tail(putPolicy.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: "Could not attach the ECR push policy.",
+        stderr: tail(putPolicy.stderr),
+      };
     }
     steps.push(`Attached ECR push policy to ${input.roleName}.`);
 
     // 4 — Ensure the ECR repository exists.
     const describe = await aws(
       ["ecr", "describe-repositories", "--repository-names", input.ecrRepoName],
-      awsEnv, region, workdir,
+      awsEnv,
+      region,
+      workdir,
     );
     if (describe.ok) {
       steps.push(`ECR repository ${input.ecrRepoName} already existed — reused.`);
     } else if (describe.stderr.includes("RepositoryNotFoundException")) {
       const createRepo = await aws(
         [
-          "ecr", "create-repository",
-          "--repository-name", input.ecrRepoName,
-          "--image-scanning-configuration", "scanOnPush=true",
-          "--image-tag-mutability", "MUTABLE",
+          "ecr",
+          "create-repository",
+          "--repository-name",
+          input.ecrRepoName,
+          "--image-scanning-configuration",
+          "scanOnPush=true",
+          "--image-tag-mutability",
+          "MUTABLE",
         ],
-        awsEnv, region, workdir,
+        awsEnv,
+        region,
+        workdir,
       );
       if (!createRepo.ok) {
-        return { ok: false, code: "aws_error", message: "Could not create the ECR repository.", stderr: tail(createRepo.stderr) };
+        return {
+          ok: false,
+          code: "aws_error",
+          message: "Could not create the ECR repository.",
+          stderr: tail(createRepo.stderr),
+        };
       }
       steps.push(`Created ECR repository ${input.ecrRepoName} (scan-on-push enabled).`);
     } else {
-      return { ok: false, code: "aws_error", message: "ecr describe-repositories failed.", stderr: tail(describe.stderr) };
+      return {
+        ok: false,
+        code: "aws_error",
+        message: "ecr describe-repositories failed.",
+        stderr: tail(describe.stderr),
+      };
     }
 
     return {

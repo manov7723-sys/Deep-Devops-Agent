@@ -55,7 +55,8 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
 
   const podsQ = useQuery<PodsResp>({
     queryKey: ["p", slug, "logs-pods", activeKey, namespace],
-    queryFn: () => api.get<PodsResp>(`/projects/${slug}/envs/${activeKey}/logs/pods`, { namespace }),
+    queryFn: () =>
+      api.get<PodsResp>(`/projects/${slug}/envs/${activeKey}/logs/pods`, { namespace }),
     enabled: enabled && !!namespace,
     refetchInterval: 15_000,
   });
@@ -83,19 +84,28 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
   if (envList.length === 0) {
     return (
       <Block>
-        <Block.Empty icon="cloud" title="No environments" description="Create an environment and connect its cluster to view logs." />
+        <Block.Empty
+          icon="cloud"
+          title="No environments"
+          description="Create an environment and connect its cluster to view logs."
+        />
       </Block>
     );
   }
 
-  const nsOptions = (nsQ.data?.namespaces ?? (namespace ? [namespace] : [])).map((n) => ({ value: n, label: n }));
-  const pods = podsQ.data?.ok ? podsQ.data.pods ?? [] : [];
+  const nsOptions = (nsQ.data?.namespaces ?? (namespace ? [namespace] : [])).map((n) => ({
+    value: n,
+    label: n,
+  }));
+  const pods = podsQ.data?.ok ? (podsQ.data.pods ?? []) : [];
 
   return (
     <div className="col gap-4">
       <Block>
         <Block.Header>
-          <Block.Title sub="Read pod logs straight from the cluster — no terminal, nothing exposed.">Logs</Block.Title>
+          <Block.Title sub="Read pod logs straight from the cluster — no terminal, nothing exposed.">
+            Logs
+          </Block.Title>
           <Block.Actions>
             {!activeEnv?.hasKubeconfig && <StatusDot tone="danger" label="no cluster" />}
           </Block.Actions>
@@ -103,7 +113,8 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
         <Block.Body>
           {!activeEnv?.hasKubeconfig ? (
             <span className="muted" style={{ fontSize: 13 }}>
-              <b>{activeEnv?.name}</b> has no cluster connected. Connect it on the Connection tab first.
+              <b>{activeEnv?.name}</b> has no cluster connected. Connect it on the Connection tab
+              first.
             </span>
           ) : (
             <div className="col gap-3">
@@ -131,7 +142,9 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
 
               {/* namespace + controls */}
               <div className="row gap-2 wrap" style={{ alignItems: "center" }}>
-                <span className="faint" style={{ fontSize: 12 }}>Namespace</span>
+                <span className="faint" style={{ fontSize: 12 }}>
+                  Namespace
+                </span>
                 <div style={{ minWidth: 200 }}>
                   <Select
                     ariaLabel="Namespace"
@@ -148,24 +161,42 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
                   <Select
                     ariaLabel="Lines"
                     value={String(tail)}
-                    options={[100, 500, 1000, 2000].map((n) => ({ value: String(n), label: `${n} lines` }))}
+                    options={[100, 500, 1000, 2000].map((n) => ({
+                      value: String(n),
+                      label: `${n} lines`,
+                    }))}
                     onValueChange={(v) => setTail(Number(v))}
                   />
                 </div>
-                <button type="button" className={`chip ${previous ? "active" : ""}`} onClick={() => setPrevious((p) => !p)}>
+                <button
+                  type="button"
+                  className={`chip ${previous ? "active" : ""}`}
+                  onClick={() => setPrevious((p) => !p)}
+                >
                   Previous (crashed)
                 </button>
-                <button type="button" className={`chip ${live ? "active" : ""}`} onClick={() => setLive((l) => !l)}>
+                <button
+                  type="button"
+                  className={`chip ${live ? "active" : ""}`}
+                  onClick={() => setLive((l) => !l)}
+                >
                   {live ? "● Live" : "Live tail"}
                 </button>
-                <Btn variant="outline" icon="refresh" onClick={() => logsQ.refetch()} loading={logsQ.isFetching && !live}>
+                <Btn
+                  variant="outline"
+                  icon="refresh"
+                  onClick={() => logsQ.refetch()}
+                  loading={logsQ.isFetching && !live}
+                >
                   Refresh
                 </Btn>
               </div>
 
               {/* pod list */}
               {podsQ.data && !podsQ.data.ok ? (
-                <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {podsQ.data.message}</span>
+                <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>
+                  ❌ {podsQ.data.message}
+                </span>
               ) : pods.length === 0 ? (
                 <span className="muted" style={{ fontSize: 13 }}>
                   {podsQ.isFetching ? "Loading pods…" : `No pods in "${namespace}".`}
@@ -180,9 +211,17 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
                       title={`${p.phase} · ${p.restarts} restarts`}
                       onClick={() => setPod(p.name)}
                     >
-                      <span className={`dot ${p.ready ? "ok" : p.phase === "Running" ? "warn" : "danger"}`} style={{ width: 6, height: 6, boxShadow: "none" }} />
+                      <span
+                        className={`dot ${p.ready ? "ok" : p.phase === "Running" ? "warn" : "danger"}`}
+                        style={{ width: 6, height: 6, boxShadow: "none" }}
+                      />
                       {p.name}
-                      {p.restarts > 0 && <span className="faint" style={{ fontSize: 11 }}> · {p.restarts}↻</span>}
+                      {p.restarts > 0 && (
+                        <span className="faint" style={{ fontSize: 11 }}>
+                          {" "}
+                          · {p.restarts}↻
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -196,16 +235,22 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
       {enabled && pod && (
         <Block>
           <Block.Header>
-            <Block.Title sub={`${namespace} / ${pod}${previous ? " · previous container" : ""}`}>Output</Block.Title>
+            <Block.Title sub={`${namespace} / ${pod}${previous ? " · previous container" : ""}`}>
+              Output
+            </Block.Title>
             <Block.Actions>{live && <StatusDot tone="ok" label="live" />}</Block.Actions>
           </Block.Header>
           <Block.Body>
             {logsQ.data && !logsQ.data.ok ? (
-              <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {logsQ.data.message}</span>
+              <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>
+                ❌ {logsQ.data.message}
+              </span>
             ) : (
               <>
                 {logsQ.data?.truncated && (
-                  <span className="faint" style={{ fontSize: 11 }}>Showing the most recent output (truncated).</span>
+                  <span className="faint" style={{ fontSize: 11 }}>
+                    Showing the most recent output (truncated).
+                  </span>
                 )}
                 <pre
                   className="mono"
@@ -223,7 +268,9 @@ export function ClusterLogsPanel({ slug, env }: { slug: string; env: EnvFilterVa
                     wordBreak: "break-word",
                   }}
                 >
-                  {logsQ.isFetching && !logsQ.data ? "Loading…" : logsQ.data?.logs?.trim() || "(no log output)"}
+                  {logsQ.isFetching && !logsQ.data
+                    ? "Loading…"
+                    : logsQ.data?.logs?.trim() || "(no log output)"}
                 </pre>
               </>
             )}

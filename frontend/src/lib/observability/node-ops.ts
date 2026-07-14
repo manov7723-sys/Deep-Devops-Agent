@@ -20,7 +20,10 @@ async function withKube<T>(
   envKey: string,
   fn: (execEnv: Record<string, string>) => Promise<T>,
 ): Promise<T | { ok: false; error: string }> {
-  const env = await prisma.env.findFirst({ where: { projectId, key: envKey }, select: { id: true, cloudProviderId: true } });
+  const env = await prisma.env.findFirst({
+    where: { projectId, key: envKey },
+    select: { id: true, cloudProviderId: true },
+  });
   if (!env) return { ok: false, error: `Env "${envKey}" not found.` };
   const kc = await getKubeconfigForEnv(env.id);
   if (!kc.ok) return { ok: false, error: kc.message };
@@ -32,7 +35,11 @@ async function withKube<T>(
   }
 }
 
-export async function getNodeDetail(projectId: string, envKey: string, node: string): Promise<NodeDetail> {
+export async function getNodeDetail(
+  projectId: string,
+  envKey: string,
+  node: string,
+): Promise<NodeDetail> {
   return withKube(projectId, envKey, async (execEnv): Promise<NodeDetail> => {
     // Pods scheduled on this node (all namespaces).
     const podsRes = await runStage({
@@ -43,12 +50,22 @@ export async function getNodeDetail(projectId: string, envKey: string, node: str
       timeoutMs: 30_000,
       maxBufferBytes: 8 * 1024 * 1024,
     });
-    if (podsRes.exitCode === -1) return { ok: false, error: "`kubectl` isn't installed on the server." };
+    if (podsRes.exitCode === -1)
+      return { ok: false, error: "`kubectl` isn't installed on the server." };
     let pods: NodePod[] = [];
     if (podsRes.exitCode === 0) {
       try {
-        const d = JSON.parse(podsRes.stdout) as { items?: Array<{ metadata?: { name?: string; namespace?: string }; status?: { phase?: string } }> };
-        pods = (d.items ?? []).map((p) => ({ name: p.metadata?.name ?? "?", namespace: p.metadata?.namespace ?? "?", status: p.status?.phase ?? "?" }));
+        const d = JSON.parse(podsRes.stdout) as {
+          items?: Array<{
+            metadata?: { name?: string; namespace?: string };
+            status?: { phase?: string };
+          }>;
+        };
+        pods = (d.items ?? []).map((p) => ({
+          name: p.metadata?.name ?? "?",
+          namespace: p.metadata?.namespace ?? "?",
+          status: p.status?.phase ?? "?",
+        }));
       } catch {
         /* leave empty */
       }
@@ -87,13 +104,25 @@ export async function getNodeDetail(projectId: string, envKey: string, node: str
   });
 }
 
-export async function nodeAction(projectId: string, envKey: string, node: string, action: "cordon" | "uncordon" | "drain"): Promise<NodeActionResult> {
+export async function nodeAction(
+  projectId: string,
+  envKey: string,
+  node: string,
+  action: "cordon" | "uncordon" | "drain",
+): Promise<NodeActionResult> {
   const args =
     action === "cordon"
       ? ["cordon", node]
       : action === "uncordon"
         ? ["uncordon", node]
-        : ["drain", node, "--ignore-daemonsets", "--delete-emptydir-data", "--force", "--timeout=120s"];
+        : [
+            "drain",
+            node,
+            "--ignore-daemonsets",
+            "--delete-emptydir-data",
+            "--force",
+            "--timeout=120s",
+          ];
 
   return withKube(projectId, envKey, async (execEnv): Promise<NodeActionResult> => {
     const r = await runStage({
@@ -105,7 +134,11 @@ export async function nodeAction(projectId: string, envKey: string, node: string
       maxBufferBytes: 2 * 1024 * 1024,
     });
     if (r.exitCode === -1) return { ok: false, error: "`kubectl` isn't installed on the server." };
-    if (r.exitCode !== 0) return { ok: false, error: (r.stderr.trim() || r.stdout.trim() || "kubectl failed").slice(-400) };
+    if (r.exitCode !== 0)
+      return {
+        ok: false,
+        error: (r.stderr.trim() || r.stdout.trim() || "kubectl failed").slice(-400),
+      };
     return { ok: true, message: (r.stdout.trim() || `${action} complete`).slice(-400) };
   });
 }

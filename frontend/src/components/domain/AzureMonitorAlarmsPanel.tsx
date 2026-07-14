@@ -35,7 +35,11 @@ export function AzureMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvF
   const envList = useMemo(() => envs ?? [], [envs]);
   const activeKey = useMemo(() => {
     if (env !== "all" && envList.some((e) => e.key === env)) return env;
-    return envList.find((e) => e.cloudKind === "azure")?.key ?? envList.find((e) => e.cloudProviderId)?.key ?? null;
+    return (
+      envList.find((e) => e.cloudKind === "azure")?.key ??
+      envList.find((e) => e.cloudProviderId)?.key ??
+      null
+    );
   }, [env, envList]);
   const activeEnv = envList.find((e) => e.key === activeKey) ?? null;
 
@@ -52,7 +56,7 @@ export function AzureMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvF
     retry: false,
     staleTime: 20_000,
   });
-  const configured = existing.data?.ok ? existing.data.configured ?? 0 : 0;
+  const configured = existing.data?.ok ? (existing.data.configured ?? 0) : 0;
 
   const setup = useMutation({
     mutationFn: () =>
@@ -87,10 +91,17 @@ export function AzureMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvF
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub="AKS node alarms (CPU, memory, disk %) → email action group. Azure only.">Azure Monitor alarms</Block.Title>
+        <Block.Title sub="AKS node alarms (CPU, memory, disk %) → email action group. Azure only.">
+          Azure Monitor alarms
+        </Block.Title>
         <Block.Actions>
           {configured > 0 && <StatusDot tone="ok" label={`${configured} alarms`} />}
-          <Btn variant="ghost" icon="refresh" loading={existing.isFetching} onClick={() => existing.refetch()}>
+          <Btn
+            variant="ghost"
+            icon="refresh"
+            loading={existing.isFetching}
+            onClick={() => existing.refetch()}
+          >
             Refresh
           </Btn>
         </Block.Actions>
@@ -100,15 +111,23 @@ export function AzureMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvF
           {configured > 0 && (
             <div className="card card-pad col gap-1" style={{ fontSize: 12.5 }}>
               <span className="row gap-2" style={{ fontWeight: 600 }}>
-                <span className="dot ok" /> {configured} alarms configured on <b>{existing.data?.clusterName}</b>
+                <span className="dot ok" /> {configured} alarms configured on{" "}
+                <b>{existing.data?.clusterName}</b>
               </span>
-              <span className="faint">Re-running below updates them. Fired alerts also email your action group.</span>
+              <span className="faint">
+                Re-running below updates them. Fired alerts also email your action group.
+              </span>
             </div>
           )}
 
           <div className="row gap-2 wrap">
             {METRICS.map((m) => (
-              <button key={m.key} type="button" className={`chip ${selected.has(m.key) ? "active" : ""}`} onClick={() => toggle(m.key)}>
+              <button
+                key={m.key}
+                type="button"
+                className={`chip ${selected.has(m.key) ? "active" : ""}`}
+                onClick={() => toggle(m.key)}
+              >
                 {selected.has(m.key) ? "✓ " : ""}
                 {m.label}
               </button>
@@ -117,27 +136,51 @@ export function AzureMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvF
 
           <div className="row gap-3 wrap">
             <Field label="Notify email" hint="Creates an Azure action group that emails on alert.">
-              <Input type="email" value={email} placeholder="you@company.com" onChange={(e) => setEmail(e.target.value)} />
+              <Input
+                type="email"
+                value={email}
+                placeholder="you@company.com"
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </Field>
-            <Field label="AKS cluster (optional)" hint="Auto-detected from the kubeconfig if blank.">
-              <Input value={clusterName} placeholder="auto-detect" onChange={(e) => setClusterName(e.target.value)} />
+            <Field
+              label="AKS cluster (optional)"
+              hint="Auto-detected from the kubeconfig if blank."
+            >
+              <Input
+                value={clusterName}
+                placeholder="auto-detect"
+                onChange={(e) => setClusterName(e.target.value)}
+              />
             </Field>
           </div>
 
           <div className="row gap-2">
-            <Btn variant="primary" icon="bell" loading={setup.isPending} disabled={selected.size === 0} onClick={() => setup.mutate()}>
+            <Btn
+              variant="primary"
+              icon="bell"
+              loading={setup.isPending}
+              disabled={selected.size === 0}
+              onClick={() => setup.mutate()}
+            >
               Set up alarms
             </Btn>
           </div>
 
-          {error && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>}
+          {error && (
+            <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>
+          )}
           {result && (
             <div className="col gap-2" style={{ fontSize: 12.5 }}>
               <span className="row gap-2">
-                <StatusDot tone={result.ok ? "ok" : "danger"} label={result.ok ? "configured" : "failed"} />
+                <StatusDot
+                  tone={result.ok ? "ok" : "danger"}
+                  label={result.ok ? "configured" : "failed"}
+                />
                 {result.ok ? (
                   <span>
-                    {result.alarms?.filter((a) => a.ok).length ?? 0} alarms on <b>{result.clusterName}</b> (resource group {result.resourceGroup}).
+                    {result.alarms?.filter((a) => a.ok).length ?? 0} alarms on{" "}
+                    <b>{result.clusterName}</b> (resource group {result.resourceGroup}).
                     {result.emailWired ? " Email action group wired." : ""}
                   </span>
                 ) : (
@@ -146,9 +189,13 @@ export function AzureMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvF
               </span>
               {result.alarms && result.alarms.some((a) => !a.ok) && (
                 <div className="col gap-1">
-                  {result.alarms.filter((a) => !a.ok).map((a, i) => (
-                    <span key={i} style={{ color: "var(--danger, #e5484d)" }}>• {a.label}: {a.error}</span>
-                  ))}
+                  {result.alarms
+                    .filter((a) => !a.ok)
+                    .map((a, i) => (
+                      <span key={i} style={{ color: "var(--danger, #e5484d)" }}>
+                        • {a.label}: {a.error}
+                      </span>
+                    ))}
                 </div>
               )}
             </div>

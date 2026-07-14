@@ -49,8 +49,14 @@ export const provisionEksTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: "Env key whose AWS creds + S3 state to use, e.g. 'release'." },
-      name: { type: "string", description: "Cluster name (lowercase letters, digits, hyphens; start with a letter)." },
+      envKey: {
+        type: "string",
+        description: "Env key whose AWS creds + S3 state to use, e.g. 'release'.",
+      },
+      name: {
+        type: "string",
+        description: "Cluster name (lowercase letters, digits, hyphens; start with a letter).",
+      },
       region: { type: "string", description: "AWS region. Default us-east-1." },
       kubernetesVersion: { type: "string", description: "K8s version, e.g. '1.30'." },
       instanceType: { type: "string", description: "Node instance type, e.g. 't3.medium'." },
@@ -58,16 +64,29 @@ export const provisionEksTool: Tool<Input, Output> = {
       minNodes: { type: "number", description: "Min node count. Default 1." },
       maxNodes: { type: "number", description: "Max node count. Default 3." },
       endpointPublic: { type: "boolean", description: "Public API endpoint. Default true." },
-      mode: { type: "string", enum: ["push", "apply", "push_and_apply"], description: "Execution mode the user chose." },
-      repoFullName: { type: "string", description: "owner/repo to push to (required for push modes)." },
-      path: { type: "string", description: "GitHub folder for the files. Default terraform/eks/<name>." },
+      mode: {
+        type: "string",
+        enum: ["push", "apply", "push_and_apply"],
+        description: "Execution mode the user chose.",
+      },
+      repoFullName: {
+        type: "string",
+        description: "owner/repo to push to (required for push modes).",
+      },
+      path: {
+        type: "string",
+        description: "GitHub folder for the files. Default terraform/eks/<name>.",
+      },
     },
     required: ["envKey", "name", "mode"],
     additionalProperties: false,
   },
   async execute(input, ctx) {
     if (!/^[a-z][a-z0-9-]{1,38}$/.test(input.name)) {
-      return { ok: false, error: "Invalid cluster name. Use lowercase letters, digits, hyphens; start with a letter." };
+      return {
+        ok: false,
+        error: "Invalid cluster name. Use lowercase letters, digits, hyphens; start with a letter.",
+      };
     }
     const wantsPush = input.mode === "push" || input.mode === "push_and_apply";
     const wantsApply = input.mode === "apply" || input.mode === "push_and_apply";
@@ -77,11 +96,21 @@ export const provisionEksTool: Tool<Input, Output> = {
 
     const env = await prisma.env.findUnique({
       where: { projectId_key: { projectId: ctx.projectId, key: input.envKey } },
-      select: { id: true, key: true, cloudProviderId: true, tfBackendBucket: true, tfBackendRegion: true, tfBackendTable: true },
+      select: {
+        id: true,
+        key: true,
+        cloudProviderId: true,
+        tfBackendBucket: true,
+        tfBackendRegion: true,
+        tfBackendTable: true,
+      },
     });
     if (!env) return { ok: false, error: `Env "${input.envKey}" not found in this project.` };
     if (wantsApply && !env.cloudProviderId) {
-      return { ok: false, error: `Env "${input.envKey}" has no cloud provider connected — connect AWS before applying.` };
+      return {
+        ok: false,
+        error: `Env "${input.envKey}" has no cloud provider connected — connect AWS before applying.`,
+      };
     }
 
     const region = (input.region ?? "us-east-1").trim();
@@ -95,10 +124,18 @@ export const provisionEksTool: Tool<Input, Output> = {
       maxNodes: input.maxNodes ?? 3,
       endpointPublic: input.endpointPublic ?? true,
       ...(env.tfBackendBucket
-        ? { stateBucket: env.tfBackendBucket, stateRegion: env.tfBackendRegion ?? region, stateTable: env.tfBackendTable ?? undefined }
+        ? {
+            stateBucket: env.tfBackendBucket,
+            stateRegion: env.tfBackendRegion ?? region,
+            stateTable: env.tfBackendTable ?? undefined,
+          }
         : {}),
     };
-    if (spec.maxNodes < spec.minNodes || spec.desiredNodes < spec.minNodes || spec.desiredNodes > spec.maxNodes) {
+    if (
+      spec.maxNodes < spec.minNodes ||
+      spec.desiredNodes < spec.minNodes ||
+      spec.desiredNodes > spec.maxNodes
+    ) {
       return { ok: false, error: "Node counts must satisfy min ≤ desired ≤ max." };
     }
 
@@ -125,7 +162,8 @@ export const provisionEksTool: Tool<Input, Output> = {
           },
           ctx,
         );
-        if (!res.ok) return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
+        if (!res.ok)
+          return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
         if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
         first = false;
@@ -159,11 +197,22 @@ export const provisionEksTool: Tool<Input, Output> = {
     const bits: string[] = [`Generated ${fileCount} EKS Terraform files for "${input.name}".`];
     if (pullRequest) bits.push(`Opened PR #${pullRequest.number}: ${pullRequest.url}`);
     else if (committed.length) bits.push(`Committed ${committed.length} files.`);
-    if (runId) bits.push(`Started terraform apply (run ${runId}) — track it on the Infrastructure tab (EKS takes ~15–20 min).`);
+    if (runId)
+      bits.push(
+        `Started terraform apply (run ${runId}) — track it on the Infrastructure tab (EKS takes ~15–20 min).`,
+      );
 
     return {
       ok: true,
-      output: { cluster: input.name, fileCount, mode: input.mode, runId, pullRequest, committed, note: bits.join(" ") },
+      output: {
+        cluster: input.name,
+        fileCount,
+        mode: input.mode,
+        runId,
+        pullRequest,
+        committed,
+        note: bits.join(" "),
+      },
     };
   },
 };

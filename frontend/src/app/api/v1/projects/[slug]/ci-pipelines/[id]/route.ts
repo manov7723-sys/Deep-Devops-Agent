@@ -27,10 +27,18 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   if (r.error) return r.error;
   const p = r.row;
   return NextResponse.json({
-    id: p.id, name: p.name, status: p.status, agentReview: p.agentReview,
-    branch: p.branch, files: p.files, workflowPath: p.workflowPath,
-    runUrl: p.runUrl, conclusion: p.conclusion, stages: p.stages,
-    lastError: p.lastError, healAttempts: p.healAttempts,
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    agentReview: p.agentReview,
+    branch: p.branch,
+    files: p.files,
+    workflowPath: p.workflowPath,
+    runUrl: p.runUrl,
+    conclusion: p.conclusion,
+    stages: p.stages,
+    lastError: p.lastError,
+    healAttempts: p.healAttempts,
     updatedAt: p.updatedAt.toISOString(),
   });
 }
@@ -41,14 +49,20 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string;
   const r = await load(slug, id, "developer");
   if (r.error) return r.error;
   const parsed = PatchBody.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request" }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json({ ok: false, code: "invalid_request" }, { status: 400 });
 
   const data: Record<string, unknown> = {};
   if (parsed.data.name !== undefined) data.name = parsed.data.name;
   if (parsed.data.agentReview !== undefined) data.agentReview = parsed.data.agentReview;
   if (parsed.data.files !== undefined) {
-    data.files = parsed.data.files.map((f) => ({ path: f.path.replace(/^\/+/, ""), content: f.content }));
-    const wf = parsed.data.files.find((f) => /^\.github\/workflows\/.+\.ya?ml$/.test(f.path.replace(/^\/+/, "")));
+    data.files = parsed.data.files.map((f) => ({
+      path: f.path.replace(/^\/+/, ""),
+      content: f.content,
+    }));
+    const wf = parsed.data.files.find((f) =>
+      /^\.github\/workflows\/.+\.ya?ml$/.test(f.path.replace(/^\/+/, "")),
+    );
     data.workflowPath = wf ? wf.path.replace(/^\/+/, "") : null;
   }
   await prisma.ciPipeline.update({ where: { id }, data });
@@ -56,7 +70,10 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string;
 }
 
 /** Remove a saved pipeline. */
-export async function DELETE(_req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
+export async function DELETE(
+  _req: Request,
+  ctx: { params: Promise<{ slug: string; id: string }> },
+) {
   const { slug, id } = await ctx.params;
   const r = await load(slug, id, "developer");
   if (r.error) return r.error;

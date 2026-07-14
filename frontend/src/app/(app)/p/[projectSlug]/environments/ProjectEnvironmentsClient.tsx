@@ -33,7 +33,8 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
   const qc = useQueryClient();
   const { data: activeResp } = useQuery<{ ok: boolean; activeEnvKey: string | null }>({
     queryKey: ["p", slug, "active-env"],
-    queryFn: () => api.get<{ ok: boolean; activeEnvKey: string | null }>(`/projects/${slug}/active-env`),
+    queryFn: () =>
+      api.get<{ ok: boolean; activeEnvKey: string | null }>(`/projects/${slug}/active-env`),
   });
   const activeEnvKey = activeResp?.activeEnvKey ?? null;
   const setActive = useMutation({
@@ -48,7 +49,7 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
     setSelected(id);
     const p = new URLSearchParams(sp);
     p.set("focus", id);
-    router.replace((`${pathname}?${p.toString()}`) as Route);
+    router.replace(`${pathname}?${p.toString()}` as Route);
   }
 
   const focused = envs?.find((e) => e.id === selected) ?? envs?.[0];
@@ -66,16 +67,42 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
           </div>
         ),
       },
-      { id: "replicas", header: "Replicas", cell: ({ row }) => <span className="mono">{row.original.replicas}</span> },
-      { id: "cpu", header: "CPU", cell: ({ row }) => <span className="mono" style={{ fontSize: 12 }}>{row.original.cpu}</span> },
-      { id: "mem", header: "Memory", cell: ({ row }) => <span className="mono" style={{ fontSize: 12 }}>{row.original.mem}</span> },
+      {
+        id: "replicas",
+        header: "Replicas",
+        cell: ({ row }) => <span className="mono">{row.original.replicas}</span>,
+      },
+      {
+        id: "cpu",
+        header: "CPU",
+        cell: ({ row }) => (
+          <span className="mono" style={{ fontSize: 12 }}>
+            {row.original.cpu}
+          </span>
+        ),
+      },
+      {
+        id: "mem",
+        header: "Memory",
+        cell: ({ row }) => (
+          <span className="mono" style={{ fontSize: 12 }}>
+            {row.original.mem}
+          </span>
+        ),
+      },
       {
         id: "status",
         header: "Status",
         cell: ({ row }) => (
           <StatusDot
             tone={row.original.status}
-            label={row.original.status === "ok" ? "Healthy" : row.original.status === "warn" ? "Degraded" : "Down"}
+            label={
+              row.original.status === "ok"
+                ? "Healthy"
+                : row.original.status === "warn"
+                  ? "Degraded"
+                  : "Down"
+            }
           />
         ),
       },
@@ -139,22 +166,38 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
                     onClick={() => setActive.mutate(e.key)}
                     disabled={setActive.isPending}
                     style={{
-                      alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      cursor: "pointer",
                       border: `1px solid ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
-                      background: isActive ? "var(--accent-soft, var(--surface-2))" : "var(--surface-1)",
+                      background: isActive
+                        ? "var(--accent-soft, var(--surface-2))"
+                        : "var(--surface-1)",
                     }}
                   >
                     <span className="row gap-2" style={{ alignItems: "center" }}>
-                      <span aria-hidden style={{
-                        width: 16, height: 16, borderRadius: "50%", flex: "none",
-                        border: `2px solid ${isActive ? "var(--accent)" : "var(--border)"}`,
-                        background: isActive ? "var(--accent)" : "transparent",
-                        boxShadow: isActive ? "inset 0 0 0 3px var(--surface-1)" : "none",
-                      }} />
+                      <span
+                        aria-hidden
+                        style={{
+                          width: 16,
+                          height: 16,
+                          borderRadius: "50%",
+                          flex: "none",
+                          border: `2px solid ${isActive ? "var(--accent)" : "var(--border)"}`,
+                          background: isActive ? "var(--accent)" : "transparent",
+                          boxShadow: isActive ? "inset 0 0 0 3px var(--surface-1)" : "none",
+                        }}
+                      />
                       <strong style={{ fontSize: 13.5 }}>{e.name}</strong>
                       <Badge tone="default">{e.key}</Badge>
                     </span>
-                    {isActive && <Badge tone="ok" icon="check">Active</Badge>}
+                    {isActive && (
+                      <Badge tone="ok" icon="check">
+                        Active
+                      </Badge>
+                    )}
                   </button>
                 );
               })}
@@ -173,7 +216,10 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
             </Block.Header>
             <Block.Body>
               <div className="col gap-3">
-                <ConfigRow label="Source branch" value={<code className="mono">{focused.branch}</code>} />
+                <ConfigRow
+                  label="Source branch"
+                  value={<code className="mono">{focused.branch}</code>}
+                />
                 <ConfigRow
                   label="Public URL"
                   value={
@@ -184,15 +230,38 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
                 />
                 <ConfigRow
                   label="Cloud target"
-                  value={<Badge icon="cloud">{focused.id === "alpha" ? "GCP · us-central1" : "AWS · us-east-1"}</Badge>}
+                  value={
+                    <Badge icon="cloud">
+                      {focused.id === "alpha" ? "GCP · us-central1" : "AWS · us-east-1"}
+                    </Badge>
+                  }
                 />
-                <ConfigRow label="Auto-deploy" value={<Toggle checked={focused.auto} onCheckedChange={() => {}} ariaLabel="Auto-deploy" />} />
-                <ConfigRow label="Require approval" value={<Toggle checked={!focused.auto} onCheckedChange={() => {}} ariaLabel="Require approval" />} />
+                <ConfigRow
+                  label="Auto-deploy"
+                  value={
+                    <Toggle
+                      checked={focused.auto}
+                      onCheckedChange={() => {}}
+                      ariaLabel="Auto-deploy"
+                    />
+                  }
+                />
+                <ConfigRow
+                  label="Require approval"
+                  value={
+                    <Toggle
+                      checked={!focused.auto}
+                      onCheckedChange={() => {}}
+                      ariaLabel="Require approval"
+                    />
+                  }
+                />
                 <ConfigRow
                   label="Terraform workspace"
                   value={
                     <code className="mono">
-                      {(focused as unknown as ProjectEnv).terraformWorkspace ?? `${slug}-${focused.id}`}
+                      {(focused as unknown as ProjectEnv).terraformWorkspace ??
+                        `${slug}-${focused.id}`}
                     </code>
                   }
                 />
@@ -261,7 +330,12 @@ function PromoTile({
 }) {
   return (
     <>
-      <button type="button" onClick={onPick} className="dda-env-tile col gap-2" data-active={active ? "true" : undefined}>
+      <button
+        type="button"
+        onClick={onPick}
+        className="dda-env-tile col gap-2"
+        data-active={active ? "true" : undefined}
+      >
         <div className="row between">
           <span className="row gap-2" style={{ fontWeight: 700 }}>
             <span className={`dot ${e.tone}`} />
@@ -269,8 +343,12 @@ function PromoTile({
           </span>
           <Badge tone={e.tone}>{e.id}</Badge>
         </div>
-        <span className="mono faint" style={{ fontSize: 11.5 }}>{e.branch}</span>
-        <span className="mono" style={{ fontSize: 12 }}>{e.url}</span>
+        <span className="mono faint" style={{ fontSize: 11.5 }}>
+          {e.branch}
+        </span>
+        <span className="mono" style={{ fontSize: 12 }}>
+          {e.url}
+        </span>
         <div className="row gap-2 muted" style={{ fontSize: 11.5 }}>
           <Icon name={e.auto ? "zap" : "lock"} size={13} />
           {e.auto ? "Auto-deploy" : "Manual approval"}

@@ -15,11 +15,17 @@ export async function listWorkloads(
   namespace?: string,
 ): Promise<{ ok: true; namespace: string; workloads: Workload[] } | { ok: false; error: string }> {
   const ctx = { projectId, userId };
-  const depRes = await listKubernetesResourcesTool.execute({ envKey, kind: "deployments", namespace }, ctx);
+  const depRes = await listKubernetesResourcesTool.execute(
+    { envKey, kind: "deployments", namespace },
+    ctx,
+  );
   if (!depRes.ok) return { ok: false, error: depRes.error };
   const ns = depRes.output.namespace;
 
-  const podRes = await listKubernetesResourcesTool.execute({ envKey, kind: "pods", namespace: ns }, ctx);
+  const podRes = await listKubernetesResourcesTool.execute(
+    { envKey, kind: "pods", namespace: ns },
+    ctx,
+  );
   const allPods = podRes.ok ? podRes.output.items : [];
 
   const workloads: Workload[] = depRes.output.items.map((d) => {

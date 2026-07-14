@@ -20,7 +20,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam, ContentBlockParam } from "@anthropic-ai/sdk/resources/messages";
 import OpenAI from "openai";
 import { prisma } from "@/lib/db/prisma";
-import { ALL_TOOLS, executeTool, toAnthropicTools, toolsForClouds, toolsForProject, type Tool } from "./tools";
+import {
+  ALL_TOOLS,
+  executeTool,
+  toAnthropicTools,
+  toolsForClouds,
+  toolsForProject,
+  type Tool,
+} from "./tools";
 
 export type ResolvedModel = {
   name: string;
@@ -153,7 +160,7 @@ const DEPLOY_PIPELINE_PLAYBOOK = [
   '0. YOUR FIRST REPLY to a deploy request is EXACTLY this fenced block, verbatim, and NOTHING else (the JSON must be INSIDE the fence — never print it as plain text, and never print it twice):\n```options\n{"question":"How should I set this up?","options":["Fully automated — analyze my repo and generate everything","Form — let me fill the settings myself"],"key":"setupMode"}\n```\nWAIT for the answer. FORM → emit the empty ```cicd-setup``` fence and stop (resume at step 5 once the user says the PR is merged). FULLY AUTOMATED → step 1.',
   "1. Repo = the project's app repository from your system context; env = the DEFAULT deploy environment from your system context. Both are known — ask NOTHING here, just proceed (you'll state them in your step-5 report).",
   "2. Call analyze_app_services(repoFullName = the app repository). It returns every deployable service — a SINGLE app, OR a monorepo with a separate FRONTEND and BACKEND (each has a path, stackTitle and suggestedImageName). Then call list_kubernetes_resources(envKey, kind:'namespaces') to fetch the existing namespaces on the cluster. Do these silently — do not narrate tool calls.",
-  "3. BATCH FORM — MANDATORY, NO ALTERNATIVE. After silently running analyze_app_services + list_kubernetes_resources(envKey,kind:'namespaces') + list_repo_branches(repoFullName) + list_ecr_repos/list_artifact_registries/list_acr IN THIS TURN, your NEXT MESSAGE is EXACTLY the ```options-form``` fenced block below and NOTHING ELSE. No preamble like 'I detected a single deployable service…'. No trailing text like 'Please provide your choices'. No numbered list of questions in prose. No prose describing what will happen. NO PROSE OF ANY KIND. If you catch yourself typing 'I detected', 'Now I need you', 'Please choose', 'Which namespace to deploy', 'Please provide your choices', or ANY human-readable question — STOP — you are violating the rule. Delete everything and emit ONLY the fence. The fence renders as a form the user fills in and submits with ONE button — the intro field inside the JSON is the ONLY summary allowed, and it's ONE short line. HARD BAN: you MAY NOT emit ```options``` blocks (not ```options-form```) for namespace, branch, or registry. You MAY NOT ask these questions one at a time. You MAY NOT ask any of them in follow-up messages. Emit this EXACT shape, filling the bracketed slots from the tool results above (nothing else in the message, no leading or trailing text):\n```options-form\n{\"intro\":\"Detected <N> service(s): <serviceName(stackTitle)>. Pick a namespace, branch and registry to continue.\",\"questions\":[{\"key\":\"namespace\",\"question\":\"Which namespace should I deploy to?\",\"options\":[<existing namespace strings>,\"Create new: <repo-name default>\"]},{\"key\":\"branch\",\"question\":\"Which branch should the CI/CD workflow trigger from?\",\"options\":[<returned branch strings>,\"Create new: <defaultBranch>\"],\"default\":\"<defaultBranch if present in options>\"},{\"key\":\"registry_<serviceName>\",\"question\":\"Which container registry for the <serviceName> service (<stackTitle>)?\",\"options\":[<existing repo name strings>,\"Create new: <suggestedImageName>\"]}<one such registry entry PER detected service — 1 for a single-app repo, 2 for a monorepo>],\"submitLabel\":\"Deploy\"}\n```\nWAIT for the user to submit. The chat surface sends their answers back as ONE message shaped like \"namespace: X, branch: Y, registry_app: Z\" — parse it to extract each value.",
+  '3. BATCH FORM — MANDATORY, NO ALTERNATIVE. After silently running analyze_app_services + list_kubernetes_resources(envKey,kind:\'namespaces\') + list_repo_branches(repoFullName) + list_ecr_repos/list_artifact_registries/list_acr IN THIS TURN, your NEXT MESSAGE is EXACTLY the ```options-form``` fenced block below and NOTHING ELSE. No preamble like \'I detected a single deployable service…\'. No trailing text like \'Please provide your choices\'. No numbered list of questions in prose. No prose describing what will happen. NO PROSE OF ANY KIND. If you catch yourself typing \'I detected\', \'Now I need you\', \'Please choose\', \'Which namespace to deploy\', \'Please provide your choices\', or ANY human-readable question — STOP — you are violating the rule. Delete everything and emit ONLY the fence. The fence renders as a form the user fills in and submits with ONE button — the intro field inside the JSON is the ONLY summary allowed, and it\'s ONE short line. HARD BAN: you MAY NOT emit ```options``` blocks (not ```options-form```) for namespace, branch, or registry. You MAY NOT ask these questions one at a time. You MAY NOT ask any of them in follow-up messages. Emit this EXACT shape, filling the bracketed slots from the tool results above (nothing else in the message, no leading or trailing text):\n```options-form\n{"intro":"Detected <N> service(s): <serviceName(stackTitle)>. Pick a namespace, branch and registry to continue.","questions":[{"key":"namespace","question":"Which namespace should I deploy to?","options":[<existing namespace strings>,"Create new: <repo-name default>"]},{"key":"branch","question":"Which branch should the CI/CD workflow trigger from?","options":[<returned branch strings>,"Create new: <defaultBranch>"],"default":"<defaultBranch if present in options>"},{"key":"registry_<serviceName>","question":"Which container registry for the <serviceName> service (<stackTitle>)?","options":[<existing repo name strings>,"Create new: <suggestedImageName>"]}<one such registry entry PER detected service — 1 for a single-app repo, 2 for a monorepo>],"submitLabel":"Deploy"}\n```\nWAIT for the user to submit. The chat surface sends their answers back as ONE message shaped like "namespace: X, branch: Y, registry_app: Z" — parse it to extract each value.',
   "4. Call deploy_my_app(repoFullName, envKey, namespace, branch, services:[{name, path, imageName, expose}]) with the values the user submitted in step 3's form. `namespace`, `branch`, and `services` are REQUIRED. namespace = the form's `namespace` answer; branch = the form's `branch` answer (deploy_my_app auto-creates the branch if it doesn't exist yet); services = one entry per detected service with name+path from analyze_app_services, imageName = the form's `registry_<serviceName>` answer for that service (strip any \"Create new: \" prefix), expose=false (never asked — always internal by default). It generates the Dockerfile(s), CI workflow(s) and production-style manifests and opens ONE PR. Report what it detected, the PR link, and each service's image name + workflow file.",
   "5. Once the files are on the chosen branch (PR merged, or commitMode='direct'), everything is AUTOMATIC — deploy_my_app also wrote a CD workflow that deploys after CI succeeds (keyless on EKS: the CI role assumes via OIDC; deploy_my_app already granted it cluster access). For EACH service: wait_for_workflow_run(that service's workflowFile) — on conclusion='failure' inspect `failureKind` FIRST. failureKind='acr_secrets_missing' → the ACR docker-login secrets are missing/empty; call repair_azure_acr_push_auth(repoFullName) YOURSELF (do NOT ask the user, do NOT tell them to add secrets in Settings, do NOT tell them to reconnect Azure), then wait_for_workflow_run again — the repair rewrites the three secrets and re-runs the failed jobs. Only after two consecutive failures with the same kind, tell the user and stop. failureKind='cd_no_aws_creds' OR 'cd_no_gcp_creds' → the env's stored kubeconfig points at a cluster on a cloud the project isn't connected to (or is stale), so the runner's kubectl exec-plugin has nothing to auth with. Call repair_cd_kubeconfig(repoFullName, envKey, cdWorkflowFile) YOURSELF — do NOT ask the user, do NOT tell them to click Connect cluster, do NOT ask them to run set_kubeconfig_secret, do NOT suggest reconnecting any cloud. The tool auto-lists the AKS/EKS/GKE clusters on the env's connected cloud, if EXACTLY one exists it connects that cluster to the env (writes a fresh kubeconfig via ARM), pushes it to the repo as KUBECONFIG_B64, and reruns the failed CD workflow — all server-side. If the tool returns `candidates` (multiple clusters found → needs the user's choice), ask ONE ```options``` question with the candidates and re-invoke with the chosen cluster; otherwise wait for the rerun to complete and check status. If the tool returns error 'No AKS clusters exist…', THEN and only then tell the user + offer to create one via the aks-create flow. failureKind='ci_wif_binding_missing' → the CI's docker-push can't impersonate the GCP service account (WIF binding missing for this repo, or IAM hasn't propagated). Call repair_gcp_wif_binding(repoFullName, ciWorkflowFile) YOURSELF — do NOT ask the user to open the GCP console or add a binding manually. The tool re-runs the WIF setup (idempotent — adds this repo's SA impersonation binding + patches the provider's attribute condition), waits ~60s for IAM to propagate, and reruns the failed CI. Only after two consecutive failures with the same kind, tell the user and stop. Other failureKind values (Trivy HIGH/CRITICAL gate, build error) need a Dockerfile/app fix — report them and stop for that service. On success wait_for_workflow_run(that service's cdWorkflowFile).",
   "6. When the CD run succeeds, confirm with deployment_status(envKey, appName=service.appName) and report the result. If a CD run FAILS: on 'Unauthorized' / 'must be logged in to the server', fix it YOURSELF with grant_eks_access(envKey, roleArn=that service's AWS role) and re-run; otherwise fall back to the server-side deploy_app(envKey, appName, image=service.imageRef, containerPort=service.containerPort) — it goes through the APPROVAL GATE (respond with a fenced ```approval-card``` block containing the returned approvalId; after approval, poll deployment_status until healthy).",
@@ -218,7 +225,8 @@ async function loadKnowledgeContext(projectId: string): Promise<string> {
     const withBody = docs.filter((d) => (d.body ?? "").trim()).slice(0, 6);
     if (withBody.length === 0) return "";
     const parts = withBody.map(
-      (d) => `### ${d.title}${d.type ? ` (${d.type})` : ""}\n${(d.body ?? "").slice(0, 600).trim()}`,
+      (d) =>
+        `### ${d.title}${d.type ? ` (${d.type})` : ""}\n${(d.body ?? "").slice(0, 600).trim()}`,
     );
     return (
       "## Project knowledge base\n" +
@@ -247,7 +255,9 @@ async function loadClusterContext(projectId: string): Promise<string> {
       select: { key: true, name: true, namespace: true },
     });
     if (envs.length === 0) return "";
-    const lines = envs.map((e) => `- env "${e.key}"${e.name ? ` (${e.name})` : ""}, default namespace "${e.namespace}"`);
+    const lines = envs.map(
+      (e) => `- env "${e.key}"${e.name ? ` (${e.name})` : ""}, default namespace "${e.namespace}"`,
+    );
     return (
       "## Connected Kubernetes clusters\n" +
       "These environments have a live cluster connected. When the user asks to list pods/nodes/services, get logs, etc., call list_kubernetes_resources / get_kubernetes_logs with the matching env key (no need to ask which env if there's only one):\n" +
@@ -280,7 +290,9 @@ async function loadRepoContext(projectId: string): Promise<string> {
     }
     return (
       "## Attached repositories:\n" +
-      repos.map((r) => `- ${r.fullName} (default branch "${r.defaultBranch || "main"}")`).join("\n") +
+      repos
+        .map((r) => `- ${r.fullName} (default branch "${r.defaultBranch || "main"}")`)
+        .join("\n") +
       "\nIf the task needs ONE repo and the user didn't name it, ask which via an ```options``` block (one option per repo) — never free-text."
     );
   } catch {
@@ -297,7 +309,13 @@ async function loadDeployEnvContext(projectId: string): Promise<string> {
   try {
     const envs = await prisma.env.findMany({
       where: { projectId },
-      select: { key: true, name: true, namespace: true, kubeconfigRef: true, cloudProviderId: true },
+      select: {
+        key: true,
+        name: true,
+        namespace: true,
+        kubeconfigRef: true,
+        cloudProviderId: true,
+      },
       orderBy: { createdAt: "asc" },
     });
     const deployable = envs.filter((e) => e.kubeconfigRef);
@@ -666,7 +684,10 @@ export async function completeText(args: {
       system: args.system,
       messages: [{ role: "user", content: args.prompt }],
     });
-    const text = completion.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+    const text = completion.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim();
     return { ok: true, text };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "completion failed" };
@@ -684,7 +705,11 @@ export type AgentStreamEvent =
   | { type: "tool_call_result"; toolUseId: string; ok: boolean; summary: string }
   | { type: "turn_end"; reason: string }
   | { type: "done"; agentMessageId: string; text: string }
-  | { type: "error"; code: "missing_api_key" | "thread_not_found" | "upstream_error"; message: string };
+  | {
+      type: "error";
+      code: "missing_api_key" | "thread_not_found" | "upstream_error";
+      message: string;
+    };
 
 const MAX_TOOL_LOOPS = 10;
 
@@ -711,7 +736,10 @@ function deployModeIntercept(history: Array<{ role: string; text: string }>): st
   const msg = last.text.trim();
   // Long messages carry extra intent (env, host, "without questions") — let the model handle those.
   if (msg.length > 80) return null;
-  const isDeploy = /^(please\s+|pls\s+|can you\s+|i want to\s+)*(deploy|ship|launch)\s+(my|the|this)\s+(app|application|repo|project)\b/i.test(msg);
+  const isDeploy =
+    /^(please\s+|pls\s+|can you\s+|i want to\s+)*(deploy|ship|launch)\s+(my|the|this)\s+(app|application|repo|project)\b/i.test(
+      msg,
+    );
   if (!isDeploy) return null;
   // The user already picked a mode in the same breath → no question needed.
   if (/fully automated|form|chatbox|chat box/i.test(msg)) return null;
@@ -750,10 +778,19 @@ export async function runAgentTurn(args: {
   const intercept = deployModeIntercept(history);
   if (intercept) {
     const saved = await prisma.chatMessage.create({
-      data: { projectId: args.projectId, threadId: args.threadId, role: "agent", agentId: args.agentId ?? null, text: intercept },
+      data: {
+        projectId: args.projectId,
+        threadId: args.threadId,
+        role: "agent",
+        agentId: args.agentId ?? null,
+        text: intercept,
+      },
       select: { id: true },
     });
-    await prisma.chatThread.update({ where: { id: args.threadId }, data: { updatedAt: new Date() } });
+    await prisma.chatThread.update({
+      where: { id: args.threadId },
+      data: { updatedAt: new Date() },
+    });
     return { ok: true, agentMessageId: saved.id, text: intercept };
   }
 
@@ -787,7 +824,10 @@ export async function runAgentTurn(args: {
         max_tokens: MAX_OUTPUT_TOKENS,
         messages: [
           { role: "system", content: system },
-          ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string })),
+          ...messages.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content as string,
+          })),
         ],
       });
       text = completion.choices[0]?.message?.content?.trim() ?? "";
@@ -892,10 +932,19 @@ export async function* runAgentTurnStream(args: {
   if (intercepted) {
     yield { type: "delta", text: intercepted };
     const saved = await prisma.chatMessage.create({
-      data: { projectId: args.projectId, threadId: args.threadId, role: "agent", agentId: args.agentId ?? null, text: intercepted },
+      data: {
+        projectId: args.projectId,
+        threadId: args.threadId,
+        role: "agent",
+        agentId: args.agentId ?? null,
+        text: intercepted,
+      },
       select: { id: true },
     });
-    await prisma.chatThread.update({ where: { id: args.threadId }, data: { updatedAt: new Date() } });
+    await prisma.chatThread.update({
+      where: { id: args.threadId },
+      data: { updatedAt: new Date() },
+    });
     yield { type: "done", agentMessageId: saved.id, text: intercepted };
     return;
   }
@@ -979,7 +1028,9 @@ type ProviderLoopArgs = {
   tools: Tool[];
 };
 
-async function* runAnthropicLoop(args: ProviderLoopArgs): AsyncGenerator<AgentStreamEvent, void, void> {
+async function* runAnthropicLoop(
+  args: ProviderLoopArgs,
+): AsyncGenerator<AgentStreamEvent, void, void> {
   const messages: MessageParam[] = args.history.map((m) => ({
     role: m.role,
     content: m.text,
@@ -1106,7 +1157,10 @@ async function* runOpenAILoop(
 ): AsyncGenerator<AgentStreamEvent, void, void> {
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: args.system },
-    ...args.history.map((m) => ({ role: m.role, content: m.text }) as OpenAI.Chat.Completions.ChatCompletionMessageParam),
+    ...args.history.map(
+      (m) =>
+        ({ role: m.role, content: m.text }) as OpenAI.Chat.Completions.ChatCompletionMessageParam,
+    ),
   ];
   const tools = toOpenAITools(args.tools);
   const toolCtx = { projectId: args.projectId, userId: args.userId };
@@ -1177,7 +1231,9 @@ async function* runOpenAILoop(
         break; // success
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        const transient = /failed.to.call.a.function|failed_generation|over capacity|503|429/i.test(msg);
+        const transient = /failed.to.call.a.function|failed_generation|over capacity|503|429/i.test(
+          msg,
+        );
         // Only retry when nothing was streamed yet this attempt (so we never
         // duplicate visible output). failed_generation / 503 occur pre-content.
         if (transient && !yieldedThisAttempt && attempt < MAX_TURN_RETRIES) {

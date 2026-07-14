@@ -14,12 +14,20 @@ const Body = z.object({ envKey: z.string().trim().min(1) });
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, code: "invalid_request", message: "envKey is required." }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, code: "invalid_request", message: "envKey is required." },
+      { status: 400 },
+    );
 
-  const res = await syncSecretsToCluster({ projectId: gate.access.project.id, userId: gate.access.session.userId }, parsed.data.envKey);
+  const res = await syncSecretsToCluster(
+    { projectId: gate.access.project.id, userId: gate.access.session.userId },
+    parsed.data.envKey,
+  );
   if (!res.ok) return NextResponse.json({ ok: false, message: res.error }, { status: 400 });
 
   const meta = extractRequestMeta(req);

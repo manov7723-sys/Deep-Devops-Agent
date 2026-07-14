@@ -3,7 +3,13 @@
  * Grafana dashboards. Real metric pulls happen out-of-band; this layer just
  * stores the snapshot used by the project Stats screen.
  */
-import type { GrafanaDashboard, HealthStatus, ObservabilityKpi, PrometheusTarget, TargetStatus } from "@prisma/client";
+import type {
+  GrafanaDashboard,
+  HealthStatus,
+  ObservabilityKpi,
+  PrometheusTarget,
+  TargetStatus,
+} from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 export type KpiRow = {
@@ -20,7 +26,7 @@ export type KpiRow = {
 function kpiRow(k: ObservabilityKpi, envKeyById: Map<string, string>): KpiRow {
   return {
     id: k.id,
-    envKey: k.envId ? envKeyById.get(k.envId) ?? null : null,
+    envKey: k.envId ? (envKeyById.get(k.envId) ?? null) : null,
     name: k.name,
     value: k.value,
     unit: k.unit,

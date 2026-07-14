@@ -56,10 +56,22 @@ export const applyK8sManifestTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: "Project env key whose cluster to deploy to (e.g. 'alpha')." },
-      manifest: { type: "string", description: "Full manifest YAML to apply. Multiple docs may be separated by '---'." },
-      namespace: { type: "string", description: "Namespace for resources without one. Defaults to the env's namespace." },
-      dryRun: { type: "boolean", description: "If true, server-side dry run — validates without applying." },
+      envKey: {
+        type: "string",
+        description: "Project env key whose cluster to deploy to (e.g. 'alpha').",
+      },
+      manifest: {
+        type: "string",
+        description: "Full manifest YAML to apply. Multiple docs may be separated by '---'.",
+      },
+      namespace: {
+        type: "string",
+        description: "Namespace for resources without one. Defaults to the env's namespace.",
+      },
+      dryRun: {
+        type: "boolean",
+        description: "If true, server-side dry run — validates without applying.",
+      },
     },
     required: ["envKey", "manifest"],
     additionalProperties: false,
@@ -106,9 +118,21 @@ export const applyK8sManifestTool: Tool<Input, Output> = {
       // always exists so we skip it, and a genuine permission error still
       // surfaces on apply. Skipped for dry-run (must not mutate the cluster).
       if (!input.dryRun && namespace && namespace !== "default") {
-        const has = await runStage({ command: "kubectl", args: ["get", "namespace", namespace], cwd: workspace, env: execEnv, timeoutMs: 30_000 });
+        const has = await runStage({
+          command: "kubectl",
+          args: ["get", "namespace", namespace],
+          cwd: workspace,
+          env: execEnv,
+          timeoutMs: 30_000,
+        });
         if (has.exitCode !== 0) {
-          await runStage({ command: "kubectl", args: ["create", "namespace", namespace], cwd: workspace, env: execEnv, timeoutMs: 30_000 });
+          await runStage({
+            command: "kubectl",
+            args: ["create", "namespace", namespace],
+            cwd: workspace,
+            env: execEnv,
+            timeoutMs: 30_000,
+          });
         }
       }
 
@@ -124,7 +148,10 @@ export const applyK8sManifestTool: Tool<Input, Output> = {
       });
 
       if (res.exitCode === -1 && (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"))) {
-        return { ok: false, error: "`kubectl` isn't installed on the server. Install it on the runner host." };
+        return {
+          ok: false,
+          error: "`kubectl` isn't installed on the server. Install it on the runner host.",
+        };
       }
 
       const cmd = `kubectl apply -f manifest.yaml -n ${namespace}${input.dryRun ? " --dry-run=server" : ""}`;

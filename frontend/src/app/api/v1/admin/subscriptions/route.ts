@@ -21,8 +21,13 @@ export async function GET(req: Request) {
 
 function isStatus(v: string | null): v is SubscriptionStatus {
   return (
-    v === "trialing" || v === "active" || v === "past_due" ||
-    v === "canceled" || v === "unpaid" || v === "incomplete" ||
-    v === "incomplete_expired" || v === "paused"
+    v === "trialing" ||
+    v === "active" ||
+    v === "past_due" ||
+    v === "canceled" ||
+    v === "unpaid" ||
+    v === "incomplete" ||
+    v === "incomplete_expired" ||
+    v === "paused"
   );
 }

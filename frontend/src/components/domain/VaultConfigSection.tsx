@@ -85,25 +85,45 @@ export function VaultConfigSection({
           {config.isLoading || status.isLoading ? (
             <Badge tone="default">checking…</Badge>
           ) : !configured ? (
-            <Badge tone="warn" withDot>not connected</Badge>
+            <Badge tone="warn" withDot>
+              not connected
+            </Badge>
           ) : reachable ? (
             <>
-              <Badge tone="ok" withDot>connected</Badge>
-              {config.data?.addr && <span className="faint mono" style={{ fontSize: 12 }}>{config.data.addr}</span>}
-              {fromEnv && <span className="faint" style={{ fontSize: 11 }}>(from server env)</span>}
+              <Badge tone="ok" withDot>
+                connected
+              </Badge>
+              {config.data?.addr && (
+                <span className="faint mono" style={{ fontSize: 12 }}>
+                  {config.data.addr}
+                </span>
+              )}
+              {fromEnv && (
+                <span className="faint" style={{ fontSize: 11 }}>
+                  (from server env)
+                </span>
+              )}
             </>
           ) : (
             <>
-              <Badge tone="danger" withDot>unreachable</Badge>
-              <span className="faint" style={{ fontSize: 12 }}>{status.data?.error ?? "Check URL / token."}</span>
+              <Badge tone="danger" withDot>
+                unreachable
+              </Badge>
+              <span className="faint" style={{ fontSize: 12 }}>
+                {status.data?.error ?? "Check URL / token."}
+              </span>
             </>
           )}
         </div>
 
         {/* ── Step 1: Vault connection form ───────────────────────────── */}
-        {(!configured || editing) ? (
+        {!configured || editing ? (
           <div className="col gap-3" style={{ maxWidth: 520 }}>
-            <Field label="Vault URL" required hint="Your Vault address, e.g. https://vault.example.com:8200">
+            <Field
+              label="Vault URL"
+              required
+              hint="Your Vault address, e.g. https://vault.example.com:8200"
+            >
               <Input
                 className="mono"
                 value={addr}
@@ -113,7 +133,11 @@ export function VaultConfigSection({
                 spellCheck={false}
               />
             </Field>
-            <Field label="Vault token" required hint="A token with read/write on the KV mount (hvs.…). Stored encrypted; never shown again.">
+            <Field
+              label="Vault token"
+              required
+              hint="A token with read/write on the KV mount (hvs.…). Stored encrypted; never shown again."
+            >
               <Input
                 type="password"
                 className="mono"
@@ -135,7 +159,14 @@ export function VaultConfigSection({
                 {save.isPending ? "Testing…" : "Save & test connection"}
               </Btn>
               {editing && (
-                <Btn variant="ghost" onClick={() => { setEditing(false); setToken(""); setFormError(null); }}>
+                <Btn
+                  variant="ghost"
+                  onClick={() => {
+                    setEditing(false);
+                    setToken("");
+                    setFormError(null);
+                  }}
+                >
                   Cancel
                 </Btn>
               )}
@@ -171,11 +202,17 @@ export function VaultConfigSection({
 
         {/* ── Step 2: AWS keys per account ────────────────────────────── */}
         <div className="col gap-2" style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-          <span className="text-sm" style={{ fontWeight: 600 }}>AWS access keys</span>
+          <span className="text-sm" style={{ fontWeight: 600 }}>
+            AWS access keys
+          </span>
           {!configured ? (
-            <span className="muted" style={{ fontSize: 13 }}>Connect Vault above first, then store your AWS keys here.</span>
+            <span className="muted" style={{ fontSize: 13 }}>
+              Connect Vault above first, then store your AWS keys here.
+            </span>
           ) : awsProviders.length === 0 ? (
-            <span className="muted" style={{ fontSize: 13 }}>Connect an AWS account above — then store its access key + secret here.</span>
+            <span className="muted" style={{ fontSize: 13 }}>
+              Connect an AWS account above — then store its access key + secret here.
+            </span>
           ) : (
             awsProviders.map((p) => (
               <div
@@ -187,9 +224,13 @@ export function VaultConfigSection({
                   <span style={{ fontWeight: 600 }}>{p.name}</span>
                   <span className="text-sm muted">{p.region}</span>
                   {p.hasVaultCreds ? (
-                    <Badge tone="ok" withDot>keys in Vault</Badge>
+                    <Badge tone="ok" withDot>
+                      keys in Vault
+                    </Badge>
                   ) : (
-                    <Badge tone="warn" withDot>no keys</Badge>
+                    <Badge tone="warn" withDot>
+                      no keys
+                    </Badge>
                   )}
                 </div>
                 <Btn

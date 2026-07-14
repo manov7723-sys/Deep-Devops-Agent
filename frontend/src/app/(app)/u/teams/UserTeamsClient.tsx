@@ -41,10 +41,7 @@ const ROLE_LABEL: Record<ProjectRoleApi, string> = {
 };
 
 function expiresLabel(iso: string): string {
-  const days = Math.max(
-    0,
-    Math.round((new Date(iso).getTime() - Date.now()) / (24 * 3600 * 1000)),
-  );
+  const days = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / (24 * 3600 * 1000)));
   if (days === 0) return "expires today";
   if (days === 1) return "expires tomorrow";
   return `expires in ${days} days`;
@@ -73,7 +70,9 @@ export function UserTeamsClient() {
               <Avatar name={m.name} size={34} />
               <div className="col" style={{ lineHeight: 1.3, minWidth: 0 }}>
                 <span style={{ fontWeight: 600 }}>{m.name}</span>
-                <span className="faint" style={{ fontSize: 12 }}>{m.email}</span>
+                <span className="faint" style={{ fontSize: 12 }}>
+                  {m.email}
+                </span>
               </div>
             </div>
           );
@@ -83,9 +82,7 @@ export function UserTeamsClient() {
         id: "role",
         header: "Role",
         cell: ({ row }) => (
-          <Badge tone={ROLE_TONE[row.original.role]}>
-            {ROLE_LABEL[row.original.role]}
-          </Badge>
+          <Badge tone={ROLE_TONE[row.original.role]}>{ROLE_LABEL[row.original.role]}</Badge>
         ),
       },
       {
@@ -93,8 +90,7 @@ export function UserTeamsClient() {
         header: "Shared projects",
         cell: ({ row }) => {
           const list = row.original.sharedProjects ?? [];
-          if (list.length === 0)
-            return <span className="muted">{row.original.projects}</span>;
+          if (list.length === 0) return <span className="muted">{row.original.projects}</span>;
           return (
             <div className="row gap-1 wrap">
               {list.slice(0, 3).map((p) => (
@@ -114,9 +110,7 @@ export function UserTeamsClient() {
       {
         id: "lastActive",
         header: "Last active",
-        cell: ({ row }) => (
-          <span className="faint">{row.original.lastActive}</span>
-        ),
+        cell: ({ row }) => <span className="faint">{row.original.lastActive}</span>,
       },
       {
         id: "actions",
@@ -213,13 +207,9 @@ export function UserTeamsClient() {
                         projectSlug: inv.projectSlug,
                         invitationId: inv.id,
                       });
-                      setRowOk(
-                        `Resent invitation to ${inv.email} for ${inv.projectName}.`,
-                      );
+                      setRowOk(`Resent invitation to ${inv.email} for ${inv.projectName}.`);
                     } catch (e) {
-                      setRowError(
-                        e instanceof Error ? e.message : "Could not resend invitation.",
-                      );
+                      setRowError(e instanceof Error ? e.message : "Could not resend invitation.");
                     }
                   }}
                   onRevoke={async () => {
@@ -235,9 +225,7 @@ export function UserTeamsClient() {
                       });
                       setRowOk(`Revoked invitation to ${inv.email}.`);
                     } catch (e) {
-                      setRowError(
-                        e instanceof Error ? e.message : "Could not revoke.",
-                      );
+                      setRowError(e instanceof Error ? e.message : "Could not revoke.");
                     }
                   }}
                 />
@@ -270,7 +258,9 @@ export function UserTeamsClient() {
       {removeTarget && (
         <RemoveFromProjectsModal
           open={!!removeTarget}
-          onOpenChange={(o) => { if (!o) setRemoveTarget(null); }}
+          onOpenChange={(o) => {
+            if (!o) setRemoveTarget(null);
+          }}
           member={removeTarget}
           onDone={(message) => {
             setRowOk(message);
@@ -326,13 +316,7 @@ function PendingInviteRow({
         </div>
       </div>
       <div className="row gap-2">
-        <Btn
-          size="sm"
-          variant="outline"
-          icon="mail"
-          loading={busyResend}
-          onClick={onResend}
-        >
+        <Btn size="sm" variant="outline" icon="mail" loading={busyResend} onClick={onResend}>
           Resend
         </Btn>
         <Btn
@@ -374,9 +358,7 @@ function RemoveFromProjectsModal({
   async function submit() {
     if (pickedSlugs.length === 0) return;
     const results = await Promise.allSettled(
-      pickedSlugs.map((slug) =>
-        remove.mutateAsync({ projectSlug: slug, userId: member.id }),
-      ),
+      pickedSlugs.map((slug) => remove.mutateAsync({ projectSlug: slug, userId: member.id })),
     );
     const failures = results.filter((r) => r.status === "rejected");
     if (failures.length === 0) {
@@ -419,23 +401,18 @@ function RemoveFromProjectsModal({
     >
       {removable.length === 0 ? (
         <p className="muted" style={{ fontSize: 13 }}>
-          There are no projects where you can remove this user. Either they own those projects,
-          or you don&apos;t have manage rights on them.
+          There are no projects where you can remove this user. Either they own those projects, or
+          you don&apos;t have manage rights on them.
         </p>
       ) : (
-        <Field
-          label="Shared projects"
-          hint={`${pickedSlugs.length} selected`}
-        >
+        <Field label="Shared projects" hint={`${pickedSlugs.length} selected`}>
           <div className="col gap-2">
             {removable.map((p) => (
               <ProjectCheckRow
                 key={p.id}
                 project={p}
                 checked={!!picked[p.slug]}
-                onToggle={() =>
-                  setPicked((cur) => ({ ...cur, [p.slug]: !cur[p.slug] }))
-                }
+                onToggle={() => setPicked((cur) => ({ ...cur, [p.slug]: !cur[p.slug] }))}
               />
             ))}
           </div>

@@ -139,9 +139,7 @@ export const UsageSummary = z.object({
   envsUsed: z.number().int(),
   envsLimit: z.number().int().nullable(),
   tokensUsed: z.number().int(),
-  samples: z.array(
-    z.object({ weekStart: z.string().datetime(), tokens: z.number().int() }),
-  ),
+  samples: z.array(z.object({ weekStart: z.string().datetime(), tokens: z.number().int() })),
 });
 export type UsageSummary = z.infer<typeof UsageSummary>;
 

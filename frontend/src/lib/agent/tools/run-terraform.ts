@@ -48,12 +48,20 @@ export const runTerraformTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: 'Env key, e.g. "release" or "alpha". Must exist in this project.' },
+      envKey: {
+        type: "string",
+        description: 'Env key, e.g. "release" or "alpha". Must exist in this project.',
+      },
       name: { type: "string", description: 'Short run label, e.g. "s3-bucket-apply".' },
-      action: { type: "string", enum: ["plan", "apply"], description: "plan = preview, apply = provision for real." },
+      action: {
+        type: "string",
+        enum: ["plan", "apply"],
+        description: "plan = preview, apply = provision for real.",
+      },
       files: {
         type: "object",
-        description: 'Terraform files: relative path → HCL contents, e.g. {"main.tf":"resource ..."}.',
+        description:
+          'Terraform files: relative path → HCL contents, e.g. {"main.tf":"resource ..."}.',
         additionalProperties: { type: "string" },
       },
       stack: {
@@ -68,7 +76,10 @@ export const runTerraformTool: Tool<Input, Output> = {
   async execute(input, ctx) {
     const fileKeys = Object.keys(input.files ?? {});
     if (fileKeys.length === 0) {
-      return { ok: false, error: "No Terraform files provided. Pass a path→content map of .tf files." };
+      return {
+        ok: false,
+        error: "No Terraform files provided. Pass a path→content map of .tf files.",
+      };
     }
 
     const env = await prisma.env.findUnique({

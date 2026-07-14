@@ -39,7 +39,10 @@ export function AlertBanner() {
   const alerts = data?.alerts ?? [];
   // Re-show the banner whenever the set of open alerts changes (a new alert
   // fires or one resolves), even if the user dismissed the previous set.
-  const signature = alerts.map((a) => a.id).sort().join(",");
+  const signature = alerts
+    .map((a) => a.id)
+    .sort()
+    .join(",");
   const [dismissedSig, setDismissedSig] = useState<string>("");
 
   const visible = alerts.length > 0 && dismissedSig !== signature;

@@ -59,30 +59,71 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       envKey: { type: "string", description: "Env key whose connected Proxmox provider to use." },
-      name: { type: "string", description: "VM name (lowercase letters, digits, hyphens; start with a letter)." },
-      node: { type: "string", description: "Proxmox node to create the VM on. Defaults to the provider's default node." },
+      name: {
+        type: "string",
+        description: "VM name (lowercase letters, digits, hyphens; start with a letter).",
+      },
+      node: {
+        type: "string",
+        description: "Proxmox node to create the VM on. Defaults to the provider's default node.",
+      },
       cores: { type: "number", description: "vCPU cores. Default 2." },
       memoryMB: { type: "number", description: "RAM in MB. Default 2048." },
       diskGB: { type: "number", description: "Disk size in GB. Default 20." },
-      datastore: { type: "string", description: "Storage pool for the disk, e.g. 'local-lvm'. Default 'local-lvm'." },
+      datastore: {
+        type: "string",
+        description: "Storage pool for the disk, e.g. 'local-lvm'. Default 'local-lvm'.",
+      },
       bridge: { type: "string", description: "Network bridge, e.g. 'vmbr0'. Default 'vmbr0'." },
-      templateVmId: { type: "number", description: "Template VM id to clone from (preferred). Provide this OR isoFile." },
-      isoFile: { type: "string", description: "Boot ISO (e.g. 'local:iso/ubuntu-24.04.iso') when not cloning." },
-      ipv4: { type: "string", description: "cloud-init IPv4: 'dhcp' or a CIDR like '10.0.0.50/24'." },
+      templateVmId: {
+        type: "number",
+        description: "Template VM id to clone from (preferred). Provide this OR isoFile.",
+      },
+      isoFile: {
+        type: "string",
+        description: "Boot ISO (e.g. 'local:iso/ubuntu-24.04.iso') when not cloning.",
+      },
+      ipv4: {
+        type: "string",
+        description: "cloud-init IPv4: 'dhcp' or a CIDR like '10.0.0.50/24'.",
+      },
       gateway: { type: "string", description: "cloud-init gateway (with a static ipv4)." },
-      skipDeployPrep: { type: "boolean", description: "Skip auto-baking the deploy user + SSH key. Default false." },
-      skipInstallDocker: { type: "boolean", description: "Skip installing Docker via cloud-init (still adds the deploy user). Default false." },
-      snippetsDatastore: { type: "string", description: "Proxmox datastore with snippets content enabled. Default 'local'." },
-      mode: { type: "string", enum: ["push", "apply", "push_and_apply"], description: "Execution mode the user chose." },
-      repoFullName: { type: "string", description: "owner/repo to push to (required for push modes)." },
-      path: { type: "string", description: "Repo folder for the files. Default terraform/proxmox/<name>." },
+      skipDeployPrep: {
+        type: "boolean",
+        description: "Skip auto-baking the deploy user + SSH key. Default false.",
+      },
+      skipInstallDocker: {
+        type: "boolean",
+        description:
+          "Skip installing Docker via cloud-init (still adds the deploy user). Default false.",
+      },
+      snippetsDatastore: {
+        type: "string",
+        description: "Proxmox datastore with snippets content enabled. Default 'local'.",
+      },
+      mode: {
+        type: "string",
+        enum: ["push", "apply", "push_and_apply"],
+        description: "Execution mode the user chose.",
+      },
+      repoFullName: {
+        type: "string",
+        description: "owner/repo to push to (required for push modes).",
+      },
+      path: {
+        type: "string",
+        description: "Repo folder for the files. Default terraform/proxmox/<name>.",
+      },
     },
     required: ["envKey", "name", "mode"],
     additionalProperties: false,
   },
   async execute(input, ctx) {
     if (!/^[a-z][a-z0-9-]{1,38}$/.test(input.name)) {
-      return { ok: false, error: "Invalid VM name. Use lowercase letters, digits, hyphens; start with a letter." };
+      return {
+        ok: false,
+        error: "Invalid VM name. Use lowercase letters, digits, hyphens; start with a letter.",
+      };
     }
     const wantsPush = input.mode === "push" || input.mode === "push_and_apply";
     const wantsApply = input.mode === "apply" || input.mode === "push_and_apply";
@@ -90,7 +131,11 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
       return { ok: false, error: "repoFullName is required for push modes." };
     }
     if (!input.templateVmId && !input.isoFile) {
-      return { ok: false, error: "Provide either templateVmId (to clone from a template) or isoFile (to boot from an ISO)." };
+      return {
+        ok: false,
+        error:
+          "Provide either templateVmId (to clone from a template) or isoFile (to boot from an ISO).",
+      };
     }
 
     const env = await prisma.env.findUnique({
@@ -105,10 +150,16 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
     if (!env) return { ok: false, error: `Env "${input.envKey}" not found in this project.` };
     if (wantsApply) {
       if (!env.cloudProviderId) {
-        return { ok: false, error: `Env "${input.envKey}" has no cloud provider — connect Proxmox and attach it to this env before applying.` };
+        return {
+          ok: false,
+          error: `Env "${input.envKey}" has no cloud provider — connect Proxmox and attach it to this env before applying.`,
+        };
       }
       if (env.cloudProvider?.kind !== "proxmox") {
-        return { ok: false, error: `Env "${input.envKey}" is connected to ${env.cloudProvider?.kind ?? "another"} cloud, not Proxmox.` };
+        return {
+          ok: false,
+          error: `Env "${input.envKey}" is connected to ${env.cloudProvider?.kind ?? "another"} cloud, not Proxmox.`,
+        };
       }
     }
 
@@ -164,7 +215,8 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
           },
           ctx,
         );
-        if (!res.ok) return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
+        if (!res.ok)
+          return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
         if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
         first = false;
@@ -187,14 +239,25 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
       runId = run.id;
     }
 
-    const bits: string[] = [`Generated ${fileCount} Proxmox VM Terraform files for "${input.name}".`];
+    const bits: string[] = [
+      `Generated ${fileCount} Proxmox VM Terraform files for "${input.name}".`,
+    ];
     if (pullRequest) bits.push(`Opened PR #${pullRequest.number}: ${pullRequest.url}`);
     else if (committed.length) bits.push(`Committed ${committed.length} files.`);
-    if (runId) bits.push(`Started terraform apply (run ${runId}) — track it on the Infrastructure tab.`);
+    if (runId)
+      bits.push(`Started terraform apply (run ${runId}) — track it on the Infrastructure tab.`);
 
     return {
       ok: true,
-      output: { vm: input.name, fileCount, mode: input.mode, runId, pullRequest, committed, note: bits.join(" ") },
+      output: {
+        vm: input.name,
+        fileCount,
+        mode: input.mode,
+        runId,
+        pullRequest,
+        committed,
+        note: bits.join(" "),
+      },
     };
   },
 };

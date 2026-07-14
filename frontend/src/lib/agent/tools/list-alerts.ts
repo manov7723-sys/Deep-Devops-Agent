@@ -4,7 +4,18 @@ import type { Tool } from "./types";
 type Input = { status?: "open" | "ack" | "resolved"; severity?: "low" | "medium" | "high" };
 type Output = {
   count: number;
-  alerts: Array<{ id: string; title: string; detail: string; severity: string; category: string; resource: string; status: string; envKey: string; detectedAt: string; recommendation: string }>;
+  alerts: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    severity: string;
+    category: string;
+    resource: string;
+    status: string;
+    envKey: string;
+    detectedAt: string;
+    recommendation: string;
+  }>;
 };
 
 /**
@@ -21,8 +32,16 @@ export const listAlertsTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      status: { type: "string", enum: ["open", "ack", "resolved"], description: "Filter by status. Usually 'open'." },
-      severity: { type: "string", enum: ["low", "medium", "high"], description: "Filter by severity." },
+      status: {
+        type: "string",
+        enum: ["open", "ack", "resolved"],
+        description: "Filter by status. Usually 'open'.",
+      },
+      severity: {
+        type: "string",
+        enum: ["low", "medium", "high"],
+        description: "Filter by severity.",
+      },
     },
     additionalProperties: false,
   },

@@ -14,7 +14,8 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  */
 async function gate(req: Request) {
   const slug = new URL(req.url).searchParams.get("slug") ?? "";
-  if (!slug) return { error: NextResponse.json({ ok: false, code: "missing_slug" }, { status: 400 }) };
+  if (!slug)
+    return { error: NextResponse.json({ ok: false, code: "missing_slug" }, { status: 400 }) };
   const g = await requireProjectAccess(slug, "developer");
   if (!g.ok) return { error: NextResponse.json({ ok: false }, { status: g.status }) };
   return { projectId: g.access.project.id, userId: g.access.session.userId };
@@ -28,7 +29,11 @@ export async function GET(req: Request) {
 }
 
 const SaveBody = z.object({
-  addr: z.string().trim().url("Enter a valid Vault URL, e.g. https://vault.example.com:8200").max(300),
+  addr: z
+    .string()
+    .trim()
+    .url("Enter a valid Vault URL, e.g. https://vault.example.com:8200")
+    .max(300),
   token: z.string().trim().min(3, "Enter your Vault token.").max(512),
   kvMount: z.string().trim().max(120).optional(),
   pathPrefix: z.string().trim().max(200).optional(),
@@ -56,7 +61,11 @@ export async function POST(req: Request) {
   });
   if (!ping.reachable) {
     return NextResponse.json(
-      { ok: false, code: "unreachable", message: ping.error ?? "Could not reach Vault with those details." },
+      {
+        ok: false,
+        code: "unreachable",
+        message: ping.error ?? "Could not reach Vault with those details.",
+      },
       { status: 400 },
     );
   }

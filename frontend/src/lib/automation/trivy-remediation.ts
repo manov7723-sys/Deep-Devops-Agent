@@ -63,7 +63,7 @@ const KNOWN_FIX: Record<string, string> = {
   "AVD-AWS-0040":
     "In the EKS cluster's `vpc_config`, set `endpoint_public_access = false` and keep `endpoint_private_access = true`, so the Kubernetes API server is reachable only from inside the VPC, not the public internet.",
   "AVD-AWS-0041":
-    "In the EKS cluster's `vpc_config`, replace `public_access_cidrs = [\"0.0.0.0/0\"]` with the specific admin/CI IP ranges that actually need API access — never leave it open to the whole internet.",
+    'In the EKS cluster\'s `vpc_config`, replace `public_access_cidrs = ["0.0.0.0/0"]` with the specific admin/CI IP ranges that actually need API access — never leave it open to the whole internet.',
 };
 // Trivy reports the same rule under both `AVD-AWS-0040` and the short `AWS-0040`.
 function knownFixFor(id: string): string | undefined {
@@ -94,15 +94,22 @@ function deterministicFix(f: TrivyFinding): string {
 }
 
 const SEVERITY_OVERVIEW: Record<Severity, string> = {
-  CRITICAL: "Critical issues can lead to full compromise (remote code execution, credential theft). Treat these as drop-everything work — patch or mitigate before the next release.",
+  CRITICAL:
+    "Critical issues can lead to full compromise (remote code execution, credential theft). Treat these as drop-everything work — patch or mitigate before the next release.",
   HIGH: "High-severity issues are readily exploitable and should be fixed in the current sprint.",
-  MEDIUM: "Medium-severity issues are worth scheduling soon; they raise risk but usually need specific conditions to exploit.",
+  MEDIUM:
+    "Medium-severity issues are worth scheduling soon; they raise risk but usually need specific conditions to exploit.",
   LOW: "Low-severity issues are minor or hard to exploit. Batch them into routine maintenance.",
-  UNKNOWN: "Severity could not be determined automatically. Review each item and assign a priority.",
+  UNKNOWN:
+    "Severity could not be determined automatically. Review each item and assign a priority.",
 };
 
 /** Build the deterministic skeleton (always correct, no LLM needed). */
-function buildSkeleton(artifact: string, findings: TrivyFinding[], counts: Record<string, number>): RemediationDoc {
+function buildSkeleton(
+  artifact: string,
+  findings: TrivyFinding[],
+  counts: Record<string, number>,
+): RemediationDoc {
   const bySeverity = new Map<Severity, RemediationItem[]>();
   for (const f of findings) {
     const sev = (SEVERITY_ORDER.includes(f.severity) ? f.severity : "UNKNOWN") as Severity;
@@ -123,14 +130,18 @@ function buildSkeleton(artifact: string, findings: TrivyFinding[], counts: Recor
     bySeverity.set(sev, arr);
   }
 
-  const sections: RemediationSection[] = SEVERITY_ORDER.filter((s) => (bySeverity.get(s)?.length ?? 0) > 0).map((s) => ({
+  const sections: RemediationSection[] = SEVERITY_ORDER.filter(
+    (s) => (bySeverity.get(s)?.length ?? 0) > 0,
+  ).map((s) => ({
     severity: s,
     overview: SEVERITY_OVERVIEW[s],
     items: bySeverity.get(s)!,
   }));
 
   const total = findings.length;
-  const lead = SEVERITY_ORDER.filter((s) => counts[s] > 0).map((s) => `${counts[s]} ${s.toLowerCase()}`).join(", ");
+  const lead = SEVERITY_ORDER.filter((s) => counts[s] > 0)
+    .map((s) => `${counts[s]} ${s.toLowerCase()}`)
+    .join(", ");
   const summary =
     total === 0
       ? `No vulnerabilities were found in ${artifact}.`
@@ -185,7 +196,10 @@ Rules: keep each recommendation specific and imperative. For vulnerable packages
       max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });
-    const text = msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+    const text = msg.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { text: string }).text)
+      .join("");
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
     if (start < 0 || end < 0) return null;
@@ -214,7 +228,11 @@ export async function generateRemediationDoc(
   if (typeof ai.summary === "string" && ai.summary.trim()) doc.summary = ai.summary.trim();
 
   if (Array.isArray(ai.sections)) {
-    const ov = new Map(ai.sections.filter((s) => s.severity && s.overview).map((s) => [String(s.severity).toUpperCase(), String(s.overview)]));
+    const ov = new Map(
+      ai.sections
+        .filter((s) => s.severity && s.overview)
+        .map((s) => [String(s.severity).toUpperCase(), String(s.overview)]),
+    );
     for (const sec of doc.sections) {
       const o = ov.get(sec.severity);
       if (o && o.trim()) sec.overview = o.trim();
@@ -222,7 +240,11 @@ export async function generateRemediationDoc(
   }
 
   if (Array.isArray(ai.items)) {
-    const recs = new Map(ai.items.filter((i) => i.id && i.recommendation).map((i) => [String(i.id), String(i.recommendation)]));
+    const recs = new Map(
+      ai.items
+        .filter((i) => i.id && i.recommendation)
+        .map((i) => [String(i.id), String(i.recommendation)]),
+    );
     for (const sec of doc.sections) {
       for (const it of sec.items) {
         const r = recs.get(it.id);

@@ -124,8 +124,7 @@ export async function createThread(
 }
 
 export type PostMessageResult =
-  | { ok: true; message: MessageRow }
-  | { ok: false; code: "thread_not_found" };
+  { ok: true; message: MessageRow } | { ok: false; code: "thread_not_found" };
 
 export async function postUserMessage(
   projectId: string,
@@ -166,9 +165,9 @@ const BUILTIN_SUGGESTIONS: Array<{ id: string; icon: string; text: string }> = [
   { id: "builtin-scan", icon: "shield", text: "Scan my repo for vulnerabilities" },
 ];
 
-export async function listSuggestions(projectId: string): Promise<
-  Array<{ id: string; icon: string; text: string }>
-> {
+export async function listSuggestions(
+  projectId: string,
+): Promise<Array<{ id: string; icon: string; text: string }>> {
   const rows = await prisma.chatSuggestion.findMany({
     where: { OR: [{ projectId }, { projectId: null }] },
     orderBy: [{ projectId: "desc" }, { order: "asc" }],

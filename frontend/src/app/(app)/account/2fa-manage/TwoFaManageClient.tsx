@@ -4,7 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { Badge, Block, Btn, Icon, PageHead, Toggle } from "@/components/ui";
-import { use2FA, useBackupCodes, useRegenerateBackupCodes, useToggle2FA } from "@/hooks/queries/account";
+import {
+  use2FA,
+  useBackupCodes,
+  useRegenerateBackupCodes,
+  useToggle2FA,
+} from "@/hooks/queries/account";
 
 export function TwoFaManageClient() {
   const { data: state } = use2FA();
@@ -18,7 +23,10 @@ export function TwoFaManageClient() {
 
   return (
     <div className="col gap-5" style={{ maxWidth: 680 }}>
-      <PageHead title="Two-factor authentication" sub="Add a second layer of security to your account." />
+      <PageHead
+        title="Two-factor authentication"
+        sub="Add a second layer of security to your account."
+      />
 
       <Block>
         <Block.Body>
@@ -95,14 +103,16 @@ export function TwoFaManageClient() {
                 </p>
                 <div className="dda-backup-codes">
                   {freshCodes.map((c) => (
-                    <span key={c} className="dda-backup-code">{c}</span>
+                    <span key={c} className="dda-backup-code">
+                      {c}
+                    </span>
                   ))}
                 </div>
               </>
             ) : (
               <p className="faint" style={{ fontSize: 12 }}>
-                Codes are only shown immediately after regeneration. Click{" "}
-                <b>Regenerate</b> to issue a new set.
+                Codes are only shown immediately after regeneration. Click <b>Regenerate</b> to
+                issue a new set.
               </p>
             )}
           </Block.Body>

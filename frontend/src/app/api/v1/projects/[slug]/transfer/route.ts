@@ -57,8 +57,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       res.code === "user_not_found"
         ? "No DeepAgent user with that email."
         : res.code === "already_owner"
-        ? "That user already owns this project."
-        : "You can't transfer the project to yourself.";
+          ? "That user already owns this project."
+          : "You can't transfer the project to yourself.";
     return NextResponse.json({ ok: false, code: res.code, message }, { status });
   }
 

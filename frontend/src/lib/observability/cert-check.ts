@@ -33,12 +33,15 @@ export async function getCertExpiry(rawUrl: string): Promise<Date | null> {
       resolve(v);
     };
 
-    const socket = tls.connect({ host, port, servername: host, timeout: TIMEOUT_MS, rejectUnauthorized: false }, () => {
-      const cert = socket.getPeerCertificate();
-      if (!cert || !cert.valid_to) return done(null);
-      const exp = new Date(cert.valid_to);
-      done(Number.isNaN(exp.getTime()) ? null : exp);
-    });
+    const socket = tls.connect(
+      { host, port, servername: host, timeout: TIMEOUT_MS, rejectUnauthorized: false },
+      () => {
+        const cert = socket.getPeerCertificate();
+        if (!cert || !cert.valid_to) return done(null);
+        const exp = new Date(cert.valid_to);
+        done(Number.isNaN(exp.getTime()) ? null : exp);
+      },
+    );
     socket.on("error", () => done(null));
     socket.on("timeout", () => done(null));
     setTimeout(() => done(null), TIMEOUT_MS + 1000);

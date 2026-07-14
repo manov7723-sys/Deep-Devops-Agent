@@ -66,10 +66,7 @@ export function SearchFilter({
   const effective = value ?? local;
 
   return (
-    <div
-      className="row gap-2 dda-search-input"
-      style={{ width }}
-    >
+    <div className="row gap-2 dda-search-input" style={{ width }}>
       <Icon name="search" size={15} />
       <input
         value={effective}

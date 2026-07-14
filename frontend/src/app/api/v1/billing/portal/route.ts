@@ -21,7 +21,8 @@ export async function POST(req: Request) {
       {
         ok: false,
         code: "no_customer",
-        message: "Subscribe to a plan first — the customer portal opens once you have a real Stripe customer record.",
+        message:
+          "Subscribe to a plan first — the customer portal opens once you have a real Stripe customer record.",
       },
       { status: 400 },
     );
@@ -50,9 +51,6 @@ export async function POST(req: Request) {
     }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[portal] unexpected: ${message}`);
-    return NextResponse.json(
-      { ok: false, code: "portal_failed", message },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, code: "portal_failed", message }, { status: 500 });
   }
 }

@@ -28,7 +28,11 @@ export function AwsTrustPolicyHelp({ enabled = true }: { enabled?: boolean }) {
   }
 
   if (isLoading) {
-    return <span className="muted" style={{ fontSize: 12.5 }}>Loading your External ID…</span>;
+    return (
+      <span className="muted" style={{ fontSize: 12.5 }}>
+        Loading your External ID…
+      </span>
+    );
   }
   if (error || !data?.ok) {
     return (
@@ -55,8 +59,9 @@ export function AwsTrustPolicyHelp({ enabled = true }: { enabled?: boolean }) {
       >
         <Icon name="shield" size={16} style={{ flex: "none" }} />
         <span>
-          Create an IAM role in your AWS account with the trust policy below, then paste its ARN.
-          No access keys are stored — Deep Agent assumes the role via STS using the ExternalId we generate for you.
+          Create an IAM role in your AWS account with the trust policy below, then paste its ARN. No
+          access keys are stored — Deep Agent assumes the role via STS using the ExternalId we
+          generate for you.
         </span>
       </div>
 
@@ -65,15 +70,19 @@ export function AwsTrustPolicyHelp({ enabled = true }: { enabled?: boolean }) {
         label="Your External ID"
         hint="App-generated and the same for every AWS account you connect. Used in the trust policy below."
       >
-        <CopyRow value={externalId} onCopy={() => copy(externalId, "eid")} copied={copied === "eid"} />
+        <CopyRow
+          value={externalId}
+          onCopy={() => copy(externalId, "eid")}
+          copied={copied === "eid"}
+        />
       </Field>
 
       {/* Platform account id status */}
       {!data.accountConfigured && (
         <div style={{ fontSize: 12, color: "var(--warn, #b8860b)" }}>
-          <Badge tone="warn">Platform account not configured</Badge>{" "}
-          The trust policy below shows a placeholder account. Set <span className="mono">PLATFORM_AWS_ACCOUNT_ID</span>{" "}
-          on the server so the policy names a real principal.
+          <Badge tone="warn">Platform account not configured</Badge> The trust policy below shows a
+          placeholder account. Set <span className="mono">PLATFORM_AWS_ACCOUNT_ID</span> on the
+          server so the policy names a real principal.
         </div>
       )}
 
@@ -115,7 +124,15 @@ export function AwsTrustPolicyHelp({ enabled = true }: { enabled?: boolean }) {
   );
 }
 
-function CopyRow({ value, onCopy, copied }: { value: string; onCopy: () => void; copied: boolean }) {
+function CopyRow({
+  value,
+  onCopy,
+  copied,
+}: {
+  value: string;
+  onCopy: () => void;
+  copied: boolean;
+}) {
   return (
     <div
       className="row gap-2"

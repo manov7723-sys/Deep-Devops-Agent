@@ -19,9 +19,17 @@ export async function POST(_req: Request, ctx: { params: Promise<{ slug: string 
     where: { projectId: gate.access.project.id, kind: "gcp" },
     select: { id: true, costDatasetId: true },
   });
-  if (!cp) return NextResponse.json({ ok: false, code: "no_gcp", message: "No GCP provider connected to this project." }, { status: 400 });
+  if (!cp)
+    return NextResponse.json(
+      { ok: false, code: "no_gcp", message: "No GCP provider connected to this project." },
+      { status: 400 },
+    );
   if (!cp.costDatasetId) {
-    return NextResponse.json({ ok: true, stage: "no_dataset", message: 'GCP cost isn\'t set up yet. Click "Prepare GCP for cost" first.' });
+    return NextResponse.json({
+      ok: true,
+      stage: "no_dataset",
+      message: 'GCP cost isn\'t set up yet. Click "Prepare GCP for cost" first.',
+    });
   }
 
   const diag = await verifyGcpCost(cp.id, cp.costDatasetId, new Date());

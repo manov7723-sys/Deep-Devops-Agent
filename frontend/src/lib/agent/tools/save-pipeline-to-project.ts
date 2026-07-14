@@ -69,7 +69,10 @@ export const savePipelineToProjectTool: Tool<Input, Output> = {
           additionalProperties: false,
         },
       },
-      agentReview: { type: "boolean", description: "Auto-fix + re-run failed runs with the agent." },
+      agentReview: {
+        type: "boolean",
+        description: "Auto-fix + re-run failed runs with the agent.",
+      },
     },
     required: ["repoFullName", "name", "files"],
     additionalProperties: false,
@@ -90,7 +93,10 @@ export const savePipelineToProjectTool: Tool<Input, Output> = {
       return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
     }
 
-    const files = input.files.map((f) => ({ path: f.path.replace(/^\/+/, ""), content: f.content }));
+    const files = input.files.map((f) => ({
+      path: f.path.replace(/^\/+/, ""),
+      content: f.content,
+    }));
     const workflowPath = findWorkflowPath(files);
 
     const row = await prisma.ciPipeline.create({

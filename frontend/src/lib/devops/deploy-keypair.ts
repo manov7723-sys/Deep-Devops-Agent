@@ -23,10 +23,7 @@ function opensshPublicKey(rawPublicKey: Buffer, comment = "deploy@dda"): string 
   //   string  <32-byte public key>
   // Each "string" is length-prefixed (uint32 big-endian).
   const algo = Buffer.from("ssh-ed25519", "utf8");
-  const parts: Buffer[] = [
-    lengthPrefixed(algo),
-    lengthPrefixed(rawPublicKey),
-  ];
+  const parts: Buffer[] = [lengthPrefixed(algo), lengthPrefixed(rawPublicKey)];
   const wire = Buffer.concat(parts);
   return `ssh-ed25519 ${wire.toString("base64")} ${comment}`;
 }

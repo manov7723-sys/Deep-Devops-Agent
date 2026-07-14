@@ -46,7 +46,14 @@ export function PipelineCard({ pipeline: p }: PipelineCardProps) {
       </div>
       <div className="row gap-1 wrap" style={{ alignItems: "stretch" }}>
         {p.stages.map((s, i) => {
-          const tone = s.status === "ok" ? "ok" : s.status === "fail" ? "danger" : s.status === "run" ? "info" : "";
+          const tone =
+            s.status === "ok"
+              ? "ok"
+              : s.status === "fail"
+                ? "danger"
+                : s.status === "run"
+                  ? "info"
+                  : "";
           return (
             <div
               key={`${s.label}-${i}`}
@@ -56,7 +63,10 @@ export function PipelineCard({ pipeline: p }: PipelineCardProps) {
                 borderColor: s.status === "fail" ? "var(--danger)" : "var(--border-soft)",
               }}
             >
-              <span className={`dot ${tone} ${s.status === "run" ? "pulse" : ""}`} style={{ flex: "none" }} />
+              <span
+                className={`dot ${tone} ${s.status === "run" ? "pulse" : ""}`}
+                style={{ flex: "none" }}
+              />
               <span
                 style={{
                   fontSize: 11.5,

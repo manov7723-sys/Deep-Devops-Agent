@@ -18,7 +18,10 @@ export type ComposeAnalysis =
     }
   | { ok: false; error: string };
 
-export async function analyzeRepoForCompose(projectId: string, repoFullName: string): Promise<ComposeAnalysis> {
+export async function analyzeRepoForCompose(
+  projectId: string,
+  repoFullName: string,
+): Promise<ComposeAnalysis> {
   const det = await detectRepoStack(projectId, repoFullName);
   if (!det.ok) return det;
 
@@ -32,7 +35,9 @@ export async function analyzeRepoForCompose(projectId: string, repoFullName: str
   const compose = generated.files.filter((f) => f.path === "docker-compose.yml");
   const notes = ["Compose builds from the repo's Dockerfile and maps the app's runtime port."];
   if (!det.existingDockerfile) {
-    notes.push("No Dockerfile detected at the repo root — generate one with the Create Dockerfile automation first, or `docker compose up` will fail to build.");
+    notes.push(
+      "No Dockerfile detected at the repo root — generate one with the Create Dockerfile automation first, or `docker compose up` will fail to build.",
+    );
   }
 
   return {

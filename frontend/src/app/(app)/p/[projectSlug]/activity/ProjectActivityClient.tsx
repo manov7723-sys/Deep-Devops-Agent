@@ -28,9 +28,8 @@ export function ProjectActivityClient({ slug }: { slug: string }) {
   const { data } = useProjectActivity(slug);
 
   const inflated = useMemo(() => inflate(data ?? [], 30), [data]);
-  const filtered = env === "all"
-    ? inflated
-    : inflated.filter((a) => a.env === env || a.env === "shared");
+  const filtered =
+    env === "all" ? inflated : inflated.filter((a) => a.env === env || a.env === "shared");
 
   return (
     <div className="col gap-5">
@@ -39,8 +38,12 @@ export function ProjectActivityClient({ slug }: { slug: string }) {
         sub="Everything you and the agents have done across this project."
         actions={
           <>
-            <Btn variant="outline" icon="filter">Filter</Btn>
-            <Btn variant="outline" icon="download">Export</Btn>
+            <Btn variant="outline" icon="filter">
+              Filter
+            </Btn>
+            <Btn variant="outline" icon="download">
+              Export
+            </Btn>
           </>
         }
       />

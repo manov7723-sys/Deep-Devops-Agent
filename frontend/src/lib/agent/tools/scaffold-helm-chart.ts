@@ -57,10 +57,19 @@ export const scaffoldHelmChartTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       repoFullName: { type: "string", description: "owner/repo attached to this project." },
-      chartPath: { type: "string", description: 'Directory inside the repo for the chart. Defaults to "chart".' },
-      imageRepository: { type: "string", description: 'Sets the default image repository in values.yaml.' },
+      chartPath: {
+        type: "string",
+        description: 'Directory inside the repo for the chart. Defaults to "chart".',
+      },
+      imageRepository: {
+        type: "string",
+        description: "Sets the default image repository in values.yaml.",
+      },
       targetPort: { type: "number", description: "Container port. Defaults to 3000." },
-      branch: { type: "string", description: 'Branch to commit on. Defaults to "deepagent/scaffold-helm".' },
+      branch: {
+        type: "string",
+        description: 'Branch to commit on. Defaults to "deepagent/scaffold-helm".',
+      },
     },
     required: ["repoFullName"],
     additionalProperties: false,
@@ -78,14 +87,17 @@ export const scaffoldHelmChartTool: Tool<Input, Output> = {
       return { ok: false, error: `Repo "${input.repoFullName}" isn't attached to this project.` };
     }
     const resolved = await resolveRepoClient(repo.id);
-    if (!resolved.ok) return { ok: false, error: `Cannot access ${repo.fullName}: ${resolved.message}` };
+    if (!resolved.ok)
+      return { ok: false, error: `Cannot access ${repo.fullName}: ${resolved.message}` };
     const client = resolved.client;
 
     const chartPath = (input.chartPath ?? "chart").replace(/^\/+|\/+$/g, "") || "chart";
     const branch = input.branch ?? "deepagent/scaffold-helm";
 
     // 1. Idempotency check — Chart.yaml already there?
-    const existingChart = await client.readFile(`${chartPath}/Chart.yaml`, repo.defaultBranch).catch(() => null);
+    const existingChart = await client
+      .readFile(`${chartPath}/Chart.yaml`, repo.defaultBranch)
+      .catch(() => null);
     if (existingChart != null) {
       return {
         ok: true,
@@ -103,7 +115,10 @@ export const scaffoldHelmChartTool: Tool<Input, Output> = {
     try {
       await client.ensureBranch(branch, repo.defaultBranch);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : `Could not create branch ${branch}.` };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : `Could not create branch ${branch}.`,
+      };
     }
 
     // 3. Read each scaffold file off disk, optionally rewriting a couple of
@@ -124,7 +139,10 @@ export const scaffoldHelmChartTool: Tool<Input, Output> = {
 
       if (f.relPath === "values.yaml") {
         if (input.imageRepository) {
-          content = content.replace(/repository:\s+ghcr\.io\/example\/app/, `repository: ${input.imageRepository}`);
+          content = content.replace(
+            /repository:\s+ghcr\.io\/example\/app/,
+            `repository: ${input.imageRepository}`,
+          );
         }
         if (input.targetPort != null) {
           content = content.replace(/targetPort:\s+3000/, `targetPort: ${input.targetPort}`);
@@ -138,7 +156,10 @@ export const scaffoldHelmChartTool: Tool<Input, Output> = {
     try {
       await client.commitFiles({ branch, message: "chore(helm): scaffold default chart", files });
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? `Failed committing chart: ${err.message}` : "Commit failed." };
+      return {
+        ok: false,
+        error: err instanceof Error ? `Failed committing chart: ${err.message}` : "Commit failed.",
+      };
     }
     const filesCommitted = files.map((f) => f.path);
 

@@ -41,7 +41,11 @@ export async function POST(req: Request) {
       metadata: { method: "backup_code" },
     });
     return NextResponse.json(
-      { ok: false, code: "invalid_code", message: "That backup code isn't valid or has already been used." },
+      {
+        ok: false,
+        code: "invalid_code",
+        message: "That backup code isn't valid or has already been used.",
+      },
       { status: 400 },
     );
   }

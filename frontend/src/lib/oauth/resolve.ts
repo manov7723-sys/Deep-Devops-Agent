@@ -32,8 +32,7 @@ export type ResolvedIdentity = {
   };
 };
 
-export type ResolveError =
-  | { ok: false; code: "email_unverified" };
+export type ResolveError = { ok: false; code: "email_unverified" };
 
 export type ResolveResult = { ok: true; identity: ResolvedIdentity } | ResolveError;
 
@@ -131,7 +130,10 @@ export async function resolveIdentity(
   return { ok: true, identity: { outcome: "signup", user: created } };
 }
 
-function splitName(name: string, emailFallback: string): {
+function splitName(
+  name: string,
+  emailFallback: string,
+): {
   firstName: string;
   lastName: string;
   display: string;

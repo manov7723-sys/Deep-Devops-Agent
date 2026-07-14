@@ -143,17 +143,13 @@ export function useSendChatMessageStream(slug: string) {
                 summary: string;
               };
               const idx = toolCalls.findIndex((t) => t.toolUseId === toolUseId);
-              if (idx >= 0)
-                toolCalls[idx] = { ...toolCalls[idx]!, result: { ok, summary } };
+              if (idx >= 0) toolCalls[idx] = { ...toolCalls[idx]!, result: { ok, summary } };
               setStatus({ state: "streaming", partial, toolCalls: [...toolCalls] });
             } else if (event === "turn_end") {
               // turn boundary — nothing for the UI to do, mostly a debug marker.
             } else if (event === "done") {
               const msg = parsed as SeedChatMessage;
-              qc.setQueryData<SeedChatMessage[]>(effectiveKey, (cur) => [
-                ...(cur ?? []),
-                msg,
-              ]);
+              qc.setQueryData<SeedChatMessage[]>(effectiveKey, (cur) => [...(cur ?? []), msg]);
               // Bubble the update into the flat chat cache too (initial-load
               // path) and the threads list so the rail's timestamps refresh.
               qc.invalidateQueries({ queryKey: ["p", slug, "chat", "threads"] });

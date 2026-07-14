@@ -34,7 +34,11 @@ export function GcpMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
   const envList = useMemo(() => envs ?? [], [envs]);
   const activeKey = useMemo(() => {
     if (env !== "all" && envList.some((e) => e.key === env)) return env;
-    return envList.find((e) => e.cloudKind === "gcp")?.key ?? envList.find((e) => e.cloudProviderId)?.key ?? null;
+    return (
+      envList.find((e) => e.cloudKind === "gcp")?.key ??
+      envList.find((e) => e.cloudProviderId)?.key ??
+      null
+    );
   }, [env, envList]);
   const activeEnv = envList.find((e) => e.key === activeKey) ?? null;
 
@@ -51,7 +55,7 @@ export function GcpMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
     retry: false,
     staleTime: 20_000,
   });
-  const configured = existing.data?.ok ? existing.data.configured ?? 0 : 0;
+  const configured = existing.data?.ok ? (existing.data.configured ?? 0) : 0;
 
   const setup = useMutation({
     mutationFn: () =>
@@ -85,10 +89,17 @@ export function GcpMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub="GKE node alarms (CPU, memory, disk %) → email notification channel. GCP only.">GCP Monitoring alarms</Block.Title>
+        <Block.Title sub="GKE node alarms (CPU, memory, disk %) → email notification channel. GCP only.">
+          GCP Monitoring alarms
+        </Block.Title>
         <Block.Actions>
           {configured > 0 && <StatusDot tone="ok" label={`${configured} alarms`} />}
-          <Btn variant="ghost" icon="refresh" loading={existing.isFetching} onClick={() => existing.refetch()}>
+          <Btn
+            variant="ghost"
+            icon="refresh"
+            loading={existing.isFetching}
+            onClick={() => existing.refetch()}
+          >
             Refresh
           </Btn>
         </Block.Actions>
@@ -98,15 +109,23 @@ export function GcpMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
           {configured > 0 && (
             <div className="card card-pad col gap-1" style={{ fontSize: 12.5 }}>
               <span className="row gap-2" style={{ fontWeight: 600 }}>
-                <span className="dot ok" /> {configured} alert policies on <b>{existing.data?.clusterName}</b>
+                <span className="dot ok" /> {configured} alert policies on{" "}
+                <b>{existing.data?.clusterName}</b>
               </span>
-              <span className="faint">Re-running below replaces them. Fired alerts email your notification channel.</span>
+              <span className="faint">
+                Re-running below replaces them. Fired alerts email your notification channel.
+              </span>
             </div>
           )}
 
           <div className="row gap-2 wrap">
             {METRICS.map((m) => (
-              <button key={m.key} type="button" className={`chip ${selected.has(m.key) ? "active" : ""}`} onClick={() => toggle(m.key)}>
+              <button
+                key={m.key}
+                type="button"
+                className={`chip ${selected.has(m.key) ? "active" : ""}`}
+                onClick={() => toggle(m.key)}
+              >
                 {selected.has(m.key) ? "✓ " : ""}
                 {m.label}
               </button>
@@ -114,28 +133,55 @@ export function GcpMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
           </div>
 
           <div className="row gap-3 wrap">
-            <Field label="Notify email" hint="Creates a GCP notification channel that emails on alert.">
-              <Input type="email" value={email} placeholder="you@company.com" onChange={(e) => setEmail(e.target.value)} />
+            <Field
+              label="Notify email"
+              hint="Creates a GCP notification channel that emails on alert."
+            >
+              <Input
+                type="email"
+                value={email}
+                placeholder="you@company.com"
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </Field>
-            <Field label="GKE cluster (optional)" hint="Auto-detected from the kubeconfig if blank.">
-              <Input value={clusterName} placeholder="auto-detect" onChange={(e) => setClusterName(e.target.value)} />
+            <Field
+              label="GKE cluster (optional)"
+              hint="Auto-detected from the kubeconfig if blank."
+            >
+              <Input
+                value={clusterName}
+                placeholder="auto-detect"
+                onChange={(e) => setClusterName(e.target.value)}
+              />
             </Field>
           </div>
 
           <div className="row gap-2">
-            <Btn variant="primary" icon="bell" loading={setup.isPending} disabled={selected.size === 0} onClick={() => setup.mutate()}>
+            <Btn
+              variant="primary"
+              icon="bell"
+              loading={setup.isPending}
+              disabled={selected.size === 0}
+              onClick={() => setup.mutate()}
+            >
               Set up alarms
             </Btn>
           </div>
 
-          {error && <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>}
+          {error && (
+            <span style={{ color: "var(--danger, #e5484d)", fontSize: 12.5 }}>❌ {error}</span>
+          )}
           {result && (
             <div className="col gap-2" style={{ fontSize: 12.5 }}>
               <span className="row gap-2">
-                <StatusDot tone={result.ok ? "ok" : "danger"} label={result.ok ? "configured" : "failed"} />
+                <StatusDot
+                  tone={result.ok ? "ok" : "danger"}
+                  label={result.ok ? "configured" : "failed"}
+                />
                 {result.ok ? (
                   <span>
-                    {result.alarms?.filter((a) => a.ok).length ?? 0} alert policies on <b>{result.clusterName}</b> (project {result.project}).
+                    {result.alarms?.filter((a) => a.ok).length ?? 0} alert policies on{" "}
+                    <b>{result.clusterName}</b> (project {result.project}).
                     {result.emailWired ? " Email channel wired." : ""}
                   </span>
                 ) : (
@@ -144,9 +190,13 @@ export function GcpMonitorAlarmsPanel({ slug, env }: { slug: string; env: EnvFil
               </span>
               {result.alarms && result.alarms.some((a) => !a.ok) && (
                 <div className="col gap-1">
-                  {result.alarms.filter((a) => !a.ok).map((a, i) => (
-                    <span key={i} style={{ color: "var(--danger, #e5484d)" }}>• {a.label}: {a.error}</span>
-                  ))}
+                  {result.alarms
+                    .filter((a) => !a.ok)
+                    .map((a, i) => (
+                      <span key={i} style={{ color: "var(--danger, #e5484d)" }}>
+                        • {a.label}: {a.error}
+                      </span>
+                    ))}
                 </div>
               )}
             </div>

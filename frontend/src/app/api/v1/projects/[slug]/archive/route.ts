@@ -13,10 +13,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   const gate = await requireProjectAccess(slug, "owner");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
   if (gate.access.project.archivedAt) {
-    return NextResponse.json(
-      { ok: false, code: "already_archived" },
-      { status: 409 },
-    );
+    return NextResponse.json({ ok: false, code: "already_archived" }, { status: 409 });
   }
   const { archivedAt } = await archiveProject(gate.access.project.id);
   const meta = extractRequestMeta(req);
@@ -48,10 +45,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ slug: string
   const gate = await requireProjectAccess(slug, "owner");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
   if (!gate.access.project.archivedAt) {
-    return NextResponse.json(
-      { ok: false, code: "not_archived" },
-      { status: 409 },
-    );
+    return NextResponse.json({ ok: false, code: "not_archived" }, { status: 409 });
   }
   await unarchiveProject(gate.access.project.id);
   const meta = extractRequestMeta(req);

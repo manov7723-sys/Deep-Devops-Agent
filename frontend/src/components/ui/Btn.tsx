@@ -32,7 +32,18 @@ const sizeClass: Record<BtnSize, string> = {
 };
 
 export const Btn = forwardRef<HTMLButtonElement, BtnProps>(function Btn(
-  { variant = "default", size = "md", icon, iconRight, block, loading, className, children, disabled, ...rest },
+  {
+    variant = "default",
+    size = "md",
+    icon,
+    iconRight,
+    block,
+    loading,
+    className,
+    children,
+    disabled,
+    ...rest
+  },
   ref,
 ) {
   const iconSize = size === "sm" ? 14 : 16;

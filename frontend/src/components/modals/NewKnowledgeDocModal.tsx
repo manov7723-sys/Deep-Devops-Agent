@@ -21,7 +21,11 @@ const TYPE_OPTIONS: SelectOption[] = [
  * Create a written KnowledgeDoc — agents pull this content into their
  * context. PDF/file upload uses a different flow (storage → ingest job).
  */
-export function NewKnowledgeDocModal({ open, onOpenChange, projectSlug }: NewKnowledgeDocModalProps) {
+export function NewKnowledgeDocModal({
+  open,
+  onOpenChange,
+  projectSlug,
+}: NewKnowledgeDocModalProps) {
   const qc = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -33,10 +37,12 @@ export function NewKnowledgeDocModal({ open, onOpenChange, projectSlug }: NewKno
       type: "Doc" | "Runbook";
       tags: string[];
     }) => {
-      const res = await api.post<{ ok: boolean; doc?: { id: string }; message?: string; code?: string }>(
-        `/projects/${projectSlug}/knowledge`,
-        body,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        doc?: { id: string };
+        message?: string;
+        code?: string;
+      }>(`/projects/${projectSlug}/knowledge`, body);
       if (!res.ok || !res.doc) throw new Error(res.message ?? res.code ?? "Could not create doc.");
       return res.doc;
     },
@@ -77,8 +83,15 @@ export function NewKnowledgeDocModal({ open, onOpenChange, projectSlug }: NewKno
       width={620}
       footer={
         <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
-          <Btn variant="primary" icon="plus" loading={create.isPending} onClick={() => form.handleSubmit()}>
+          <Btn variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="primary"
+            icon="plus"
+            loading={create.isPending}
+            onClick={() => form.handleSubmit()}
+          >
             Create
           </Btn>
         </>
@@ -94,7 +107,12 @@ export function NewKnowledgeDocModal({ open, onOpenChange, projectSlug }: NewKno
         <form.Field
           name="title"
           validators={{
-            onChange: ({ value }) => (!value.trim() ? "Title is required" : value.length > 200 ? "Max 200 chars" : undefined),
+            onChange: ({ value }) =>
+              !value.trim()
+                ? "Title is required"
+                : value.length > 200
+                  ? "Max 200 chars"
+                  : undefined,
           }}
         >
           {(field) => (
@@ -112,7 +130,10 @@ export function NewKnowledgeDocModal({ open, onOpenChange, projectSlug }: NewKno
 
         <form.Field name="type">
           {(field) => (
-            <Field label="Section" hint="Documentation vs Runbook — affects grouping on the Knowledge tab.">
+            <Field
+              label="Section"
+              hint="Documentation vs Runbook — affects grouping on the Knowledge tab."
+            >
               <Select
                 options={TYPE_OPTIONS}
                 value={field.state.value}
@@ -125,7 +146,10 @@ export function NewKnowledgeDocModal({ open, onOpenChange, projectSlug }: NewKno
 
         <form.Field name="excerpt">
           {(field) => (
-            <Field label="Excerpt" hint="One-line summary for the card. Auto-derived from body if blank.">
+            <Field
+              label="Excerpt"
+              hint="One-line summary for the card. Auto-derived from body if blank."
+            >
               <Input
                 placeholder="Quick context for what this doc covers."
                 value={field.state.value}

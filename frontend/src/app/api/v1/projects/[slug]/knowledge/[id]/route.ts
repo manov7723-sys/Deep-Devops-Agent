@@ -14,10 +14,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   return NextResponse.json({ doc });
 }
 
-export async function PATCH(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; id: string }> },
-) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
@@ -44,10 +41,7 @@ export async function PATCH(
   return NextResponse.json({ ok: true, doc: res.doc });
 }
 
-export async function DELETE(
-  req: Request,
-  ctx: { params: Promise<{ slug: string; id: string }> },
-) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });

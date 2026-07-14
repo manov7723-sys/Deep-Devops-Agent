@@ -13,7 +13,9 @@ export function Stat({ label, value, sub, icon, trend }: StatProps) {
   return (
     <div className="card card-pad col gap-3" style={{ minWidth: 0 }}>
       <div className="row between">
-        <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
+        <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
+          {label}
+        </span>
         {icon && (
           <span style={{ color: "var(--text-faint)" }}>
             <Icon name={icon} size={16} />

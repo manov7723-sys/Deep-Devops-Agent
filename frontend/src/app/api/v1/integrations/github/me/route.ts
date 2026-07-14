@@ -32,10 +32,7 @@ export async function GET(req: Request) {
         select: { id: true, accessTokenRef: true, providerAccountId: true },
       });
   if (!oauth?.accessTokenRef) {
-    return NextResponse.json(
-      { ok: false, code: "github_not_connected" },
-      { status: 409 },
-    );
+    return NextResponse.json({ ok: false, code: "github_not_connected" }, { status: 409 });
   }
 
   const token = decryptSecret(oauth.accessTokenRef);
@@ -48,10 +45,7 @@ export async function GET(req: Request) {
     cache: "no-store",
   });
   if (!res.ok) {
-    return NextResponse.json(
-      { ok: false, code: `github_${res.status}` },
-      { status: 502 },
-    );
+    return NextResponse.json({ ok: false, code: `github_${res.status}` }, { status: 502 });
   }
   const user = (await res.json()) as {
     id: number;

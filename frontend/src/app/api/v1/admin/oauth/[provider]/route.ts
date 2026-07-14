@@ -9,19 +9,13 @@ const ProviderParam = z.enum(["github", "google"]);
 const PatchRequest = z.object({ enabled: z.boolean() });
 
 /** PATCH → toggle the `enabled` flag without touching the secret. */
-export async function PATCH(
-  req: Request,
-  ctx: { params: Promise<{ provider: string }> },
-) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ provider: string }> }) {
   const gate = await requireSuperAdmin();
   if (!gate.ok) return adminGateResponse(gate.status);
   const { provider } = await ctx.params;
   const p = ProviderParam.safeParse(provider);
   if (!p.success) {
-    return NextResponse.json(
-      { ok: false, code: "unknown_provider" },
-      { status: 404 },
-    );
+    return NextResponse.json({ ok: false, code: "unknown_provider" }, { status: 404 });
   }
   const parsed = PatchRequest.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
@@ -56,19 +50,13 @@ export async function PATCH(
 }
 
 /** DELETE → drop the row. `getProviderAsync()` then falls back to env vars. */
-export async function DELETE(
-  req: Request,
-  ctx: { params: Promise<{ provider: string }> },
-) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ provider: string }> }) {
   const gate = await requireSuperAdmin();
   if (!gate.ok) return adminGateResponse(gate.status);
   const { provider } = await ctx.params;
   const p = ProviderParam.safeParse(provider);
   if (!p.success) {
-    return NextResponse.json(
-      { ok: false, code: "unknown_provider" },
-      { status: 404 },
-    );
+    return NextResponse.json({ ok: false, code: "unknown_provider" }, { status: 404 });
   }
   await clearOAuthConfig(p.data);
   const meta = extractRequestMeta(req);

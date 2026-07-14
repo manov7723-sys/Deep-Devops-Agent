@@ -61,7 +61,10 @@ async function tokenRequest(body: URLSearchParams): Promise<TokenResult> {
       cache: "no-store",
     });
   } catch (err) {
-    return { ok: false, error: `Network error reaching Google: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching Google: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   const j = (await res.json().catch(() => ({}))) as {
     access_token?: string;
@@ -71,11 +74,20 @@ async function tokenRequest(body: URLSearchParams): Promise<TokenResult> {
     error_description?: string;
   };
   if (!res.ok || !j.access_token) {
-    return { ok: false, error: (j.error_description || j.error || `token request failed (${res.status})`).split("\n")[0] };
+    return {
+      ok: false,
+      error: (j.error_description || j.error || `token request failed (${res.status})`).split(
+        "\n",
+      )[0],
+    };
   }
   return {
     ok: true,
-    tokens: { accessToken: j.access_token, refreshToken: j.refresh_token ?? "", expiresIn: j.expires_in ?? 3600 },
+    tokens: {
+      accessToken: j.access_token,
+      refreshToken: j.refresh_token ?? "",
+      expiresIn: j.expires_in ?? 3600,
+    },
   };
 }
 
@@ -105,7 +117,12 @@ export function refreshGcpToken(refreshToken: string): Promise<TokenResult> {
   );
 }
 
-export type GcpProject = { projectId: string; name: string; projectNumber: string; lifecycleState: string };
+export type GcpProject = {
+  projectId: string;
+  name: string;
+  projectNumber: string;
+  lifecycleState: string;
+};
 
 /** List the GCP projects the token can access (validates + resolves a default). */
 export async function listGcpProjects(
@@ -113,16 +130,30 @@ export async function listGcpProjects(
 ): Promise<{ ok: true; projects: GcpProject[] } | { ok: false; error: string }> {
   let res: Response;
   try {
-    res = await fetch(CRM, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+    res = await fetch(CRM, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
   } catch (err) {
-    return { ok: false, error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return { ok: false, error: `GCP returned ${res.status} listing projects: ${body.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `GCP returned ${res.status} listing projects: ${body.slice(0, 200)}`,
+    };
   }
   const data = (await res.json().catch(() => ({}))) as {
-    projects?: Array<{ projectId: string; name: string; projectNumber: string; lifecycleState: string }>;
+    projects?: Array<{
+      projectId: string;
+      name: string;
+      projectNumber: string;
+      lifecycleState: string;
+    }>;
   };
   const projects = (data.projects ?? []).map((p) => ({
     projectId: p.projectId,
@@ -154,14 +185,25 @@ export async function listGcpNetworks(
       cache: "no-store",
     });
   } catch (err) {
-    return { ok: false, error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return { ok: false, error: `GCP returned ${res.status} listing networks: ${body.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `GCP returned ${res.status} listing networks: ${body.slice(0, 200)}`,
+    };
   }
-  const data = (await res.json().catch(() => ({}))) as { items?: Array<{ name?: string; selfLink?: string }> };
-  const networks = (data.items ?? []).map((n) => ({ name: n.name ?? "", selfLink: n.selfLink ?? "" }));
+  const data = (await res.json().catch(() => ({}))) as {
+    items?: Array<{ name?: string; selfLink?: string }>;
+  };
+  const networks = (data.items ?? []).map((n) => ({
+    name: n.name ?? "",
+    selfLink: n.selfLink ?? "",
+  }));
   return { ok: true, networks };
 }
 
@@ -173,16 +215,25 @@ export async function listGcpSubnetworks(
 ): Promise<{ ok: true; subnetworks: GcpSubnetwork[] } | { ok: false; error: string }> {
   let res: Response;
   try {
-    res = await fetch(`${COMPUTE}/${encodeURIComponent(project)}/regions/${encodeURIComponent(region)}/subnetworks`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-    });
+    res = await fetch(
+      `${COMPUTE}/${encodeURIComponent(project)}/regions/${encodeURIComponent(region)}/subnetworks`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
+      },
+    );
   } catch (err) {
-    return { ok: false, error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return { ok: false, error: `GCP returned ${res.status} listing subnetworks: ${body.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `GCP returned ${res.status} listing subnetworks: ${body.slice(0, 200)}`,
+    };
   }
   const data = (await res.json().catch(() => ({}))) as {
     items?: Array<{ name?: string; network?: string; ipCidrRange?: string }>;
@@ -214,9 +265,15 @@ export async function getGkeKubeconfig(
   const path = `${CONTAINER}/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/clusters/${encodeURIComponent(clusterName)}`;
   let res: Response;
   try {
-    res = await fetch(path, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+    res = await fetch(path, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
   } catch (err) {
-    return { ok: false, error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Network error reaching GCP: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -235,12 +292,19 @@ export async function getGkeKubeconfig(
     masterAuth?: { clusterCaCertificate?: string };
   };
   if (data.status && data.status !== "RUNNING") {
-    return { ok: false, error: `Cluster is not ready (status ${data.status}). Wait until it's RUNNING, then connect again.` };
+    return {
+      ok: false,
+      error: `Cluster is not ready (status ${data.status}). Wait until it's RUNNING, then connect again.`,
+    };
   }
   const endpoint = data.endpoint;
   const ca = data.masterAuth?.clusterCaCertificate;
   if (!endpoint || !ca) {
-    return { ok: false, error: "Found the cluster but it didn't return an endpoint/CA (it may be a private cluster without a public endpoint)." };
+    return {
+      ok: false,
+      error:
+        "Found the cluster but it didn't return an endpoint/CA (it may be a private cluster without a public endpoint).",
+    };
   }
   const kubeconfig = `apiVersion: v1
 kind: Config

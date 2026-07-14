@@ -110,12 +110,31 @@ export const AKS_DEFAULTS: AksDefaults = {
   kedaVpa: true,
 };
 
-export const AKS_VM_SIZES = ["Standard_B2s", "Standard_DS2_v2", "Standard_D2s_v3", "Standard_D4s_v3", "Standard_D8s_v3", "Standard_E4s_v3"];
+export const AKS_VM_SIZES = [
+  "Standard_B2s",
+  "Standard_DS2_v2",
+  "Standard_D2s_v3",
+  "Standard_D4s_v3",
+  "Standard_D8s_v3",
+  "Standard_E4s_v3",
+];
 export const AKS_K8S_VERSIONS = ["1.36", "1.35", "1.34", "1.33", "1.32", "1.31", "1.30"];
 export const AKS_DISK_SIZES = [64, 128, 256, 512];
 export const AKS_REGIONS = [
-  "eastus", "eastus2", "westus2", "westus3", "centralus", "northeurope", "westeurope",
-  "uksouth", "francecentral", "germanywestcentral", "southeastasia", "australiaeast", "centralindia", "japaneast",
+  "eastus",
+  "eastus2",
+  "westus2",
+  "westus3",
+  "centralus",
+  "northeurope",
+  "westeurope",
+  "uksouth",
+  "francecentral",
+  "germanywestcentral",
+  "southeastasia",
+  "australiaeast",
+  "centralindia",
+  "japaneast",
 ];
 
 function backendBlock(spec: AksSpec): string {
@@ -145,7 +164,11 @@ export function buildAksTerraform(spec: AksSpec): Record<string, string> {
   const monitoring = spec.monitoring !== false;
   const privateCluster = spec.privateCluster === true;
   const authedIps = (spec.authorizedIpRanges || "")
-    .split(",").map((c) => c.trim()).filter(Boolean).map((c) => `"${c}"`).join(", ");
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .map((c) => `"${c}"`)
+    .join(", ");
 
   const versions = `terraform {
   required_version = ">= 1.5.0"
@@ -235,10 +258,14 @@ locals {
     spec.skuTier === "Free" ? "" : `  sku_tier                  = "Standard"`,
     spec.automaticUpgrade === "none" ? "" : `  automatic_channel_upgrade = "patch"`,
     spec.disableLocalAccounts === true ? `  local_account_disabled    = true` : "",
-    spec.workloadIdentity !== false ? `  oidc_issuer_enabled       = true\n  workload_identity_enabled = true` : "",
+    spec.workloadIdentity !== false
+      ? `  oidc_issuer_enabled       = true\n  workload_identity_enabled = true`
+      : "",
     spec.azurePolicy !== false ? `  azure_policy_enabled      = true` : "",
     privateCluster ? `  private_cluster_enabled   = true` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const main = `locals {
   cluster_name = "${cluster}"
@@ -291,7 +318,9 @@ ${blocks.join("\n\n")}
     delete = "30m"
   }
 }
-${appPool ? `
+${
+  appPool
+    ? `
 resource "azurerm_kubernetes_cluster_node_pool" "app" {
   name                  = "apppool"
   kubernetes_cluster_id = azurerm_kubernetes_cluster.aks.id
@@ -306,7 +335,9 @@ resource "azurerm_kubernetes_cluster_node_pool" "app" {
   }
   tags = local.tags
 }
-` : ""}`;
+`
+    : ""
+}`;
 
   const outputs = `output "cluster_name" {
   value = azurerm_kubernetes_cluster.aks.name

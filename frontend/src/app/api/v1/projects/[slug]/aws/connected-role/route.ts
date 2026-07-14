@@ -28,7 +28,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
     orderBy: env?.cloudProviderId ? undefined : { createdAt: "desc" },
   });
 
-  if (!cp) return NextResponse.json({ ok: true, connected: false, roleArn: null, providerName: null, source: "none" });
+  if (!cp)
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      roleArn: null,
+      providerName: null,
+      source: "none",
+    });
   return NextResponse.json({
     ok: true,
     connected: true,

@@ -125,13 +125,55 @@ const BUILTIN_MODELS: Array<{
   inputCostPerMTokCents: number;
   outputCostPerMTokCents: number;
 }> = [
-  { name: "Claude Sonnet 4.5", provider: "Anthropic", ctxTokens: 200_000, inputCostPerMTokCents: 300, outputCostPerMTokCents: 1500 },
-  { name: "Claude Opus 4.7",   provider: "Anthropic", ctxTokens: 200_000, inputCostPerMTokCents: 1500, outputCostPerMTokCents: 7500 },
-  { name: "Claude Haiku 4.5",  provider: "Anthropic", ctxTokens: 200_000, inputCostPerMTokCents: 80,  outputCostPerMTokCents: 400 },
-  { name: "GPT-4o",            provider: "OpenAI",    ctxTokens: 128_000, inputCostPerMTokCents: 250, outputCostPerMTokCents: 1000 },
-  { name: "GPT-4o mini",       provider: "OpenAI",    ctxTokens: 128_000, inputCostPerMTokCents: 15,  outputCostPerMTokCents: 60 },
-  { name: "Llama 3.3 70B",     provider: "Groq",      ctxTokens: 128_000, inputCostPerMTokCents: 59,  outputCostPerMTokCents: 79 },
-  { name: "Llama 3.1 8B Instant", provider: "Groq",   ctxTokens: 128_000, inputCostPerMTokCents: 5,   outputCostPerMTokCents: 8 },
+  {
+    name: "Claude Sonnet 4.5",
+    provider: "Anthropic",
+    ctxTokens: 200_000,
+    inputCostPerMTokCents: 300,
+    outputCostPerMTokCents: 1500,
+  },
+  {
+    name: "Claude Opus 4.7",
+    provider: "Anthropic",
+    ctxTokens: 200_000,
+    inputCostPerMTokCents: 1500,
+    outputCostPerMTokCents: 7500,
+  },
+  {
+    name: "Claude Haiku 4.5",
+    provider: "Anthropic",
+    ctxTokens: 200_000,
+    inputCostPerMTokCents: 80,
+    outputCostPerMTokCents: 400,
+  },
+  {
+    name: "GPT-4o",
+    provider: "OpenAI",
+    ctxTokens: 128_000,
+    inputCostPerMTokCents: 250,
+    outputCostPerMTokCents: 1000,
+  },
+  {
+    name: "GPT-4o mini",
+    provider: "OpenAI",
+    ctxTokens: 128_000,
+    inputCostPerMTokCents: 15,
+    outputCostPerMTokCents: 60,
+  },
+  {
+    name: "Llama 3.3 70B",
+    provider: "Groq",
+    ctxTokens: 128_000,
+    inputCostPerMTokCents: 59,
+    outputCostPerMTokCents: 79,
+  },
+  {
+    name: "Llama 3.1 8B Instant",
+    provider: "Groq",
+    ctxTokens: 128_000,
+    inputCostPerMTokCents: 5,
+    outputCostPerMTokCents: 8,
+  },
 ];
 
 export async function ensureBuiltinModels(): Promise<void> {
@@ -208,9 +250,7 @@ export type PatchModelArgs = Partial<{
   isDefault: boolean;
 }>;
 
-export type PatchModelResult =
-  | { ok: true; model: ModelRow }
-  | { ok: false; code: "not_found" };
+export type PatchModelResult = { ok: true; model: ModelRow } | { ok: false; code: "not_found" };
 
 export async function patchModel(id: string, patch: PatchModelArgs): Promise<PatchModelResult> {
   const existing = await prisma.model.findUnique({ where: { id }, select: { id: true } });
@@ -228,8 +268,12 @@ export async function patchModel(id: string, patch: PatchModelArgs): Promise<Pat
       data: {
         ...(patch.name !== undefined && { name: patch.name }),
         ...(patch.ctxTokens !== undefined && { ctxTokens: patch.ctxTokens }),
-        ...(patch.inputCostPerMTokCents !== undefined && { inputCostPerMTokCents: patch.inputCostPerMTokCents }),
-        ...(patch.outputCostPerMTokCents !== undefined && { outputCostPerMTokCents: patch.outputCostPerMTokCents }),
+        ...(patch.inputCostPerMTokCents !== undefined && {
+          inputCostPerMTokCents: patch.inputCostPerMTokCents,
+        }),
+        ...(patch.outputCostPerMTokCents !== undefined && {
+          outputCostPerMTokCents: patch.outputCostPerMTokCents,
+        }),
         ...(patch.costNote !== undefined && { costNote: patch.costNote }),
         ...(patch.enabled !== undefined && { enabled: patch.enabled }),
         ...(patch.isDefault !== undefined && { isDefault: patch.isDefault }),
@@ -240,9 +284,7 @@ export async function patchModel(id: string, patch: PatchModelArgs): Promise<Pat
   return { ok: true, model: modelRow(updated) };
 }
 
-export type DeleteModelResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" | "in_use" };
+export type DeleteModelResult = { ok: true } | { ok: false; code: "not_found" | "in_use" };
 
 export async function deleteModel(id: string): Promise<DeleteModelResult> {
   const m = await prisma.model.findUnique({
@@ -310,8 +352,7 @@ export type CreateAgentArgs = {
 };
 
 export type CreateAgentResult =
-  | { ok: true; agent: AgentRow }
-  | { ok: false; code: "model_not_found" };
+  { ok: true; agent: AgentRow } | { ok: false; code: "model_not_found" };
 
 export async function createAgent(args: CreateAgentArgs): Promise<CreateAgentResult> {
   if (args.modelId) {
@@ -344,8 +385,7 @@ export type PatchAgentArgs = Partial<{
 }>;
 
 export type PatchAgentResult =
-  | { ok: true; agent: AgentRow }
-  | { ok: false; code: "not_found" | "model_not_found" };
+  { ok: true; agent: AgentRow } | { ok: false; code: "not_found" | "model_not_found" };
 
 export async function patchAgent(id: string, patch: PatchAgentArgs): Promise<PatchAgentResult> {
   const existing = await prisma.agent.findUnique({ where: { id }, select: { id: true } });
@@ -359,7 +399,9 @@ export async function patchAgent(id: string, patch: PatchAgentArgs): Promise<Pat
     data: {
       ...(patch.name !== undefined && { name: patch.name }),
       ...(patch.skill !== undefined && { skill: patch.skill }),
-      ...(patch.triggerDescription !== undefined && { triggerDescription: patch.triggerDescription }),
+      ...(patch.triggerDescription !== undefined && {
+        triggerDescription: patch.triggerDescription,
+      }),
       ...(patch.approvalPolicy !== undefined && { approvalPolicy: patch.approvalPolicy }),
       ...(patch.modelId !== undefined && { modelId: patch.modelId }),
       ...(patch.enabled !== undefined && { enabled: patch.enabled }),
@@ -370,9 +412,7 @@ export async function patchAgent(id: string, patch: PatchAgentArgs): Promise<Pat
   return { ok: true, agent: agentRow(updated) };
 }
 
-export type DeleteAgentResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" | "in_use" };
+export type DeleteAgentResult = { ok: true } | { ok: false; code: "not_found" | "in_use" };
 
 export async function deleteAgent(id: string): Promise<DeleteAgentResult> {
   const a = await prisma.agent.findUnique({
@@ -472,9 +512,7 @@ export type PatchMcpArgs = Partial<{
   avgLatencyMs: number | null;
 }>;
 
-export type PatchMcpResult =
-  | { ok: true; connector: McpRow }
-  | { ok: false; code: "not_found" };
+export type PatchMcpResult = { ok: true; connector: McpRow } | { ok: false; code: "not_found" };
 
 export async function patchMcp(id: string, patch: PatchMcpArgs): Promise<PatchMcpResult> {
   const existing = await prisma.mcpConnector.findUnique({ where: { id }, select: { id: true } });
@@ -494,9 +532,7 @@ export async function patchMcp(id: string, patch: PatchMcpArgs): Promise<PatchMc
   return { ok: true, connector: mcpRow(updated) };
 }
 
-export type DeleteMcpResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" | "in_use" };
+export type DeleteMcpResult = { ok: true } | { ok: false; code: "not_found" | "in_use" };
 
 export async function deleteMcp(id: string): Promise<DeleteMcpResult> {
   const c = await prisma.mcpConnector.findUnique({
@@ -509,9 +545,7 @@ export async function deleteMcp(id: string): Promise<DeleteMcpResult> {
   return { ok: true };
 }
 
-export type UpsertCredentialResult =
-  | { ok: true }
-  | { ok: false; code: "not_found" };
+export type UpsertCredentialResult = { ok: true } | { ok: false; code: "not_found" };
 
 export async function upsertMcpCredential(
   connectorId: string,
@@ -519,7 +553,10 @@ export async function upsertMcpCredential(
   value: string,
   isSecret: boolean,
 ): Promise<UpsertCredentialResult> {
-  const c = await prisma.mcpConnector.findUnique({ where: { id: connectorId }, select: { id: true } });
+  const c = await prisma.mcpConnector.findUnique({
+    where: { id: connectorId },
+    select: { id: true },
+  });
   if (!c) return { ok: false, code: "not_found" };
   await prisma.mcpCredential.upsert({
     where: { connectorId_key: { connectorId, key } },

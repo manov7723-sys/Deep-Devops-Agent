@@ -64,7 +64,9 @@ function parseSetCookie(jar: CookieJar, header: string | null) {
 }
 
 function cookieHeader(jar: CookieJar): string {
-  return Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join("; ");
+  return Array.from(jar.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
 }
 
 async function authenticate(jar: CookieJar) {
@@ -76,7 +78,10 @@ async function authenticate(jar: CookieJar) {
   parseSetCookie(jar, res.headers.get("set-cookie"));
 }
 
-async function checkOne(jar: CookieJar, c: Check): Promise<{ ok: true } | { ok: false; reason: string }> {
+async function checkOne(
+  jar: CookieJar,
+  c: Check,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   const res = await fetch(BASE + c.path, {
     headers: { cookie: cookieHeader(jar) },
   });

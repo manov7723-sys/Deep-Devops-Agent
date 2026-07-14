@@ -39,7 +39,10 @@ export function normalizeProxmoxEndpoint(raw: string): string {
     return `${u.protocol}//${u.host}`; // origin only — drops path, query, and #fragment
   } catch {
     // Fallback: strip fragment/query/path/trailing slash by hand.
-    return e.replace(/[#?].*$/, "").replace(/\/api2\/json.*$/i, "").replace(/\/+$/, "");
+    return e
+      .replace(/[#?].*$/, "")
+      .replace(/\/api2\/json.*$/i, "")
+      .replace(/\/+$/, "");
   }
 }
 
@@ -95,17 +98,27 @@ export async function connectProxmox(input: ProxmoxInput): Promise<ProxmoxConnec
     return { ok: false, error: "Proxmox needs the host URL, API token ID and token secret." };
   }
   if (!tokenId.includes("@") || !tokenId.includes("!")) {
-    return { ok: false, error: 'API token ID must look like "user@realm!tokenname" (e.g. root@pam!deepagent).' };
+    return {
+      ok: false,
+      error: 'API token ID must look like "user@realm!tokenname" (e.g. root@pam!deepagent).',
+    };
   }
 
   let res: { status: number; body: string };
   try {
     res = await proxmoxGet(base, "/api2/json/version", proxmoxAuthHeader(tokenId, secret));
   } catch (err) {
-    return { ok: false, error: `Couldn't reach Proxmox at ${base}: ${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      ok: false,
+      error: `Couldn't reach Proxmox at ${base}: ${err instanceof Error ? err.message : "unknown"}`,
+    };
   }
   if (res.status === 401) {
-    return { ok: false, error: "Proxmox rejected the API token (401). Check the token ID and secret, and that the token has permissions." };
+    return {
+      ok: false,
+      error:
+        "Proxmox rejected the API token (401). Check the token ID and secret, and that the token has permissions.",
+    };
   }
   if (res.status < 200 || res.status >= 300) {
     return { ok: false, error: `Proxmox returned ${res.status}. ${res.body.slice(0, 160)}` };
@@ -113,7 +126,9 @@ export async function connectProxmox(input: ProxmoxInput): Promise<ProxmoxConnec
   let version = "";
   try {
     const j = JSON.parse(res.body) as { data?: { version?: string; release?: string } };
-    version = j.data?.version ? `${j.data.version}${j.data.release ? `-${j.data.release}` : ""}` : "";
+    version = j.data?.version
+      ? `${j.data.version}${j.data.release ? `-${j.data.release}` : ""}`
+      : "";
   } catch {
     /* non-fatal — a 2xx already proves the token works */
   }
@@ -130,7 +145,9 @@ export type DecryptedProxmoxCreds =
   | { ok: false; error: string };
 
 /** Load + decrypt a Proxmox provider's API-token credentials. */
-export async function getDecryptedProxmoxCreds(cloudProviderId: string): Promise<DecryptedProxmoxCreds> {
+export async function getDecryptedProxmoxCreds(
+  cloudProviderId: string,
+): Promise<DecryptedProxmoxCreds> {
   const cp = await prisma.cloudProvider.findUnique({
     where: { id: cloudProviderId },
     select: { kind: true, accountRef: true, roleArn: true, externalId: true, region: true },
@@ -144,7 +161,10 @@ export async function getDecryptedProxmoxCreds(cloudProviderId: string): Promise
   try {
     tokenSecret = decryptSecret(cp.externalId);
   } catch {
-    return { ok: false, error: "Could not decrypt the Proxmox token secret — reconnect the provider." };
+    return {
+      ok: false,
+      error: "Could not decrypt the Proxmox token secret — reconnect the provider.",
+    };
   }
   return {
     ok: true,
@@ -175,7 +195,13 @@ export type ProxmoxOptions = {
  * lookup 'pve' failed").
  */
 export async function getProxmoxOptions(cloudProviderId: string): Promise<ProxmoxOptions> {
-  const empty: ProxmoxOptions = { nodes: [], defaultNode: "", datastores: [], bridges: [], templates: [] };
+  const empty: ProxmoxOptions = {
+    nodes: [],
+    defaultNode: "",
+    datastores: [],
+    bridges: [],
+    templates: [],
+  };
   const creds = await getDecryptedProxmoxCreds(cloudProviderId);
   if (!creds.ok) return empty;
   const auth = proxmoxAuthHeader(creds.tokenId, creds.tokenSecret);
@@ -193,13 +219,17 @@ export async function getProxmoxOptions(cloudProviderId: string): Promise<Proxmo
   }
   if (!nodes.length && creds.node) nodes = [creds.node];
   const defaultNode =
-    creds.node && nodes.includes(creds.node) ? creds.node : nodes[0] ?? creds.node ?? "";
+    creds.node && nodes.includes(creds.node) ? creds.node : (nodes[0] ?? creds.node ?? "");
   if (!defaultNode) return { ...empty, nodes };
 
   // 2) Storage pools that can hold VM images/disks on the default node.
   let datastores: string[] = [];
   try {
-    const res = await proxmoxGet(creds.endpoint, `/api2/json/nodes/${encodeURIComponent(defaultNode)}/storage`, auth);
+    const res = await proxmoxGet(
+      creds.endpoint,
+      `/api2/json/nodes/${encodeURIComponent(defaultNode)}/storage`,
+      auth,
+    );
     if (res.status >= 200 && res.status < 300) {
       const j = JSON.parse(res.body) as { data?: Array<{ storage?: string; content?: string }> };
       datastores = (j.data ?? [])
@@ -213,7 +243,11 @@ export async function getProxmoxOptions(cloudProviderId: string): Promise<Proxmo
   // 3) Linux bridges on the default node.
   let bridges: string[] = [];
   try {
-    const res = await proxmoxGet(creds.endpoint, `/api2/json/nodes/${encodeURIComponent(defaultNode)}/network?type=bridge`, auth);
+    const res = await proxmoxGet(
+      creds.endpoint,
+      `/api2/json/nodes/${encodeURIComponent(defaultNode)}/network?type=bridge`,
+      auth,
+    );
     if (res.status >= 200 && res.status < 300) {
       const j = JSON.parse(res.body) as { data?: Array<{ iface?: string }> };
       bridges = (j.data ?? []).map((b) => b.iface).filter((b): b is string => !!b);
@@ -225,9 +259,15 @@ export async function getProxmoxOptions(cloudProviderId: string): Promise<Proxmo
   // 4) VM templates on the default node (clone sources).
   let templates: ProxmoxTemplate[] = [];
   try {
-    const res = await proxmoxGet(creds.endpoint, `/api2/json/nodes/${encodeURIComponent(defaultNode)}/qemu`, auth);
+    const res = await proxmoxGet(
+      creds.endpoint,
+      `/api2/json/nodes/${encodeURIComponent(defaultNode)}/qemu`,
+      auth,
+    );
     if (res.status >= 200 && res.status < 300) {
-      const j = JSON.parse(res.body) as { data?: Array<{ vmid?: number; name?: string; template?: number }> };
+      const j = JSON.parse(res.body) as {
+        data?: Array<{ vmid?: number; name?: string; template?: number }>;
+      };
       templates = (j.data ?? [])
         .filter((v) => v.template === 1 && typeof v.vmid === "number")
         .map((v) => ({ vmid: v.vmid as number, name: v.name ?? "" }))

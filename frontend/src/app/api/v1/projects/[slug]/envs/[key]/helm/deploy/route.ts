@@ -39,7 +39,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   const toolCtx = { projectId: gate.access.project.id, userId: gate.access.session.userId };
   const res = await runHelmUpgradeTool.execute({ envKey: key, ...parsed.data }, toolCtx);
   if (!res.ok) {
-    return NextResponse.json({ ok: false, code: "deploy_failed", message: res.error }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, code: "deploy_failed", message: res.error },
+      { status: 400 },
+    );
   }
 
   const meta = extractRequestMeta(req);
@@ -51,7 +54,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
     targetId: key,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
-    metadata: { releaseName: parsed.data.releaseName, chartPath: parsed.data.chartPath, via: "helm_builder" },
+    metadata: {
+      releaseName: parsed.data.releaseName,
+      chartPath: parsed.data.chartPath,
+      via: "helm_builder",
+    },
   });
 
   return NextResponse.json({ ok: true, result: res.output });

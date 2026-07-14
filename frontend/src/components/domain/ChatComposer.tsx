@@ -97,7 +97,8 @@ export function ChatComposer({
         </div>
       </div>
       <p className="faint" style={{ fontSize: 11, textAlign: "center" }}>
-        Deep Agent can read and write to your repos. Changes require approval before they touch release.
+        Deep Agent can read and write to your repos. Changes require approval before they touch
+        release.
       </p>
     </div>
   );

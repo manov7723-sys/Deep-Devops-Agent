@@ -10,7 +10,13 @@ import type { Tool } from "./types";
  * Entries via the app's stored AWS creds; no aws-auth editing, no human.
  */
 export const grantEksAccessTool: Tool<
-  { envKey: string; roleArn: string; accessLevel?: "edit" | "admin"; namespaces?: string[]; roleName?: string },
+  {
+    envKey: string;
+    roleArn: string;
+    accessLevel?: "edit" | "admin";
+    namespaces?: string[];
+    roleName?: string;
+  },
   { clusterName: string; roleArn: string; accessLevel: string; steps: string[] }
 > = {
   name: "grant_eks_access",
@@ -19,11 +25,30 @@ export const grantEksAccessTool: Tool<
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: "Env whose EKS cluster to grant access on (from list_deploy_targets)." },
-      roleArn: { type: "string", description: "IAM role ARN to grant (e.g. arn:aws:iam::<acct>:role/gha-ecr-<repo>)." },
-      accessLevel: { type: "string", enum: ["edit", "admin"], description: "'edit' = namespace-scoped least-privilege (default); 'admin' = cluster-admin." },
-      namespaces: { type: "array", items: { type: "string" }, description: "Namespaces for 'edit' scope (default ['default'])." },
-      roleName: { type: "string", description: "Role NAME (not ARN) to also give eks:DescribeCluster. Defaults to the name from roleArn." },
+      envKey: {
+        type: "string",
+        description: "Env whose EKS cluster to grant access on (from list_deploy_targets).",
+      },
+      roleArn: {
+        type: "string",
+        description: "IAM role ARN to grant (e.g. arn:aws:iam::<acct>:role/gha-ecr-<repo>).",
+      },
+      accessLevel: {
+        type: "string",
+        enum: ["edit", "admin"],
+        description:
+          "'edit' = namespace-scoped least-privilege (default); 'admin' = cluster-admin.",
+      },
+      namespaces: {
+        type: "array",
+        items: { type: "string" },
+        description: "Namespaces for 'edit' scope (default ['default']).",
+      },
+      roleName: {
+        type: "string",
+        description:
+          "Role NAME (not ARN) to also give eks:DescribeCluster. Defaults to the name from roleArn.",
+      },
     },
     required: ["envKey", "roleArn"],
     additionalProperties: false,
@@ -34,8 +59,13 @@ export const grantEksAccessTool: Tool<
       select: { id: true, kubeconfigRef: true, cloudProviderId: true },
     });
     if (!env) return { ok: false, error: `No env "${input.envKey}" in this project.` };
-    if (!env.kubeconfigRef) return { ok: false, error: `Env "${input.envKey}" has no connected cluster.` };
-    if (!env.cloudProviderId) return { ok: false, error: `Env "${input.envKey}" isn't linked to an AWS account — link one on the cluster/env first.` };
+    if (!env.kubeconfigRef)
+      return { ok: false, error: `Env "${input.envKey}" has no connected cluster.` };
+    if (!env.cloudProviderId)
+      return {
+        ok: false,
+        error: `Env "${input.envKey}" isn't linked to an AWS account — link one on the cluster/env first.`,
+      };
 
     let kubeconfig: string;
     try {
@@ -46,7 +76,10 @@ export const grantEksAccessTool: Tool<
 
     const ref = parseEksClusterRef(kubeconfig);
     if (!ref) {
-      return { ok: false, error: `Env "${input.envKey}" doesn't look like an EKS cluster (no EKS cluster ARN in its kubeconfig). Access Entries are EKS-only.` };
+      return {
+        ok: false,
+        error: `Env "${input.envKey}" doesn't look like an EKS cluster (no EKS cluster ARN in its kubeconfig). Access Entries are EKS-only.`,
+      };
     }
 
     const creds = await resolveAwsExecEnv(env.cloudProviderId);
@@ -63,8 +96,19 @@ export const grantEksAccessTool: Tool<
       roleName,
     });
     if (!res.ok) {
-      return { ok: false, error: `${res.message}${res.stderr ? ` — ${res.stderr.slice(-200)}` : ""}` };
+      return {
+        ok: false,
+        error: `${res.message}${res.stderr ? ` — ${res.stderr.slice(-200)}` : ""}`,
+      };
     }
-    return { ok: true, output: { clusterName: res.clusterName, roleArn: res.roleArn, accessLevel: input.accessLevel ?? "edit", steps: res.steps } };
+    return {
+      ok: true,
+      output: {
+        clusterName: res.clusterName,
+        roleArn: res.roleArn,
+        accessLevel: input.accessLevel ?? "edit",
+        steps: res.steps,
+      },
+    };
   },
 };

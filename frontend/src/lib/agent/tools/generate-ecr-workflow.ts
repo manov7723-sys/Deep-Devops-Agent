@@ -32,16 +32,25 @@ export const generateEcrWorkflowTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       roleArn: { type: "string", description: "IAM role ARN from setup_github_oidc_ecr." },
-      ecrRepositoryUri: { type: "string", description: "ECR repository URI from setup_github_oidc_ecr." },
+      ecrRepositoryUri: {
+        type: "string",
+        description: "ECR repository URI from setup_github_oidc_ecr.",
+      },
       region: { type: "string", description: "AWS region (e.g. us-east-1)." },
-      branch: { type: "string", description: "Branch that triggers the build. Defaults to 'main'." },
+      branch: {
+        type: "string",
+        description: "Branch that triggers the build. Defaults to 'main'.",
+      },
     },
     required: ["roleArn", "ecrRepositoryUri", "region"],
     additionalProperties: false,
   },
   async execute(input) {
     if (!/^arn:aws:iam::\d{12}:role\//.test(input.roleArn)) {
-      return { ok: false, error: `"${input.roleArn}" is not a valid IAM role ARN. Use the value from setup_github_oidc_ecr.` };
+      return {
+        ok: false,
+        error: `"${input.roleArn}" is not a valid IAM role ARN. Use the value from setup_github_oidc_ecr.`,
+      };
     }
     const file = generateEcrWorkflow({
       roleArn: input.roleArn,

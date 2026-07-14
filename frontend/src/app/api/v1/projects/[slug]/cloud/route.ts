@@ -15,7 +15,8 @@ const CATEGORIES: ResourceCategory[] = ["compute", "network", "storage", "data"]
 export async function GET(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const gate = await requireProjectAccess(slug, "viewer");
-  if (!gate.ok) return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
+  if (!gate.ok)
+    return NextResponse.json({ ok: false, code: `status_${gate.status}` }, { status: gate.status });
 
   const sp = new URL(req.url).searchParams;
   const cat = sp.get("cat") as ResourceCategory | null;

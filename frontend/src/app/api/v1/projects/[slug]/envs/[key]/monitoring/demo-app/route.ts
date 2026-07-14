@@ -18,7 +18,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ ok: false, message: parsed.error.errors[0]?.message }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { ok: false, message: parsed.error.errors[0]?.message },
+      { status: 400 },
+    );
 
   const env = await envBySlugAndKey(gate.access.project.id, key);
   if (!env) return NextResponse.json({ ok: false, code: "env_not_found" }, { status: 404 });

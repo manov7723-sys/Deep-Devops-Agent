@@ -3,16 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { Route } from "next";
-import {
-  Badge,
-  Block,
-  Btn,
-  Donut,
-  PageHead,
-  RowList,
-  Stat,
-  StatusDot,
-} from "@/components/ui";
+import { Badge, Block, Btn, Donut, PageHead, RowList, Stat, StatusDot } from "@/components/ui";
 import { EnvFilter, type EnvFilterValue } from "@/components/domain/EnvFilter";
 import { PipeIcon } from "@/components/domain/PipeIcon";
 import { ActivityRow } from "@/components/domain/ActivityRow";
@@ -36,9 +27,15 @@ function riskTone(risk: SeedApproval["risk"]): "danger" | "warn" | "ok" {
   return risk === "high" ? "danger" : risk === "medium" ? "warn" : "ok";
 }
 
-export function ProjectDashboardClient({ slug, projectName }: { slug: string; projectName: string }) {
+export function ProjectDashboardClient({
+  slug,
+  projectName,
+}: {
+  slug: string;
+  projectName: string;
+}) {
   const sp = useSearchParams();
-  const env = ((sp.get("env") as EnvFilterValue | null) ?? "all");
+  const env = (sp.get("env") as EnvFilterValue | null) ?? "all";
 
   const { data: envs } = useProjectEnvs(slug);
   const { data: workloads } = useProjectWorkloads(slug, env);
@@ -47,7 +44,8 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
   const { data: activity } = useProjectActivity(slug);
   const { data: cost } = useProjectCost(slug);
 
-  const healthyEnvs = envs?.filter((e) => !workloads?.some((w) => w.env === e.id && w.status !== "ok")).length ?? 0;
+  const healthyEnvs =
+    envs?.filter((e) => !workloads?.some((w) => w.env === e.id && w.status !== "ok")).length ?? 0;
   const totalEnvs = envs?.length ?? 0;
   const degradedNote = (() => {
     if (!workloads || !envs) return undefined;
@@ -70,7 +68,16 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
             <Link href={`/p/${slug}/chat` as Route} className="btn primary">
               <span className="row gap-2">
                 <span style={{ display: "inline-flex" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M21 12a8 8 0 0 1-11.5 7.2L3 21l1.8-6.5A8 8 0 1 1 21 12Z" />
                   </svg>
                 </span>
@@ -89,7 +96,13 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
           icon="layers"
           sub={degradedNote}
         />
-        <Stat label="Deploys this week" value="312" icon="rocket" trend={{ up: true, v: "12%" }} sub="98.7% success rate" />
+        <Stat
+          label="Deploys this week"
+          value="312"
+          icon="rocket"
+          trend={{ up: true, v: "12%" }}
+          sub="98.7% success rate"
+        />
         <Stat
           label="Open approvals"
           value={approvals?.length ?? "—"}
@@ -129,23 +142,33 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
                 return (
                   <div className="row between gap-3">
                     <div className="row gap-3" style={{ minWidth: 0 }}>
-                      <span className={`dot ${bad ? "warn" : "ok"} ${e.id === "release" ? "pulse" : ""}`} />
+                      <span
+                        className={`dot ${bad ? "warn" : "ok"} ${e.id === "release" ? "pulse" : ""}`}
+                      />
                       <div className="col" style={{ lineHeight: 1.35, minWidth: 0 }}>
                         <span className="row gap-2" style={{ fontWeight: 700, fontSize: 13.5 }}>
                           {e.name}
                           <Badge tone={e.tone}>{e.branch}</Badge>
                         </span>
-                        <span className="faint mono" style={{ fontSize: 11.5 }}>{e.url}</span>
+                        <span className="faint mono" style={{ fontSize: 11.5 }}>
+                          {e.url}
+                        </span>
                       </div>
                     </div>
                     <div className="row gap-4 nowrap">
-                      <div className="col hide-sm nowrap" style={{ alignItems: "flex-end", lineHeight: 1.3 }}>
+                      <div
+                        className="col hide-sm nowrap"
+                        style={{ alignItems: "flex-end", lineHeight: 1.3 }}
+                      >
                         <span style={{ fontSize: 13, fontWeight: 700 }}>{wl.length} workloads</span>
                         <span className="faint" style={{ fontSize: 11.5 }}>
                           {e.auto ? "Auto-deploy on" : "Manual deploy"}
                         </span>
                       </div>
-                      <Link href={`/p/${slug}/stats?env=${e.id}` as Route} className="btn outline sm">
+                      <Link
+                        href={`/p/${slug}/stats?env=${e.id}` as Route}
+                        className="btn outline sm"
+                      >
                         View
                       </Link>
                     </div>
@@ -175,8 +198,12 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
                   segments={cost.byEnv}
                   center={
                     <>
-                      <span className="faint" style={{ fontSize: 10.5 }}>MONTH</span>
-                      <span style={{ fontSize: 19, fontWeight: 800 }}>{moneyK(cost.monthTotal)}</span>
+                      <span className="faint" style={{ fontSize: 10.5 }}>
+                        MONTH
+                      </span>
+                      <span style={{ fontSize: 19, fontWeight: 800 }}>
+                        {moneyK(cost.monthTotal)}
+                      </span>
                     </>
                   }
                 />
@@ -223,7 +250,9 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
                   <div className="row gap-3" style={{ minWidth: 0 }}>
                     <PipeIcon status={p.status} />
                     <div className="col" style={{ lineHeight: 1.35, minWidth: 0 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700 }} className="nowrap">{p.repo}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700 }} className="nowrap">
+                        {p.repo}
+                      </span>
                       <span className="faint mono nowrap" style={{ fontSize: 11 }}>
                         {p.sha} · {p.branch}
                       </span>
@@ -231,7 +260,10 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
                   </div>
                   <div className="row gap-3 nowrap">
                     <Badge tone={ENV_TONE[p.env]}>{p.env}</Badge>
-                    <span className="faint" style={{ fontSize: 11.5, width: 56, textAlign: "right" }}>
+                    <span
+                      className="faint"
+                      style={{ fontSize: 11.5, width: 56, textAlign: "right" }}
+                    >
                       {p.startedRelative}
                     </span>
                   </div>
@@ -261,7 +293,15 @@ export function ProjectDashboardClient({ slug, projectName }: { slug: string; pr
                   <div className="row gap-3" style={{ minWidth: 0 }}>
                     <StatusDot tone={riskTone(a.risk)} />
                     <div className="col" style={{ lineHeight: 1.35, minWidth: 0 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         {a.title}
                       </span>
                       <span className="faint" style={{ fontSize: 11 }}>

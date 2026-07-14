@@ -40,16 +40,65 @@ export type MetricDef = {
 };
 
 export const METRICS: Record<MetricKey, MetricDef> = {
-  cpu: { key: "cpu", label: "CPU Utilization", namespace: "AWS/EC2", metricName: "CPUUtilization", statistic: "Average", comparison: "GreaterThanThreshold", threshold: 80, perInstance: true, needsAgent: false, unit: "%" },
-  status: { key: "status", label: "Status Check Failed", namespace: "AWS/EC2", metricName: "StatusCheckFailed", statistic: "Maximum", comparison: "GreaterThanOrEqualToThreshold", threshold: 1, perInstance: true, needsAgent: false },
-  memory: { key: "memory", label: "Memory Utilization", namespace: "ContainerInsights", metricName: "node_memory_utilization", statistic: "Average", comparison: "GreaterThanThreshold", threshold: 80, perInstance: false, needsAgent: true, unit: "%" },
-  disk: { key: "disk", label: "Disk Utilization", namespace: "ContainerInsights", metricName: "node_filesystem_utilization", statistic: "Average", comparison: "GreaterThanThreshold", threshold: 80, perInstance: false, needsAgent: true, unit: "%" },
+  cpu: {
+    key: "cpu",
+    label: "CPU Utilization",
+    namespace: "AWS/EC2",
+    metricName: "CPUUtilization",
+    statistic: "Average",
+    comparison: "GreaterThanThreshold",
+    threshold: 80,
+    perInstance: true,
+    needsAgent: false,
+    unit: "%",
+  },
+  status: {
+    key: "status",
+    label: "Status Check Failed",
+    namespace: "AWS/EC2",
+    metricName: "StatusCheckFailed",
+    statistic: "Maximum",
+    comparison: "GreaterThanOrEqualToThreshold",
+    threshold: 1,
+    perInstance: true,
+    needsAgent: false,
+  },
+  memory: {
+    key: "memory",
+    label: "Memory Utilization",
+    namespace: "ContainerInsights",
+    metricName: "node_memory_utilization",
+    statistic: "Average",
+    comparison: "GreaterThanThreshold",
+    threshold: 80,
+    perInstance: false,
+    needsAgent: true,
+    unit: "%",
+  },
+  disk: {
+    key: "disk",
+    label: "Disk Utilization",
+    namespace: "ContainerInsights",
+    metricName: "node_filesystem_utilization",
+    statistic: "Average",
+    comparison: "GreaterThanThreshold",
+    threshold: 80,
+    perInstance: false,
+    needsAgent: true,
+    unit: "%",
+  },
 };
 
-type AwsRun = { ok: true; exitCode: number; stdout: string; stderr: string } | { ok: false; error: string };
+type AwsRun =
+  { ok: true; exitCode: number; stdout: string; stderr: string } | { ok: false; error: string };
 
 /** Run an `aws` CLI command for a cloud provider in a region. */
-async function aws(env: Record<string, string>, region: string, args: string[], timeoutMs = 60_000): Promise<AwsRun> {
+async function aws(
+  env: Record<string, string>,
+  region: string,
+  args: string[],
+  timeoutMs = 60_000,
+): Promise<AwsRun> {
   const res = await runStage({
     command: "aws",
     args: [...args, "--region", region, "--output", "json", "--no-cli-pager"],
@@ -57,7 +106,8 @@ async function aws(env: Record<string, string>, region: string, args: string[], 
     env: { ...env, AWS_REGION: region, AWS_DEFAULT_REGION: region },
     timeoutMs,
   });
-  if (res.exitCode === -1 && res.stderr.includes("ENOENT")) return { ok: false, error: "`aws` CLI isn't installed on the server." };
+  if (res.exitCode === -1 && res.stderr.includes("ENOENT"))
+    return { ok: false, error: "`aws` CLI isn't installed on the server." };
   return { ok: true, exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr };
 }
 
@@ -67,7 +117,10 @@ function awsErr(r: { stderr: string; stdout: string }, fallback: string): string
 
 /** Best-effort EKS cluster name from the env's kubeconfig (the EKS ARN embeds it). */
 export async function eksClusterFromEnv(envId: string): Promise<string | null> {
-  const env = await prisma.env.findUnique({ where: { id: envId }, select: { kubeconfigRef: true } });
+  const env = await prisma.env.findUnique({
+    where: { id: envId },
+    select: { kubeconfigRef: true },
+  });
   if (!env?.kubeconfigRef) return null;
   try {
     const kc = decryptSecret(env.kubeconfigRef);
@@ -82,11 +135,19 @@ export async function eksClusterFromEnv(envId: string): Promise<string | null> {
 export type NodeInstance = { instanceId: string; name: string };
 
 /** Worker EC2 instances of an EKS cluster (managed node groups carry eks:cluster-name). */
-export async function listEksNodeInstances(env: Record<string, string>, region: string, clusterName: string): Promise<{ ok: true; instances: NodeInstance[] } | { ok: false; error: string }> {
+export async function listEksNodeInstances(
+  env: Record<string, string>,
+  region: string,
+  clusterName: string,
+): Promise<{ ok: true; instances: NodeInstance[] } | { ok: false; error: string }> {
   const r = await aws(env, region, [
-    "ec2", "describe-instances",
-    "--filters", `Name=tag:eks:cluster-name,Values=${clusterName}`, "Name=instance-state-name,Values=running",
-    "--query", "Reservations[].Instances[].{id:InstanceId,name:Tags[?Key=='Name']|[0].Value}",
+    "ec2",
+    "describe-instances",
+    "--filters",
+    `Name=tag:eks:cluster-name,Values=${clusterName}`,
+    "Name=instance-state-name,Values=running",
+    "--query",
+    "Reservations[].Instances[].{id:InstanceId,name:Tags[?Key=='Name']|[0].Value}",
   ]);
   if (!r.ok) return { ok: false, error: r.error };
   if (r.exitCode !== 0) return { ok: false, error: awsErr(r, "describe-instances failed.") };
@@ -99,7 +160,14 @@ export async function listEksNodeInstances(env: Record<string, string>, region: 
 }
 
 /** Create (idempotent) an SNS topic and subscribe an email; returns the topic ARN. */
-export async function ensureSnsTopic(env: Record<string, string>, region: string, name: string, email: string): Promise<{ ok: true; topicArn: string; pendingConfirmation: boolean } | { ok: false; error: string }> {
+export async function ensureSnsTopic(
+  env: Record<string, string>,
+  region: string,
+  name: string,
+  email: string,
+): Promise<
+  { ok: true; topicArn: string; pendingConfirmation: boolean } | { ok: false; error: string }
+> {
   const create = await aws(env, region, ["sns", "create-topic", "--name", name]);
   if (!create.ok) return { ok: false, error: create.error };
   if (create.exitCode !== 0) return { ok: false, error: awsErr(create, "create-topic failed.") };
@@ -109,7 +177,16 @@ export async function ensureSnsTopic(env: Record<string, string>, region: string
   } catch {
     return { ok: false, error: "Could not read SNS topic ARN." };
   }
-  const sub = await aws(env, region, ["sns", "subscribe", "--topic-arn", topicArn, "--protocol", "email", "--notification-endpoint", email]);
+  const sub = await aws(env, region, [
+    "sns",
+    "subscribe",
+    "--topic-arn",
+    topicArn,
+    "--protocol",
+    "email",
+    "--notification-endpoint",
+    email,
+  ]);
   if (!sub.ok) return { ok: false, error: sub.error };
   if (sub.exitCode !== 0) return { ok: false, error: awsErr(sub, "subscribe failed.") };
   return { ok: true, topicArn, pendingConfirmation: true };
@@ -119,27 +196,52 @@ export async function ensureSnsTopic(env: Record<string, string>, region: string
 async function putAlarm(
   env: Record<string, string>,
   region: string,
-  args: { name: string; def: MetricDef; dims: Array<{ Name: string; Value: string }>; topicArn?: string; description: string },
+  args: {
+    name: string;
+    def: MetricDef;
+    dims: Array<{ Name: string; Value: string }>;
+    topicArn?: string;
+    description: string;
+  },
 ): Promise<AwsRun> {
   const cli = [
-    "cloudwatch", "put-metric-alarm",
-    "--alarm-name", args.name,
-    "--alarm-description", args.description,
-    "--namespace", args.def.namespace,
-    "--metric-name", args.def.metricName,
-    "--statistic", args.def.statistic,
-    "--period", "300",
-    "--evaluation-periods", "1",
-    "--threshold", String(args.def.threshold),
-    "--comparison-operator", args.def.comparison,
-    "--treat-missing-data", "missing",
-    "--dimensions", ...args.dims.map((d) => `Name=${d.Name},Value=${d.Value}`),
+    "cloudwatch",
+    "put-metric-alarm",
+    "--alarm-name",
+    args.name,
+    "--alarm-description",
+    args.description,
+    "--namespace",
+    args.def.namespace,
+    "--metric-name",
+    args.def.metricName,
+    "--statistic",
+    args.def.statistic,
+    "--period",
+    "300",
+    "--evaluation-periods",
+    "1",
+    "--threshold",
+    String(args.def.threshold),
+    "--comparison-operator",
+    args.def.comparison,
+    "--treat-missing-data",
+    "missing",
+    "--dimensions",
+    ...args.dims.map((d) => `Name=${d.Name},Value=${d.Value}`),
   ];
   if (args.topicArn) cli.push("--alarm-actions", args.topicArn, "--ok-actions", args.topicArn);
   return aws(env, region, cli);
 }
 
-export type AlarmResult = { name: string; metric: MetricKey; label: string; target: string; ok: boolean; error?: string };
+export type AlarmResult = {
+  name: string;
+  metric: MetricKey;
+  label: string;
+  target: string;
+  ok: boolean;
+  error?: string;
+};
 
 /** Create alarms for the chosen metrics across the cluster's nodes / cluster dim. */
 export async function putEksAlarms(
@@ -166,7 +268,18 @@ export async function putEksAlarms(
           topicArn,
           description: `${def.label} ${def.comparison} ${def.threshold} on EKS node ${node.name} (${clusterName})`,
         });
-        out.push({ name, metric: key, label: def.label, target: node.name, ok: r.ok && r.exitCode === 0, error: r.ok ? (r.exitCode !== 0 ? awsErr(r, "put-metric-alarm failed.") : undefined) : r.error });
+        out.push({
+          name,
+          metric: key,
+          label: def.label,
+          target: node.name,
+          ok: r.ok && r.exitCode === 0,
+          error: r.ok
+            ? r.exitCode !== 0
+              ? awsErr(r, "put-metric-alarm failed.")
+              : undefined
+            : r.error,
+        });
       }
     } else {
       const name = `dda-${clusterName}-${key}`;
@@ -177,7 +290,18 @@ export async function putEksAlarms(
         topicArn,
         description: `${def.label} ${def.comparison} ${def.threshold} across EKS cluster ${clusterName}`,
       });
-      out.push({ name, metric: key, label: def.label, target: clusterName, ok: r.ok && r.exitCode === 0, error: r.ok ? (r.exitCode !== 0 ? awsErr(r, "put-metric-alarm failed.") : undefined) : r.error });
+      out.push({
+        name,
+        metric: key,
+        label: def.label,
+        target: clusterName,
+        ok: r.ok && r.exitCode === 0,
+        error: r.ok
+          ? r.exitCode !== 0
+            ? awsErr(r, "put-metric-alarm failed.")
+            : undefined
+          : r.error,
+      });
     }
   }
   return out;
@@ -196,13 +320,27 @@ export async function installContainerInsights(
 ): Promise<{ ok: boolean; note: string }> {
   const roles = new Set<string>();
   for (const node of instances) {
-    const prof = await aws(env, region, ["ec2", "describe-instances", "--instance-ids", node.instanceId, "--query", "Reservations[].Instances[].IamInstanceProfile.Arn"]);
+    const prof = await aws(env, region, [
+      "ec2",
+      "describe-instances",
+      "--instance-ids",
+      node.instanceId,
+      "--query",
+      "Reservations[].Instances[].IamInstanceProfile.Arn",
+    ]);
     if (!prof.ok || prof.exitCode !== 0) continue;
     try {
       const arns = JSON.parse(prof.stdout || "[]") as string[];
       const profileName = arns[0]?.split("/").pop();
       if (!profileName) continue;
-      const gp = await aws(env, region, ["iam", "get-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Roles[].RoleName"]);
+      const gp = await aws(env, region, [
+        "iam",
+        "get-instance-profile",
+        "--instance-profile-name",
+        profileName,
+        "--query",
+        "InstanceProfile.Roles[].RoleName",
+      ]);
       if (gp.ok && gp.exitCode === 0) {
         for (const rn of JSON.parse(gp.stdout || "[]") as string[]) roles.add(rn);
       }
@@ -211,20 +349,51 @@ export async function installContainerInsights(
     }
   }
   for (const role of roles) {
-    await aws(env, region, ["iam", "attach-role-policy", "--role-name", role, "--policy-arn", CW_AGENT_POLICY]);
+    await aws(env, region, [
+      "iam",
+      "attach-role-policy",
+      "--role-name",
+      role,
+      "--policy-arn",
+      CW_AGENT_POLICY,
+    ]);
   }
-  const addon = await aws(env, region, ["eks", "create-addon", "--cluster-name", clusterName, "--addon-name", CI_ADDON], 120_000);
-  if (addon.ok && addon.exitCode === 0) return { ok: true, note: "Container Insights addon installing — memory/disk metrics appear in ~5 min." };
+  const addon = await aws(
+    env,
+    region,
+    ["eks", "create-addon", "--cluster-name", clusterName, "--addon-name", CI_ADDON],
+    120_000,
+  );
+  if (addon.ok && addon.exitCode === 0)
+    return {
+      ok: true,
+      note: "Container Insights addon installing — memory/disk metrics appear in ~5 min.",
+    };
   const err = addon.ok ? awsErr(addon, "") : addon.error;
-  if (/already (exists|in use)|ResourceInUse/i.test(err)) return { ok: true, note: "Container Insights already enabled." };
-  return { ok: false, note: `Could not enable Container Insights: ${err}. Memory/disk alarms won't have data until the CloudWatch agent runs.` };
+  if (/already (exists|in use)|ResourceInUse/i.test(err))
+    return { ok: true, note: "Container Insights already enabled." };
+  return {
+    ok: false,
+    note: `Could not enable Container Insights: ${err}. Memory/disk alarms won't have data until the CloudWatch agent runs.`,
+  };
 }
 
 export type AlarmState = { name: string; state: "OK" | "ALARM" | "INSUFFICIENT_DATA" | string };
 
 /** Describe the state of this app's alarms for a cluster (for syncing into Alerts). */
-export async function describeEksAlarmStates(env: Record<string, string>, region: string, clusterName: string): Promise<{ ok: true; alarms: AlarmState[] } | { ok: false; error: string }> {
-  const r = await aws(env, region, ["cloudwatch", "describe-alarms", "--alarm-name-prefix", `dda-${clusterName}-`, "--query", "MetricAlarms[].{name:AlarmName,state:StateValue}"]);
+export async function describeEksAlarmStates(
+  env: Record<string, string>,
+  region: string,
+  clusterName: string,
+): Promise<{ ok: true; alarms: AlarmState[] } | { ok: false; error: string }> {
+  const r = await aws(env, region, [
+    "cloudwatch",
+    "describe-alarms",
+    "--alarm-name-prefix",
+    `dda-${clusterName}-`,
+    "--query",
+    "MetricAlarms[].{name:AlarmName,state:StateValue}",
+  ]);
   if (!r.ok) return { ok: false, error: r.error };
   if (r.exitCode !== 0) return { ok: false, error: awsErr(r, "describe-alarms failed.") };
   try {
@@ -256,21 +425,57 @@ export async function setupEksCloudWatchAlarms(opts: {
   thresholdPercents?: Partial<Record<MetricKey, number>>;
 }): Promise<SetupResult> {
   const resolved = await resolveAwsExecEnv(opts.cloudProviderId);
-  if (!resolved.ok) return { ok: false, clusterName: opts.clusterName, region: opts.region ?? "", nodeCount: 0, alarms: [], error: resolved.message };
+  if (!resolved.ok)
+    return {
+      ok: false,
+      clusterName: opts.clusterName,
+      region: opts.region ?? "",
+      nodeCount: 0,
+      alarms: [],
+      error: resolved.message,
+    };
   const region = (opts.region || resolved.region).trim();
   const env = resolved.env;
 
   const nodes = await listEksNodeInstances(env, region, opts.clusterName);
-  if (!nodes.ok) return { ok: false, clusterName: opts.clusterName, region, nodeCount: 0, alarms: [], error: nodes.error };
+  if (!nodes.ok)
+    return {
+      ok: false,
+      clusterName: opts.clusterName,
+      region,
+      nodeCount: 0,
+      alarms: [],
+      error: nodes.error,
+    };
   if (nodes.instances.length === 0) {
-    return { ok: false, clusterName: opts.clusterName, region, nodeCount: 0, alarms: [], error: `No running worker nodes found for cluster "${opts.clusterName}" in ${region}. Check the cluster name/region.` };
+    return {
+      ok: false,
+      clusterName: opts.clusterName,
+      region,
+      nodeCount: 0,
+      alarms: [],
+      error: `No running worker nodes found for cluster "${opts.clusterName}" in ${region}. Check the cluster name/region.`,
+    };
   }
 
   let topicArn: string | undefined;
   if (opts.email) {
-    const topic = await ensureSnsTopic(env, region, `dda-eks-${opts.clusterName}-alarms`, opts.email);
+    const topic = await ensureSnsTopic(
+      env,
+      region,
+      `dda-eks-${opts.clusterName}-alarms`,
+      opts.email,
+    );
     if (topic.ok) topicArn = topic.topicArn;
-    else return { ok: false, clusterName: opts.clusterName, region, nodeCount: nodes.instances.length, alarms: [], error: `SNS setup failed: ${topic.error}` };
+    else
+      return {
+        ok: false,
+        clusterName: opts.clusterName,
+        region,
+        nodeCount: nodes.instances.length,
+        alarms: [],
+        error: `SNS setup failed: ${topic.error}`,
+      };
   }
 
   let ciNote: string | undefined;
@@ -279,7 +484,15 @@ export async function setupEksCloudWatchAlarms(opts: {
     ciNote = ci.note;
   }
 
-  const alarms = await putEksAlarms(env, region, opts.clusterName, nodes.instances, opts.metrics, topicArn, opts.thresholdPercents);
+  const alarms = await putEksAlarms(
+    env,
+    region,
+    opts.clusterName,
+    nodes.instances,
+    opts.metrics,
+    topicArn,
+    opts.thresholdPercents,
+  );
   return {
     ok: alarms.some((a) => a.ok),
     clusterName: opts.clusterName,

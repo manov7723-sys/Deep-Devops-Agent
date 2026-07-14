@@ -85,10 +85,12 @@ export function useAdminAgentCreate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: CreateAgentInput) => {
-      const res = await api.post<{ ok: boolean; agent?: SeedAgent; message?: string; code?: string }>(
-        "/admin/agents",
-        input,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        agent?: SeedAgent;
+        message?: string;
+        code?: string;
+      }>("/admin/agents", input);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not create agent.");
       return res.agent!;
     },
@@ -150,10 +152,12 @@ export function useAdminModelCreate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: CreateModelInput) => {
-      const res = await api.post<{ ok: boolean; model?: SeedAdminModel; message?: string; code?: string }>(
-        "/admin/models",
-        input,
-      );
+      const res = await api.post<{
+        ok: boolean;
+        model?: SeedAdminModel;
+        message?: string;
+        code?: string;
+      }>("/admin/models", input);
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not create model.");
       return res.model!;
     },
@@ -164,7 +168,10 @@ export function useAdminModelCreate() {
 export function useAdminModelPatch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; patch: Partial<Pick<SeedAdminModel, "on" | "isDefault">> }) => {
+    mutationFn: async (input: {
+      id: string;
+      patch: Partial<Pick<SeedAdminModel, "on" | "isDefault">>;
+    }) => {
       // The list endpoint renames `enabled` → `on` for the UI; the PATCH
       // route expects the schema-side name `enabled` again. Translate here
       // so callers can keep using the legacy field name.
@@ -247,15 +254,13 @@ export function usePlatformSettingsPatch() {
             ...base.email,
             smtpHost: patch.smtpHost ?? settings.email?.smtpHost ?? base.email.smtpHost,
             smtpPort: patch.smtpPort ?? settings.email?.smtpPort ?? base.email.smtpPort,
-            fromAddress:
-              patch.fromAddress ?? settings.email?.fromAddress ?? base.email.fromAddress,
+            fromAddress: patch.fromAddress ?? settings.email?.fromAddress ?? base.email.fromAddress,
           },
         };
       });
     },
   });
 }
-
 
 /* ─────────────── OAuth provider configs ─────────────── */
 

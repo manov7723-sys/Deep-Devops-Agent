@@ -49,10 +49,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   sb.push("month,amount_dollars");
   for (const p of trend) {
     sb.push(
-      [
-        new Date(p.monthStart).toISOString().slice(0, 7),
-        (p.amountCents / 100).toFixed(2),
-      ].join(","),
+      [new Date(p.monthStart).toISOString().slice(0, 7), (p.amountCents / 100).toFixed(2)].join(
+        ",",
+      ),
     );
   }
   sb.push("");

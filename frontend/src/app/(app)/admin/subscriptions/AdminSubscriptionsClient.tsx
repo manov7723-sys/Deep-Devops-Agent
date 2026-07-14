@@ -51,16 +51,10 @@ export function AdminSubscriptionsClient() {
 
   const totals = useMemo(() => {
     if (!subs) return { totalMrr: 0, active: 0, addonMrr: 0, pastDue: 0 };
-    const addonMrr = subs.reduce(
-      (t, s) => t + s.addons.reduce((a, x) => a + x.price, 0),
-      0,
-    );
+    const addonMrr = subs.reduce((t, s) => t + s.addons.reduce((a, x) => a + x.price, 0), 0);
     const totalMrr = subs
       .filter((s) => s.status !== "suspended")
-      .reduce(
-        (t, s) => t + s.base + s.addons.reduce((a, x) => a + x.price, 0),
-        0,
-      );
+      .reduce((t, s) => t + s.base + s.addons.reduce((a, x) => a + x.price, 0), 0);
     return {
       totalMrr,
       active: subs.filter((s) => s.status === "active").length,
@@ -79,7 +73,9 @@ export function AdminSubscriptionsClient() {
             <Avatar name={row.original.userName} size={34} />
             <div className="col" style={{ lineHeight: 1.3 }}>
               <span style={{ fontWeight: 600 }}>{row.original.userName}</span>
-              <span className="faint" style={{ fontSize: 12 }}>{row.original.email}</span>
+              <span className="faint" style={{ fontSize: 12 }}>
+                {row.original.email}
+              </span>
             </div>
           </div>
         ),
@@ -94,7 +90,12 @@ export function AdminSubscriptionsClient() {
         header: "Add-ons",
         cell: ({ row }) => {
           const s = row.original;
-          if (s.addons.length === 0) return <span className="faint" style={{ fontSize: 12.5 }}>None</span>;
+          if (s.addons.length === 0)
+            return (
+              <span className="faint" style={{ fontSize: 12.5 }}>
+                None
+              </span>
+            );
           const isOpen = expanded.has(s.id);
           return (
             <button
@@ -108,7 +109,10 @@ export function AdminSubscriptionsClient() {
               <Icon
                 name="chevD"
                 size={13}
-                style={{ transform: isOpen ? "rotate(180deg)" : undefined, transition: "transform .15s" }}
+                style={{
+                  transform: isOpen ? "rotate(180deg)" : undefined,
+                  transition: "transform .15s",
+                }}
               />
             </button>
           );
@@ -126,7 +130,8 @@ export function AdminSubscriptionsClient() {
               {fmt(total)}
               {addonTotal > 0 && (
                 <span className="faint" style={{ fontWeight: 400, fontSize: 11 }}>
-                  {" "}({fmt(s.base)}+{fmt(addonTotal)})
+                  {" "}
+                  ({fmt(s.base)}+{fmt(addonTotal)})
                 </span>
               )}
             </span>
@@ -137,7 +142,10 @@ export function AdminSubscriptionsClient() {
         id: "status",
         header: "Status",
         cell: ({ row }) => (
-          <StatusDot tone={STATUS_TONE[row.original.status]} label={row.original.status.replace("_", " ")} />
+          <StatusDot
+            tone={STATUS_TONE[row.original.status]}
+            label={row.original.status.replace("_", " ")}
+          />
         ),
       },
       {
@@ -154,7 +162,9 @@ export function AdminSubscriptionsClient() {
         id: "method",
         header: "Method",
         cell: ({ row }) => (
-          <span className="mono faint" style={{ fontSize: 12 }}>{row.original.method}</span>
+          <span className="mono faint" style={{ fontSize: 12 }}>
+            {row.original.method}
+          </span>
         ),
       },
       {
@@ -163,11 +173,7 @@ export function AdminSubscriptionsClient() {
         cell: ({ row }) => (
           <Menu
             trigger={
-              <Btn
-                variant="ghost"
-                size="icon"
-                aria-label={`Actions for ${row.original.userName}`}
-              >
+              <Btn variant="ghost" size="icon" aria-label={`Actions for ${row.original.userName}`}>
                 <Icon name="more" size={16} />
               </Btn>
             }
@@ -198,7 +204,13 @@ export function AdminSubscriptionsClient() {
         }
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 14,
+        }}
+      >
         <Stat
           label="Total MRR"
           value={fmt(totals.totalMrr)}
@@ -233,7 +245,9 @@ export function AdminSubscriptionsClient() {
                     </span>
                   </span>
                   <span style={{ fontWeight: 600, fontSize: 12.5, flex: 1 }}>{ad.name}</span>
-                  <span className="tnum" style={{ fontWeight: 600 }}>{fmt(ad.price)}</span>
+                  <span className="tnum" style={{ fontWeight: 600 }}>
+                    {fmt(ad.price)}
+                  </span>
                   <Badge tone="ok">add-on</Badge>
                 </div>
               ))}

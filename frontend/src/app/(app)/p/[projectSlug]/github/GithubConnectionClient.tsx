@@ -11,10 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Avatar, Badge, Block, Btn, PageHead } from "@/components/ui";
 import { Icon } from "@/components/ui/Icon";
-import {
-  useConnectedOAuthAccounts,
-  useDisconnectOAuthAccount,
-} from "@/hooks/queries/account";
+import { useConnectedOAuthAccounts, useDisconnectOAuthAccount } from "@/hooks/queries/account";
 import { useProjectRepos } from "@/hooks/queries/project";
 import { ChangeRepoModal } from "@/components/modals/ChangeRepoModal";
 
@@ -48,14 +45,19 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
     return () => window.removeEventListener("message", onMsg);
   }, [qc]);
 
-  const anyConnected = (accountsQuery.data ?? []).some((a) => a.provider === "github" || a.provider === "gitlab");
+  const anyConnected = (accountsQuery.data ?? []).some(
+    (a) => a.provider === "github" || a.provider === "gitlab",
+  );
 
   const reposQuery = useProjectRepos(slug);
   const projectRepos = reposQuery.data ?? [];
   const activeRepo = projectRepos[0] ?? null;
-  const activeRepoView = activeRepo as unknown as
-    | { fullName: string; defaultBranch?: string; visibility?: string; provider?: Provider }
-    | null;
+  const activeRepoView = activeRepo as unknown as {
+    fullName: string;
+    defaultBranch?: string;
+    visibility?: string;
+    provider?: Provider;
+  } | null;
   const repoIcon: Provider = activeRepoView?.provider === "gitlab" ? "gitlab" : "github";
 
   return (
@@ -65,8 +67,16 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
         sub="Manage the GitHub and GitLab accounts the agent uses to read your repositories and open pull / merge requests."
       />
 
-      {error && <Badge tone="danger" icon="alert">{error}</Badge>}
-      {!error && note && <Badge tone="ok" icon="check">{note}</Badge>}
+      {error && (
+        <Badge tone="danger" icon="alert">
+          {error}
+        </Badge>
+      )}
+      {!error && note && (
+        <Badge tone="ok" icon="check">
+          {note}
+        </Badge>
+      )}
 
       <ProviderSection slug={slug} provider="github" onNote={setNote} onError={setError} />
       <ProviderSection slug={slug} provider="gitlab" onNote={setNote} onError={setError} />
@@ -81,7 +91,9 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
           <Block.Body>
             <div className="row between gap-3 wrap" style={{ alignItems: "center" }}>
               {reposQuery.isLoading ? (
-                <span className="muted" style={{ fontSize: 13 }}>Loading…</span>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  Loading…
+                </span>
               ) : activeRepoView ? (
                 <div className="row gap-3" style={{ alignItems: "center", minWidth: 0 }}>
                   <Icon name={repoIcon} size={20} />
@@ -94,7 +106,9 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
                         </Badge>
                       )}
                       {projectRepos.length > 1 && (
-                        <Badge tone="info">+{projectRepos.length - 1} more — Change repo consolidates to one</Badge>
+                        <Badge tone="info">
+                          +{projectRepos.length - 1} more — Change repo consolidates to one
+                        </Badge>
                       )}
                     </div>
                     <span className="faint" style={{ fontSize: 12 }}>
@@ -103,10 +117,17 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
                   </div>
                 </div>
               ) : (
-                <span className="muted" style={{ fontSize: 13 }}>No repository set for this project yet.</span>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  No repository set for this project yet.
+                </span>
               )}
 
-              <Btn variant="outline" size="sm" icon={repoIcon} onClick={() => setRepoModalOpen(true)}>
+              <Btn
+                variant="outline"
+                size="sm"
+                icon={repoIcon}
+                onClick={() => setRepoModalOpen(true)}
+              >
                 {activeRepoView ? "Change repo" : "Set repository"}
               </Btn>
             </div>
@@ -124,9 +145,10 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
       <p className="faint row gap-2" style={{ fontSize: 12, alignItems: "flex-start" }}>
         <Icon name="lock" />
         <span>
-          Disconnecting removes the agent&apos;s access to that provider&apos;s repositories. You can
-          reconnect at any time — it&apos;s the same flow used when creating a project. If a provider is
-          your only sign-in method, set a password first or it can&apos;t be disconnected.
+          Disconnecting removes the agent&apos;s access to that provider&apos;s repositories. You
+          can reconnect at any time — it&apos;s the same flow used when creating a project. If a
+          provider is your only sign-in method, set a password first or it can&apos;t be
+          disconnected.
         </span>
       </p>
     </div>
@@ -156,11 +178,16 @@ function ProviderSection({
   const openPopup = useCallback(() => {
     onError(null);
     onNote(null);
-    const w = 640, h = 760;
+    const w = 640,
+      h = 760;
     const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
     const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
     const url = `/api/v1/auth/oauth/${provider}/start?popup=1&next=${encodeURIComponent(`/p/${slug}/github`)}`;
-    const popup = window.open(url, `dda_${provider}_oauth`, `width=${w},height=${h},left=${left},top=${top}`);
+    const popup = window.open(
+      url,
+      `dda_${provider}_oauth`,
+      `width=${w},height=${h},left=${left},top=${top}`,
+    );
     if (!popup) {
       window.location.href = url.replace("&popup=1", "").replace("?popup=1&", "?");
       return;
@@ -187,7 +214,9 @@ function ProviderSection({
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub={`Used for repo access, Dockerfile/workflow ${crNoun} requests and CI setup`}>
+        <Block.Title
+          sub={`Used for repo access, Dockerfile/workflow ${crNoun} requests and CI setup`}
+        >
           {label}
         </Block.Title>
       </Block.Header>
@@ -219,7 +248,9 @@ function ProviderSection({
                         {acc.hasToken ? "Connected" : "Token missing"}
                       </Badge>
                     </div>
-                    <span className="faint" style={{ fontSize: 12 }}>{scopeSummary(provider, acc.scope)}</span>
+                    <span className="faint" style={{ fontSize: 12 }}>
+                      {scopeSummary(provider, acc.scope)}
+                    </span>
                   </div>
                 </div>
 

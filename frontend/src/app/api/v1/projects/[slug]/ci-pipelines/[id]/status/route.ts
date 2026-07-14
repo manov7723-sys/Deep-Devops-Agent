@@ -18,9 +18,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   const p = await prisma.ciPipeline.findFirst({
     where: { id, projectId: gate.access.project.id },
     select: {
-      id: true, status: true, agentReview: true, healAttempts: true, branch: true,
-      runId: true, runUrl: true, conclusion: true, stages: true, lastError: true,
-      workflowPath: true, commitSha: true, repoId: true,
+      id: true,
+      status: true,
+      agentReview: true,
+      healAttempts: true,
+      branch: true,
+      runId: true,
+      runUrl: true,
+      conclusion: true,
+      stages: true,
+      lastError: true,
+      workflowPath: true,
+      commitSha: true,
+      repoId: true,
     },
   });
   if (!p) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
@@ -30,7 +40,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
     return NextResponse.json(snapshot(p, { healing: false }));
   }
 
-  const repo = await prisma.repo.findUnique({ where: { id: p.repoId }, select: { fullName: true } });
+  const repo = await prisma.repo.findUnique({
+    where: { id: p.repoId },
+    select: { fullName: true },
+  });
   const tok = await resolveTokenForRepo(p.repoId);
   if (!repo || !tok.ok) return NextResponse.json(snapshot(p, { healing: false }));
   const gh = { token: tok.accessToken, repoFullName: repo.fullName };
@@ -54,13 +67,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   const failed = done && live.conclusion !== "success";
   const newStatus = !done ? "running" : failed ? "failed" : "success";
   const failedStep = failed
-    ? live.stages.flatMap((s) => s.steps).find((s) => s.conclusion === "failure")?.name ?? null
+    ? (live.stages.flatMap((s) => s.steps).find((s) => s.conclusion === "failure")?.name ?? null)
     : null;
   const lastError = failed ? `Failed: ${failedStep ?? live.conclusion ?? "run failed"}` : null;
 
   await prisma.ciPipeline.update({
     where: { id },
-    data: { status: newStatus, conclusion: live.conclusion, runUrl: live.url, stages: live.stages, lastError },
+    data: {
+      status: newStatus,
+      conclusion: live.conclusion,
+      runUrl: live.url,
+      stages: live.stages,
+      lastError,
+    },
   });
 
   // Agent reviewer: on failure, auto-heal once (fix + re-run), if budget left.
@@ -83,8 +102,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   const fresh = await prisma.ciPipeline.findUnique({
     where: { id },
     select: {
-      status: true, agentReview: true, healAttempts: true, runUrl: true,
-      conclusion: true, stages: true, lastError: true,
+      status: true,
+      agentReview: true,
+      healAttempts: true,
+      runUrl: true,
+      conclusion: true,
+      stages: true,
+      lastError: true,
     },
   });
   return NextResponse.json({ ...snapshot(fresh ?? p, { healing }), healNote });
@@ -92,8 +116,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
 
 function snapshot(
   p: {
-    status: string; agentReview: boolean; healAttempts: number; runUrl: string | null;
-    conclusion: string | null; stages: unknown; lastError: string | null;
+    status: string;
+    agentReview: boolean;
+    healAttempts: number;
+    runUrl: string | null;
+    conclusion: string | null;
+    stages: unknown;
+    lastError: string | null;
   },
   extra: { healing: boolean },
 ) {

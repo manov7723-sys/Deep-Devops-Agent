@@ -22,11 +22,7 @@
  */
 import { prisma } from "@/lib/db/prisma";
 import { getAzureAccessToken } from "@/lib/cloud/azure";
-import {
-  getAksKubeconfig,
-  getSubscriptionTenant,
-  listAksClusters,
-} from "@/lib/cloud/azure-arm";
+import { getAksKubeconfig, getSubscriptionTenant, listAksClusters } from "@/lib/cloud/azure-arm";
 import { updateEnv } from "@/lib/devops/envs";
 import { setEnvKubeconfigSecret } from "@/lib/devops/deploy";
 import { rerunLatestFailedWorkflow } from "@/lib/cloud/azure-acr";
@@ -65,9 +61,19 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      repoFullName: { type: "string", description: 'GitHub repo as "owner/name" (the one whose CD is failing).' },
-      envKey: { type: "string", description: "Env key from list_deploy_targets — the env whose kubeconfig is stale/wrong-cloud." },
-      cdWorkflowFile: { type: "string", description: 'CD workflow file to rerun after fixing (default "deploy.yml").' },
+      repoFullName: {
+        type: "string",
+        description: 'GitHub repo as "owner/name" (the one whose CD is failing).',
+      },
+      envKey: {
+        type: "string",
+        description:
+          "Env key from list_deploy_targets — the env whose kubeconfig is stale/wrong-cloud.",
+      },
+      cdWorkflowFile: {
+        type: "string",
+        description: 'CD workflow file to rerun after fixing (default "deploy.yml").',
+      },
     },
     required: ["repoFullName", "envKey"],
     additionalProperties: false,
@@ -80,7 +86,8 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
       select: { id: true, cloudProvider: { select: { id: true, kind: true, accountRef: true } } },
     });
     if (!env) return { ok: false, error: `Env "${input.envKey}" not found in this project.` };
-    if (!env.cloudProvider) return { ok: false, error: `Env "${input.envKey}" has no connected cloud provider.` };
+    if (!env.cloudProvider)
+      return { ok: false, error: `Env "${input.envKey}" has no connected cloud provider.` };
 
     // Right now we only fully automate Azure/AKS — that's the shape hitting the
     // user. AWS/GCP land the same way when their listers are wired.
@@ -91,7 +98,10 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
       };
     }
     if (!env.cloudProvider.accountRef) {
-      return { ok: false, error: "Azure provider has no subscription id — reconnect Azure on the connection page." };
+      return {
+        ok: false,
+        error: "Azure provider has no subscription id — reconnect Azure on the connection page.",
+      };
     }
 
     // 1 — find the AKS cluster on the connected subscription.
@@ -110,7 +120,8 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
     if (list.clusters.length === 0) {
       return {
         ok: false,
-        error: "No AKS clusters exist on this Azure subscription. Create one via chat 'create an AKS cluster' first.",
+        error:
+          "No AKS clusters exist on this Azure subscription. Create one via chat 'create an AKS cluster' first.",
       };
     }
     // Multiple clusters — need a user choice. Return the candidates so the
@@ -129,7 +140,9 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
       };
     }
     const pick = list.clusters[0];
-    steps.push(`Found one AKS cluster on the subscription: "${pick.name}" in resource group "${pick.resourceGroup}" (${pick.location}).`);
+    steps.push(
+      `Found one AKS cluster on the subscription: "${pick.name}" in resource group "${pick.resourceGroup}" (${pick.location}).`,
+    );
 
     // 2 — mint a kubeconfig via ARM and store it on the env.
     const kc = await getAksKubeconfig(
@@ -142,22 +155,39 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
     if (!kc.ok) return { ok: false, error: `Couldn't fetch AKS kubeconfig: ${kc.error}` };
     steps.push(`Fetched a ${kc.mode}-credential kubeconfig from ARM.`);
 
-    const owner = await prisma.project.findUnique({ where: { id: ctx.projectId }, select: { ownerId: true } });
+    const owner = await prisma.project.findUnique({
+      where: { id: ctx.projectId },
+      select: { ownerId: true },
+    });
     if (!owner?.ownerId) return { ok: false, error: "Project has no owner." };
-    const upd = await updateEnv(ctx.projectId, owner.ownerId, input.envKey, { kubeconfig: kc.kubeconfig });
-    if (!upd.ok) return { ok: false, error: `Couldn't save the kubeconfig on env "${input.envKey}": ${upd.code}` };
+    const upd = await updateEnv(ctx.projectId, owner.ownerId, input.envKey, {
+      kubeconfig: kc.kubeconfig,
+    });
+    if (!upd.ok)
+      return {
+        ok: false,
+        error: `Couldn't save the kubeconfig on env "${input.envKey}": ${upd.code}`,
+      };
     steps.push(`Stored the fresh AKS kubeconfig on env "${input.envKey}".`);
 
     // 3 — push the fresh kubeconfig to GitHub as KUBECONFIG_B64 so the on-repo
     //     CD workflow reads it. This is the step that actually unblocks CI.
     const push = await setEnvKubeconfigSecret(ctx.projectId, input.repoFullName, input.envKey);
-    if (!push.ok) return { ok: false, error: `Couldn't rewrite KUBECONFIG_B64 on ${input.repoFullName}: ${push.error}` };
+    if (!push.ok)
+      return {
+        ok: false,
+        error: `Couldn't rewrite KUBECONFIG_B64 on ${input.repoFullName}: ${push.error}`,
+      };
     steps.push(`Rewrote KUBECONFIG_B64 on ${input.repoFullName} from the new kubeconfig.`);
 
     // 4 — rerun the failed CD workflow so the user doesn't have to click.
     const gh = await (async () => {
       const repo = await prisma.repo.findFirst({
-        where: { fullName: input.repoFullName, deletedAt: null, projectRepos: { some: { projectId: ctx.projectId } } },
+        where: {
+          fullName: input.repoFullName,
+          deletedAt: null,
+          projectRepos: { some: { projectId: ctx.projectId } },
+        },
         select: { id: true },
       });
       if (!repo) return null;

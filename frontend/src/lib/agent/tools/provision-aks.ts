@@ -74,38 +74,88 @@ export const provisionAksTool: Tool<Input, Output> = {
     type: "object",
     properties: {
       envKey: { type: "string", description: "Env key whose Azure creds to use, e.g. 'release'." },
-      name: { type: "string", description: "Cluster name (lowercase letters, digits, hyphens; start with a letter)." },
+      name: {
+        type: "string",
+        description: "Cluster name (lowercase letters, digits, hyphens; start with a letter).",
+      },
       location: { type: "string", description: "Azure region. Default eastus." },
-      resourceGroup: { type: "string", description: "Resource group (created if createResourceGroup=true, else must exist)." },
-      createResourceGroup: { type: "boolean", description: "Create a new resource group. Default true." },
-      vnetSubnetId: { type: "string", description: "Full resource id of an existing subnet to place nodes in. Omit for AKS-managed networking." },
+      resourceGroup: {
+        type: "string",
+        description: "Resource group (created if createResourceGroup=true, else must exist).",
+      },
+      createResourceGroup: {
+        type: "boolean",
+        description: "Create a new resource group. Default true.",
+      },
+      vnetSubnetId: {
+        type: "string",
+        description:
+          "Full resource id of an existing subnet to place nodes in. Omit for AKS-managed networking.",
+      },
       kubernetesVersion: { type: "string", description: "K8s version, e.g. '1.30'." },
       vmSize: { type: "string", description: "System node VM size, e.g. 'Standard_D4s_v3'." },
       desiredNodes: { type: "number", description: "System node desired count. Default 2." },
       minNodes: { type: "number", description: "System node min count. Default 2." },
       maxNodes: { type: "number", description: "System node max count. Default 5." },
-      privateCluster: { type: "boolean", description: "Private API server (no public endpoint). Default false." },
-      azureRbac: { type: "boolean", description: "Entra ID + Azure RBAC for Kubernetes authorization. Default true." },
-      disableLocalAccounts: { type: "boolean", description: "Force Entra ID only (disable local admin accounts). Default false." },
-      workloadIdentity: { type: "boolean", description: "OIDC issuer + workload identity for pods. Default true." },
-      appNodePool: { type: "boolean", description: "Add an application node pool alongside the system pool. Default true." },
+      privateCluster: {
+        type: "boolean",
+        description: "Private API server (no public endpoint). Default false.",
+      },
+      azureRbac: {
+        type: "boolean",
+        description: "Entra ID + Azure RBAC for Kubernetes authorization. Default true.",
+      },
+      disableLocalAccounts: {
+        type: "boolean",
+        description: "Force Entra ID only (disable local admin accounts). Default false.",
+      },
+      workloadIdentity: {
+        type: "boolean",
+        description: "OIDC issuer + workload identity for pods. Default true.",
+      },
+      appNodePool: {
+        type: "boolean",
+        description: "Add an application node pool alongside the system pool. Default true.",
+      },
       appVmSize: { type: "string", description: "App pool VM size." },
       appSpot: { type: "boolean", description: "Use spot VMs for the app pool. Default true." },
       appMinNodes: { type: "number", description: "App pool min nodes." },
       appMaxNodes: { type: "number", description: "App pool max nodes." },
-      stateResourceGroup: { type: "string", description: "Remote-state Storage Account resource group (optional)." },
-      stateStorageAccount: { type: "string", description: "Remote-state Storage Account name (optional)." },
-      stateContainer: { type: "string", description: "Remote-state blob container (optional). Provide all three or none." },
-      mode: { type: "string", enum: ["push", "apply", "push_and_apply"], description: "Execution mode the user chose." },
-      repoFullName: { type: "string", description: "owner/repo to push to (required for push modes)." },
-      path: { type: "string", description: "GitHub folder for the files. Default terraform/aks/<name>." },
+      stateResourceGroup: {
+        type: "string",
+        description: "Remote-state Storage Account resource group (optional).",
+      },
+      stateStorageAccount: {
+        type: "string",
+        description: "Remote-state Storage Account name (optional).",
+      },
+      stateContainer: {
+        type: "string",
+        description: "Remote-state blob container (optional). Provide all three or none.",
+      },
+      mode: {
+        type: "string",
+        enum: ["push", "apply", "push_and_apply"],
+        description: "Execution mode the user chose.",
+      },
+      repoFullName: {
+        type: "string",
+        description: "owner/repo to push to (required for push modes).",
+      },
+      path: {
+        type: "string",
+        description: "GitHub folder for the files. Default terraform/aks/<name>.",
+      },
     },
     required: ["envKey", "name", "resourceGroup", "mode"],
     additionalProperties: false,
   },
   async execute(input, ctx) {
     if (!/^[a-z][a-z0-9-]{1,38}$/.test(input.name)) {
-      return { ok: false, error: "Invalid cluster name. Use lowercase letters, digits, hyphens; start with a letter." };
+      return {
+        ok: false,
+        error: "Invalid cluster name. Use lowercase letters, digits, hyphens; start with a letter.",
+      };
     }
     const wantsPush = input.mode === "push" || input.mode === "push_and_apply";
     const wantsApply = input.mode === "apply" || input.mode === "push_and_apply";
@@ -126,14 +176,22 @@ export const provisionAksTool: Tool<Input, Output> = {
     });
     if (!env) return { ok: false, error: `Env "${input.envKey}" not found in this project.` };
     if (wantsApply && !env.cloudProviderId) {
-      return { ok: false, error: `Env "${input.envKey}" has no cloud provider connected — connect Azure before applying.` };
+      return {
+        ok: false,
+        error: `Env "${input.envKey}" has no cloud provider connected — connect Azure before applying.`,
+      };
     }
 
     // Backend resolution: explicit inputs win; otherwise fall back to whatever
     // the env has stored via the Connection page's tf-backend section.
-    const explicitComplete = !!(input.stateResourceGroup && input.stateStorageAccount && input.stateContainer);
+    const explicitComplete = !!(
+      input.stateResourceGroup &&
+      input.stateStorageAccount &&
+      input.stateContainer
+    );
     const explicitPartial =
-      !explicitComplete && (input.stateResourceGroup || input.stateStorageAccount || input.stateContainer);
+      !explicitComplete &&
+      (input.stateResourceGroup || input.stateStorageAccount || input.stateContainer);
     if (explicitPartial) {
       return {
         ok: false,
@@ -183,7 +241,11 @@ export const provisionAksTool: Tool<Input, Output> = {
           }
         : {}),
     };
-    if (spec.maxNodes < spec.minNodes || spec.desiredNodes < spec.minNodes || spec.desiredNodes > spec.maxNodes) {
+    if (
+      spec.maxNodes < spec.minNodes ||
+      spec.desiredNodes < spec.minNodes ||
+      spec.desiredNodes > spec.maxNodes
+    ) {
       return { ok: false, error: "Node counts must satisfy min ≤ desired ≤ max." };
     }
 
@@ -210,7 +272,8 @@ export const provisionAksTool: Tool<Input, Output> = {
           },
           ctx,
         );
-        if (!res.ok) return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
+        if (!res.ok)
+          return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
         if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
         first = false;
@@ -243,11 +306,22 @@ export const provisionAksTool: Tool<Input, Output> = {
     const bits: string[] = [`Generated ${fileCount} AKS Terraform files for "${input.name}".`];
     if (pullRequest) bits.push(`Opened PR #${pullRequest.number}: ${pullRequest.url}`);
     else if (committed.length) bits.push(`Committed ${committed.length} files.`);
-    if (runId) bits.push(`Started terraform apply (run ${runId}) — track it on the Infrastructure tab (AKS takes ~10–15 min).`);
+    if (runId)
+      bits.push(
+        `Started terraform apply (run ${runId}) — track it on the Infrastructure tab (AKS takes ~10–15 min).`,
+      );
 
     return {
       ok: true,
-      output: { cluster: input.name, fileCount, mode: input.mode, runId, pullRequest, committed, note: bits.join(" ") },
+      output: {
+        cluster: input.name,
+        fileCount,
+        mode: input.mode,
+        runId,
+        pullRequest,
+        committed,
+        note: bits.join(" "),
+      },
     };
   },
 };

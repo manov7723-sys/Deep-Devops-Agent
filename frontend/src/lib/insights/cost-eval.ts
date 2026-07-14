@@ -10,22 +10,29 @@
  * way. Keyed by sourceLabel `cost:budget:<YYYY-MM>` so it never duplicates.
  */
 import { prisma } from "@/lib/db/prisma";
-import { getAzureCost, getAzureClusterCost, getAzureCostByService, forecastFromMtd } from "@/lib/cloud/azure-cost";
+import {
+  getAzureCost,
+  getAzureClusterCost,
+  getAzureCostByService,
+  forecastFromMtd,
+} from "@/lib/cloud/azure-cost";
 import { aksClusterFromEnv } from "@/lib/cloud/azure-monitor";
 import { getAwsCost, getAwsCostByService } from "@/lib/cloud/aws-cost";
 import { getGcpCost } from "@/lib/cloud/gcp-cost";
 import { upsertSnapshot, getLatestSnapshot } from "./cost";
 import { createAlert, patchAlertStatus } from "@/lib/agentops/alerts";
 
-export type CostEval = {
-  ok: true;
-  accountCents: number;
-  projectCents: number;
-  forecastCents: number;
-  budgetCents: number | null;
-  currency: string;
-  breached: boolean;
-} | { ok: false; error: string };
+export type CostEval =
+  | {
+      ok: true;
+      accountCents: number;
+      projectCents: number;
+      forecastCents: number;
+      budgetCents: number | null;
+      currency: string;
+      breached: boolean;
+    }
+  | { ok: false; error: string };
 
 function monthStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -68,7 +75,10 @@ export async function evaluateProjectCost(projectId: string, now: Date): Promise
     totalCents = account.totalCents;
     currency = account.currency;
     // Project cost = ONLY the connected AKS cluster (its node resource group).
-    const env = await prisma.env.findFirst({ where: { projectId, cloudProviderId: cp.id }, select: { id: true } });
+    const env = await prisma.env.findFirst({
+      where: { projectId, cloudProviderId: cp.id },
+      select: { id: true },
+    });
     const clusterName = env ? await aksClusterFromEnv(env.id) : null;
     if (clusterName) {
       const cl = await getAzureClusterCost(cp.id, clusterName);
@@ -89,7 +99,11 @@ export async function evaluateProjectCost(projectId: string, now: Date): Promise
   } else {
     // GCP — from the Cloud Billing → BigQuery export (set up via /cost/gcp-setup).
     if (!cp.costDatasetId) {
-      return { ok: false, error: "GCP cost isn't set up. Click “Prepare GCP for cost”, then enable Billing → BigQuery export in the console." };
+      return {
+        ok: false,
+        error:
+          "GCP cost isn't set up. Click “Prepare GCP for cost”, then enable Billing → BigQuery export in the console.",
+      };
     }
     const account = await getGcpCost(cp.id, cp.costDatasetId, now);
     if (!account.ok) return { ok: false, error: account.error };
@@ -99,7 +113,9 @@ export async function evaluateProjectCost(projectId: string, now: Date): Promise
   }
 
   const periodStart = monthStart(now);
-  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const daysInMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
+  ).getUTCDate();
   const forecastCents = forecastFromMtd(projectCents, { day: now.getUTCDate(), daysInMonth });
 
   // Preserve any user-set budget across the ETL replace.
@@ -135,14 +151,24 @@ export async function evaluateProjectCost(projectId: string, now: Date): Promise
     let drivers: Array<{ service: string; cents: number }> = [];
     try {
       const bd =
-        cp.kind === "azure" ? await getAzureCostByService(cp.id) :
-        cp.kind === "aws" ? await getAwsCostByService(cp.id, now) : null;
+        cp.kind === "azure"
+          ? await getAzureCostByService(cp.id)
+          : cp.kind === "aws"
+            ? await getAwsCostByService(cp.id, now)
+            : null;
       if (bd?.ok) drivers = bd.services.slice(0, 5);
-    } catch { /* report still useful without the breakdown */ }
+    } catch {
+      /* report still useful without the breakdown */
+    }
 
     const report = drivers.length
       ? "\n\nWhy it crossed — top cost drivers this month:\n" +
-        drivers.map((d) => `• ${d.service}: ${money(d.cents)}${totalCents > 0 ? ` (${Math.round((d.cents / totalCents) * 100)}%)` : ""}`).join("\n")
+        drivers
+          .map(
+            (d) =>
+              `• ${d.service}: ${money(d.cents)}${totalCents > 0 ? ` (${Math.round((d.cents / totalCents) * 100)}%)` : ""}`,
+          )
+          .join("\n")
       : "";
     const top = drivers[0];
 

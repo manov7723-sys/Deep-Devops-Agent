@@ -41,7 +41,8 @@ async function resolveSubscription(cloudProviderId: string): Promise<Res<string>
   if (!subscription) {
     return {
       ok: false,
-      error: "Azure provider has no subscription id saved. Reconnect Azure and pick the subscription.",
+      error:
+        "Azure provider has no subscription id saved. Reconnect Azure and pick the subscription.",
     };
   }
   return { ok: true, data: subscription };
@@ -85,9 +86,15 @@ async function resolveSp(cloudProviderId: string): Promise<Res<SpCreds>> {
     try {
       clientSecret = decryptSecret(cp.spClientSecretEnc);
     } catch {
-      return { ok: false, error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision." };
+      return {
+        ok: false,
+        error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision.",
+      };
     }
-    return { ok: true, data: { tenantId: cp.accountId, clientId: cp.spClientId, clientSecret, subscription } };
+    return {
+      ok: true,
+      data: { tenantId: cp.accountId, clientId: cp.spClientId, clientSecret, subscription },
+    };
   }
 
   // Legacy full-SP connect: clientId in roleArn, secret in externalId.
@@ -96,9 +103,15 @@ async function resolveSp(cloudProviderId: string): Promise<Res<SpCreds>> {
     try {
       clientSecret = decryptSecret(cp.externalId);
     } catch {
-      return { ok: false, error: "Could not decrypt the Azure credential. Reconnect the provider." };
+      return {
+        ok: false,
+        error: "Could not decrypt the Azure credential. Reconnect the provider.",
+      };
     }
-    return { ok: true, data: { tenantId: cp.accountId, clientId: cp.roleArn, clientSecret, subscription } };
+    return {
+      ok: true,
+      data: { tenantId: cp.accountId, clientId: cp.roleArn, clientSecret, subscription },
+    };
   }
 
   // MARKER: setupAzureDeployRegistry regexes on this exact phrase to decide the
@@ -107,11 +120,17 @@ async function resolveSp(cloudProviderId: string): Promise<Res<SpCreds>> {
   // rule); the fallback path is the intended UX for OAuth-connected projects.
   return {
     ok: false,
-    error: "Keyless ACR setup needs a SERVICE-PRINCIPAL Azure connection — using ACR admin secret fallback (this is expected for OAuth-connected Azure).",
+    error:
+      "Keyless ACR setup needs a SERVICE-PRINCIPAL Azure connection — using ACR admin secret fallback (this is expected for OAuth-connected Azure).",
   };
 }
 
-async function http<T = Record<string, unknown>>(token: string, url: string, method = "GET", body?: unknown): Promise<Res<T>> {
+async function http<T = Record<string, unknown>>(
+  token: string,
+  url: string,
+  method = "GET",
+  body?: unknown,
+): Promise<Res<T>> {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -126,7 +145,13 @@ async function http<T = Record<string, unknown>>(token: string, url: string, met
   const data = text ? (JSON.parse(text) as T & { error?: { message?: string } }) : ({} as T);
   if (!res.ok) {
     const msg = (data as { error?: { message?: string } | string })?.error;
-    return { ok: false, error: (typeof msg === "object" ? msg?.message : msg) || text.slice(0, 300) || `HTTP ${res.status}` };
+    return {
+      ok: false,
+      error:
+        (typeof msg === "object" ? msg?.message : msg) ||
+        text.slice(0, 300) ||
+        `HTTP ${res.status}`,
+    };
   }
   return { ok: true, data };
 }
@@ -140,7 +165,9 @@ export async function listAcr(cloudProviderId: string): Promise<Res<AcrInfo[]>> 
   if (!tok.ok) return { ok: false, error: tok.error };
   const sub = await resolveSubscription(cloudProviderId);
   if (!sub.ok) return { ok: false, error: sub.error };
-  const r = await http<{ value?: Array<{ name?: string; id?: string; properties?: { loginServer?: string } }> }>(
+  const r = await http<{
+    value?: Array<{ name?: string; id?: string; properties?: { loginServer?: string } }>;
+  }>(
     tok.accessToken,
     `${ARM}/subscriptions/${sub.data}/providers/Microsoft.ContainerRegistry/registries?api-version=2023-07-01`,
   );
@@ -155,7 +182,12 @@ export async function listAcr(cloudProviderId: string): Promise<Res<AcrInfo[]>> 
 
 /** Create an ACR (Basic SKU) in a resource group (ARM). Idempotent. Works for
  *  both OAuth and SP Azure connections — only ARM permissions matter here. */
-export async function createAcr(cloudProviderId: string, resourceGroup: string, name: string, location: string): Promise<Res<AcrInfo>> {
+export async function createAcr(
+  cloudProviderId: string,
+  resourceGroup: string,
+  name: string,
+  location: string,
+): Promise<Res<AcrInfo>> {
   const tok = await getAzureAccessToken(cloudProviderId);
   if (!tok.ok) return { ok: false, error: tok.error };
   const sub = await resolveSubscription(cloudProviderId);
@@ -167,7 +199,14 @@ export async function createAcr(cloudProviderId: string, resourceGroup: string, 
     { location, sku: { name: "Basic" }, properties: { adminUserEnabled: false } },
   );
   if (!r.ok) return r;
-  return { ok: true, data: { name, resourceGroup, loginServer: r.data.properties?.loginServer ?? `${name}.azurecr.io` } };
+  return {
+    ok: true,
+    data: {
+      name,
+      resourceGroup,
+      loginServer: r.data.properties?.loginServer ?? `${name}.azurecr.io`,
+    },
+  };
 }
 
 /**
@@ -190,23 +229,19 @@ export async function enableAcrAdminAndGetCreds(
   const acrArm = `${ARM}/subscriptions/${sub.data}/resourceGroups/${resourceGroup}/providers/Microsoft.ContainerRegistry/registries/${name}`;
 
   // 1 — Ensure adminUserEnabled=true. PATCH is idempotent; a no-op when already on.
-  const patch = await http(
-    tok.accessToken,
-    `${acrArm}?api-version=2023-07-01`,
-    "PATCH",
-    { properties: { adminUserEnabled: true } },
-  );
+  const patch = await http(tok.accessToken, `${acrArm}?api-version=2023-07-01`, "PATCH", {
+    properties: { adminUserEnabled: true },
+  });
   if (!patch.ok) return { ok: false, error: `Could not enable ACR admin user: ${patch.error}` };
 
   // 2 — Read the credentials. `listCredentials` returns two rotatable passwords;
   // password[0] is the primary.
-  const creds = await http<{ username?: string; passwords?: Array<{ name?: string; value?: string }> }>(
-    tok.accessToken,
-    `${acrArm}/listCredentials?api-version=2023-07-01`,
-    "POST",
-    {},
-  );
-  if (!creds.ok) return { ok: false, error: `Could not fetch ACR admin credentials: ${creds.error}` };
+  const creds = await http<{
+    username?: string;
+    passwords?: Array<{ name?: string; value?: string }>;
+  }>(tok.accessToken, `${acrArm}/listCredentials?api-version=2023-07-01`, "POST", {});
+  if (!creds.ok)
+    return { ok: false, error: `Could not fetch ACR admin credentials: ${creds.error}` };
   const username = creds.data.username ?? name;
   const password = creds.data.passwords?.[0]?.value;
   if (!password) return { ok: false, error: "ACR did not return a password." };
@@ -220,7 +255,11 @@ export function acrSecretPrefix(acrName: string): string {
 }
 
 /** The three GitHub Actions secret names the ACR secret-mode workflow reads. */
-export function acrSecretNames(acrName: string): { loginServer: string; username: string; password: string } {
+export function acrSecretNames(acrName: string): {
+  loginServer: string;
+  username: string;
+  password: string;
+} {
   const p = acrSecretPrefix(acrName);
   return { loginServer: `${p}_LOGIN_SERVER`, username: `${p}_USERNAME`, password: `${p}_PASSWORD` };
 }
@@ -266,7 +305,14 @@ export async function setupAcrSecretPush(
       };
     }
   }
-  return { ok: true, data: { registry: acrName, loginServer: c.data.loginServer, secretPrefix: acrSecretPrefix(acrName) } };
+  return {
+    ok: true,
+    data: {
+      registry: acrName,
+      loginServer: c.data.loginServer,
+      secretPrefix: acrSecretPrefix(acrName),
+    },
+  };
 }
 
 /**
@@ -288,22 +334,41 @@ export async function repairAcrSecretPush(
   resourceGroup: string,
   acrName: string,
 ): Promise<Res<{ secretNames: string[]; loginServer: string }>> {
-  const setup = await setupAcrSecretPush(cloudProviderId, githubToken, repoFullName, resourceGroup, acrName);
+  const setup = await setupAcrSecretPush(
+    cloudProviderId,
+    githubToken,
+    repoFullName,
+    resourceGroup,
+    acrName,
+  );
   if (!setup.ok) return setup;
   const names = acrSecretNames(acrName);
   return {
     ok: true,
     data: {
       secretNames: [names.loginServer, names.username, names.password],
-      loginServer: setup.data.loginServer.startsWith("http") ? setup.data.loginServer : setup.data.loginServer,
+      loginServer: setup.data.loginServer.startsWith("http")
+        ? setup.data.loginServer
+        : setup.data.loginServer,
     },
   };
 }
 
-export type AzureOidcResult = { clientId: string; tenantId: string; subscriptionId: string; servicePrincipalObjectId: string };
+export type AzureOidcResult = {
+  clientId: string;
+  tenantId: string;
+  subscriptionId: string;
+  servicePrincipalObjectId: string;
+};
 
 export type AzurePushSetup =
-  | { mode: "keyless"; clientId: string; tenantId: string; subscriptionId: string; servicePrincipalObjectId: string }
+  | {
+      mode: "keyless";
+      clientId: string;
+      tenantId: string;
+      subscriptionId: string;
+      servicePrincipalObjectId: string;
+    }
   | { mode: "secret"; registry: string; loginServer: string; secretPrefix: string };
 
 /**
@@ -312,11 +377,15 @@ export type AzurePushSetup =
  * in the credential user, e.g. "clusterAdmin_rg-devops_agent-cluster" or
  * "clusterUser_<rg>_<cluster>" — the format `az aks get-credentials` writes.
  */
-export function parseAksClusterRef(kubeconfig: string): { clusterName: string; resourceGroup: string | null } | null {
+export function parseAksClusterRef(
+  kubeconfig: string,
+): { clusterName: string; resourceGroup: string | null } | null {
   const clusterName = kubeconfig.match(/current-context:\s*([A-Za-z0-9._-]+)/)?.[1];
   if (!clusterName) return null;
   const escaped = clusterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const rg = kubeconfig.match(new RegExp(`user:\\s*cluster(?:Admin|User)_([A-Za-z0-9._-]+)_${escaped}\\b`))?.[1];
+  const rg = kubeconfig.match(
+    new RegExp(`user:\\s*cluster(?:Admin|User)_([A-Za-z0-9._-]+)_${escaped}\\b`),
+  )?.[1];
   return { clusterName, resourceGroup: rg ?? null };
 }
 
@@ -341,7 +410,9 @@ export async function grantAksClusterAdmin(
   const sp = await resolveSp(cloudProviderId);
   if (!sp.ok) return sp;
   const aksId = `/subscriptions/${sp.data.subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ContainerService/managedClusters/${clusterName}`;
-  const assignmentName = await deterministicGuid(`${servicePrincipalObjectId}:${clusterName}:aksadmin`);
+  const assignmentName = await deterministicGuid(
+    `${servicePrincipalObjectId}:${clusterName}:aksadmin`,
+  );
   const ra = await http(
     armTok.accessToken,
     `${ARM}${aksId}/providers/Microsoft.Authorization/roleAssignments/${assignmentName}?api-version=2022-04-01`,
@@ -354,7 +425,8 @@ export async function grantAksClusterAdmin(
       },
     },
   );
-  if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error)) return { ok: false, error: `AKS admin role assignment failed: ${ra.error}` };
+  if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error))
+    return { ok: false, error: `AKS admin role assignment failed: ${ra.error}` };
   return { ok: true, data: true };
 }
 
@@ -374,7 +446,10 @@ export async function setupGithubFederatedCredential(
   if (!sp.ok) return sp;
   const { tenantId, clientId, clientSecret, subscription } = sp.data;
 
-  const graphTok = await getAzureSpToken({ tenantId, clientId, clientSecret }, "https://graph.microsoft.com/.default");
+  const graphTok = await getAzureSpToken(
+    { tenantId, clientId, clientSecret },
+    "https://graph.microsoft.com/.default",
+  );
   if (!graphTok.ok) return { ok: false, error: `Graph auth failed: ${graphTok.error}` };
   const armTok = await getAzureAccessToken(cloudProviderId);
   if (!armTok.ok) return { ok: false, error: armTok.error };
@@ -392,7 +467,12 @@ export async function setupGithubFederatedCredential(
     appId = find.data.value[0].id;
     appClientId = find.data.value[0].appId;
   } else {
-    const create = await http<{ id?: string; appId?: string }>(graphTok.accessToken, `${GRAPH}/applications`, "POST", { displayName: appName });
+    const create = await http<{ id?: string; appId?: string }>(
+      graphTok.accessToken,
+      `${GRAPH}/applications`,
+      "POST",
+      { displayName: appName },
+    );
     if (!create.ok) return { ok: false, error: `Couldn't create the AD app: ${create.error}` };
     appId = create.data.id;
     appClientId = create.data.appId;
@@ -406,8 +486,14 @@ export async function setupGithubFederatedCredential(
   );
   let spObjectId = spFind.ok ? spFind.data.value?.[0]?.id : undefined;
   if (!spObjectId) {
-    const spCreate = await http<{ id?: string }>(graphTok.accessToken, `${GRAPH}/servicePrincipals`, "POST", { appId: appClientId });
-    if (!spCreate.ok) return { ok: false, error: `Couldn't create the service principal: ${spCreate.error}` };
+    const spCreate = await http<{ id?: string }>(
+      graphTok.accessToken,
+      `${GRAPH}/servicePrincipals`,
+      "POST",
+      { appId: appClientId },
+    );
+    if (!spCreate.ok)
+      return { ok: false, error: `Couldn't create the service principal: ${spCreate.error}` };
     spObjectId = spCreate.data.id;
   }
   if (!spObjectId) return { ok: false, error: "Service principal has no id." };
@@ -421,13 +507,19 @@ export async function setupGithubFederatedCredential(
   );
   const exists = fcList.ok && (fcList.data.value ?? []).some((f) => f.subject === fcSubject);
   if (!exists) {
-    const fc = await http(graphTok.accessToken, `${GRAPH}/applications/${appId}/federatedIdentityCredentials`, "POST", {
-      name: fcName,
-      issuer: "https://token.actions.githubusercontent.com",
-      subject: fcSubject,
-      audiences: ["api://AzureADTokenExchange"],
-    });
-    if (!fc.ok && !/already exists|conflict/i.test(fc.error)) return { ok: false, error: `Couldn't add the federated credential: ${fc.error}` };
+    const fc = await http(
+      graphTok.accessToken,
+      `${GRAPH}/applications/${appId}/federatedIdentityCredentials`,
+      "POST",
+      {
+        name: fcName,
+        issuer: "https://token.actions.githubusercontent.com",
+        subject: fcSubject,
+        audiences: ["api://AzureADTokenExchange"],
+      },
+    );
+    if (!fc.ok && !/already exists|conflict/i.test(fc.error))
+      return { ok: false, error: `Couldn't add the federated credential: ${fc.error}` };
   }
 
   // 4 — Assign AcrPush on the ACR to the SP (ARM role assignment). 8311e382… = AcrPush.
@@ -447,9 +539,18 @@ export async function setupGithubFederatedCredential(
       },
     },
   );
-  if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error)) return { ok: false, error: `Role assignment failed: ${ra.error}` };
+  if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error))
+    return { ok: false, error: `Role assignment failed: ${ra.error}` };
 
-  return { ok: true, data: { clientId: appClientId, tenantId, subscriptionId: subscription, servicePrincipalObjectId: spObjectId } };
+  return {
+    ok: true,
+    data: {
+      clientId: appClientId,
+      tenantId,
+      subscriptionId: subscription,
+      servicePrincipalObjectId: spObjectId,
+    },
+  };
 }
 
 export type AzureDeployRegistry =
@@ -498,11 +599,23 @@ export async function setupAzureDeployRegistry(
   const acr = await createAcr(cloudProviderId, resourceGroup, acrName, location);
   if (!acr.ok) return { ok: false, error: `Creating the ACR failed. ${acr.error}` };
 
-  const oidc = await setupGithubFederatedCredential(cloudProviderId, repoFullName, acrName, resourceGroup, branch);
+  const oidc = await setupGithubFederatedCredential(
+    cloudProviderId,
+    repoFullName,
+    acrName,
+    resourceGroup,
+    branch,
+  );
   if (oidc.ok) {
     if (aks) {
-      const grant = await grantAksClusterAdmin(cloudProviderId, oidc.data.servicePrincipalObjectId, aks.resourceGroup, aks.clusterName);
-      if (!grant.ok) return { ok: false, error: `Granting AKS deploy access failed. ${grant.error}` };
+      const grant = await grantAksClusterAdmin(
+        cloudProviderId,
+        oidc.data.servicePrincipalObjectId,
+        aks.resourceGroup,
+        aks.clusterName,
+      );
+      if (!grant.ok)
+        return { ok: false, error: `Granting AKS deploy access failed. ${grant.error}` };
     }
     return {
       ok: true,
@@ -532,9 +645,19 @@ export async function setupAzureDeployRegistry(
   });
   if (!repo) return { ok: false, error: `Repo "${repoFullName}" is not registered.` };
   const gh = await resolveTokenForRepo(repo.id);
-  if (!gh.ok) return { ok: false, error: `Could not resolve a GitHub token to store the ACR credentials: ${gh.message}` };
+  if (!gh.ok)
+    return {
+      ok: false,
+      error: `Could not resolve a GitHub token to store the ACR credentials: ${gh.message}`,
+    };
 
-  const secret = await setupAcrSecretPush(cloudProviderId, gh.accessToken, repoFullName, resourceGroup, acrName);
+  const secret = await setupAcrSecretPush(
+    cloudProviderId,
+    gh.accessToken,
+    repoFullName,
+    resourceGroup,
+    acrName,
+  );
   if (!secret.ok) return secret;
 
   return {
@@ -559,30 +682,52 @@ export async function setupAzureDeployRegistry(
 export async function discoverAcrPushWorkflows(
   githubToken: string,
   repoFullName: string,
-): Promise<Res<Array<{ workflowPath: string; registry: string; loginServer: string; secretPrefix: string }>>> {
+): Promise<
+  Res<Array<{ workflowPath: string; registry: string; loginServer: string; secretPrefix: string }>>
+> {
   const listUrl = `https://api.github.com/repos/${repoFullName}/contents/.github/workflows`;
   let list: Response;
   try {
     list = await fetch(listUrl, {
-      headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
       cache: "no-store",
     });
   } catch (e) {
-    return { ok: false, error: `Network error listing workflows: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error listing workflows: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   if (list.status === 404) return { ok: true, data: [] };
   if (!list.ok) return { ok: false, error: `Couldn't list workflows (HTTP ${list.status}).` };
-  const entries = (await list.json().catch(() => [])) as Array<{ name?: string; path?: string; type?: string }>;
+  const entries = (await list.json().catch(() => [])) as Array<{
+    name?: string;
+    path?: string;
+    type?: string;
+  }>;
   if (!Array.isArray(entries)) return { ok: true, data: [] };
 
-  const results: Array<{ workflowPath: string; registry: string; loginServer: string; secretPrefix: string }> = [];
+  const results: Array<{
+    workflowPath: string;
+    registry: string;
+    loginServer: string;
+    secretPrefix: string;
+  }> = [];
   for (const e of entries) {
     if (e.type !== "file" || !e.name || !e.path) continue;
     if (!/\.ya?ml$/i.test(e.name)) continue;
     let file: Response;
     try {
       file = await fetch(`https://api.github.com/repos/${repoFullName}/contents/${e.path}`, {
-        headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
         cache: "no-store",
       });
     } catch {
@@ -641,39 +786,70 @@ export async function rerunLatestFailedWorkflow(
 ): Promise<Res<{ rerunRunId: number | null; note: string }>> {
   const wfPath = `.github/workflows/${workflowFileName}`;
   const listUrl = `https://api.github.com/repos/${repoFullName}/actions/workflows/${encodeURIComponent(workflowFileName)}/runs?per_page=1`;
-  const headers = { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
+  const headers = {
+    Authorization: `Bearer ${githubToken}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
   let res: Response;
   try {
     res = await fetch(listUrl, { headers, cache: "no-store" });
   } catch (e) {
-    return { ok: false, error: `Network error listing runs: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error listing runs: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
-  if (!res.ok) return { ok: false, error: `Couldn't list runs for ${wfPath} (HTTP ${res.status}).` };
-  const data = (await res.json().catch(() => ({}))) as { workflow_runs?: Array<{ id?: number; conclusion?: string | null }> };
+  if (!res.ok)
+    return { ok: false, error: `Couldn't list runs for ${wfPath} (HTTP ${res.status}).` };
+  const data = (await res.json().catch(() => ({}))) as {
+    workflow_runs?: Array<{ id?: number; conclusion?: string | null }>;
+  };
   const run = data.workflow_runs?.[0];
-  if (!run?.id) return { ok: true, data: { rerunRunId: null, note: `No prior runs of ${wfPath} to re-run.` } };
+  if (!run?.id)
+    return { ok: true, data: { rerunRunId: null, note: `No prior runs of ${wfPath} to re-run.` } };
   if (run.conclusion !== "failure") {
-    return { ok: true, data: { rerunRunId: null, note: `Latest run of ${wfPath} is "${run.conclusion ?? "in-progress"}", not "failure" — nothing to re-run.` } };
+    return {
+      ok: true,
+      data: {
+        rerunRunId: null,
+        note: `Latest run of ${wfPath} is "${run.conclusion ?? "in-progress"}", not "failure" — nothing to re-run.`,
+      },
+    };
   }
   let rerun: Response;
   try {
-    rerun = await fetch(`https://api.github.com/repos/${repoFullName}/actions/runs/${run.id}/rerun-failed-jobs`, {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-    });
+    rerun = await fetch(
+      `https://api.github.com/repos/${repoFullName}/actions/runs/${run.id}/rerun-failed-jobs`,
+      {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+      },
+    );
   } catch (e) {
-    return { ok: false, error: `Network error triggering rerun: ${e instanceof Error ? e.message : "error"}` };
+    return {
+      ok: false,
+      error: `Network error triggering rerun: ${e instanceof Error ? e.message : "error"}`,
+    };
   }
   if (rerun.status !== 201 && rerun.status !== 204) {
     const t = await rerun.text().catch(() => "");
-    return { ok: false, error: `Couldn't trigger re-run of ${wfPath} (HTTP ${rerun.status}). ${t.slice(0, 160)}` };
+    return {
+      ok: false,
+      error: `Couldn't trigger re-run of ${wfPath} (HTTP ${rerun.status}). ${t.slice(0, 160)}`,
+    };
   }
-  return { ok: true, data: { rerunRunId: run.id, note: `Re-ran failed jobs on run ${run.id} of ${wfPath}.` } };
+  return {
+    ok: true,
+    data: { rerunRunId: run.id, note: `Re-ran failed jobs on run ${run.id} of ${wfPath}.` },
+  };
 }
 
 /** A stable v5-ish GUID from a string (for idempotent role-assignment names). */
 async function deterministicGuid(input: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-  const b = Array.from(new Uint8Array(buf)).map((x) => x.toString(16).padStart(2, "0")).join("");
+  const b = Array.from(new Uint8Array(buf))
+    .map((x) => x.toString(16).padStart(2, "0"))
+    .join("");
   return `${b.slice(0, 8)}-${b.slice(8, 12)}-${b.slice(12, 16)}-${b.slice(16, 20)}-${b.slice(20, 32)}`;
 }

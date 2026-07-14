@@ -23,7 +23,9 @@ type Output = {
 };
 
 /** Find the Azure provider for THIS project (per-project isolation). */
-async function resolveAzureProvider(projectId: string): Promise<{ id: string; subscriptionId: string } | null> {
+async function resolveAzureProvider(
+  projectId: string,
+): Promise<{ id: string; subscriptionId: string } | null> {
   const cp = await prisma.cloudProvider.findFirst({
     where: { projectId, kind: "azure" },
     select: { id: true, accountRef: true },
@@ -78,13 +80,22 @@ export const listAzureVmsTool: Tool<Input, Output> = {
 
     let res: Response;
     try {
-      res = await fetch(url, { headers: { Authorization: `Bearer ${tok.accessToken}` }, cache: "no-store" });
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${tok.accessToken}` },
+        cache: "no-store",
+      });
     } catch (err) {
-      return { ok: false, error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}` };
+      return {
+        ok: false,
+        error: `Network error reaching Azure: ${err instanceof Error ? err.message : "unknown"}`,
+      };
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return { ok: false, error: `Azure returned ${res.status} listing VMs: ${body.slice(0, 200)}` };
+      return {
+        ok: false,
+        error: `Azure returned ${res.status} listing VMs: ${body.slice(0, 200)}`,
+      };
     }
 
     const data = (await res.json().catch(() => ({}))) as {

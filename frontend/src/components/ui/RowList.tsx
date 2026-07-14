@@ -14,13 +14,7 @@ export interface RowListProps<T> {
  * Vertical card-style rows. Each row composes whatever it wants inside.
  * Used by dashboard "Your projects" block, tasks, approvals, alerts, activity.
  */
-export function RowList<T>({
-  items,
-  renderItem,
-  getKey,
-  empty,
-  divider = true,
-}: RowListProps<T>) {
+export function RowList<T>({ items, renderItem, getKey, empty, divider = true }: RowListProps<T>) {
   if (items.length === 0) {
     return <>{empty}</>;
   }

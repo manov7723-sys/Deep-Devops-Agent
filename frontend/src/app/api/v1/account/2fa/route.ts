@@ -8,10 +8,7 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
 export async function GET() {
   const sess = await getActiveSession();
   if (!sess) {
-    return NextResponse.json(
-      { ok: false, code: "unauthenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
   }
   const [totp, codes] = await Promise.all([
     getTotpState(sess.userId),
@@ -32,10 +29,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const sess = await getActiveSession();
   if (!sess) {
-    return NextResponse.json(
-      { ok: false, code: "unauthenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
   }
   const body = (await req.json().catch(() => ({}))) as { enabled?: boolean };
   if (typeof body.enabled !== "boolean") {

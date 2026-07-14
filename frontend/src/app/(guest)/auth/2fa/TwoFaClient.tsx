@@ -79,7 +79,12 @@ export function TwoFaClient({ setup }: TwoFaClientProps) {
     setServerError(null);
     const endpoint = useBackupCode ? "/api/v1/auth/backup-code" : "/api/v1/auth/totp";
     const payload = useBackupCode
-      ? { code: code.trim().toUpperCase().replace(/^([A-Z0-9]{4})([A-Z0-9]{4})$/, "$1-$2") }
+      ? {
+          code: code
+            .trim()
+            .toUpperCase()
+            .replace(/^([A-Z0-9]{4})([A-Z0-9]{4})$/, "$1-$2"),
+        }
       : { code };
     const res = await fetch(endpoint, {
       method: "POST",
@@ -128,7 +133,9 @@ export function TwoFaClient({ setup }: TwoFaClientProps) {
           }}
         >
           {backupCodes.map((c) => (
-            <code key={c} className="mono">{c}</code>
+            <code key={c} className="mono">
+              {c}
+            </code>
           ))}
         </div>
         <div className="row gap-2">
@@ -176,7 +183,9 @@ export function TwoFaClient({ setup }: TwoFaClientProps) {
                 style={{ borderRadius: 8, background: "#fff", padding: 4 }}
               />
             ) : (
-              <div className="ph auth-qr" aria-hidden>QR code</div>
+              <div className="ph auth-qr" aria-hidden>
+                QR code
+              </div>
             )}
             <div className="col gap-2" style={{ minWidth: 0 }}>
               <span className="muted" style={{ fontSize: 12.5 }}>
@@ -268,7 +277,10 @@ export function TwoFaClient({ setup }: TwoFaClientProps) {
         )}
 
         {setup && (
-          <p className="faint row gap-2 center" style={{ fontSize: 12.5, justifyContent: "center" }}>
+          <p
+            className="faint row gap-2 center"
+            style={{ fontSize: 12.5, justifyContent: "center" }}
+          >
             <Icon name="key" size={12} />
             Enter the code from your authenticator app.
           </p>

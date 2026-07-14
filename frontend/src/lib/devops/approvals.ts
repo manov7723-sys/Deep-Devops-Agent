@@ -3,7 +3,13 @@
  * by anyone with developer+. Decision is immutable: once approved/rejected
  * the row stays terminal forever (callers re-create a new approval if needed).
  */
-import { Prisma, type Approval, type ApprovalDiff, type ApprovalRisk, type DiffKind } from "@prisma/client";
+import {
+  Prisma,
+  type Approval,
+  type ApprovalDiff,
+  type ApprovalRisk,
+  type DiffKind,
+} from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 export type ApprovalRow = {
@@ -20,11 +26,13 @@ export type ApprovalRow = {
   diff: Array<{ kind: DiffKind; text: string; order: number }>;
 };
 
-function row(a: Approval & {
-  env: { key: string };
-  decidedBy: { name: string } | null;
-  diff: ApprovalDiff[];
-}): ApprovalRow {
+function row(
+  a: Approval & {
+    env: { key: string };
+    decidedBy: { name: string } | null;
+    diff: ApprovalDiff[];
+  },
+): ApprovalRow {
   return {
     id: a.id,
     envKey: a.env.key,
@@ -117,8 +125,7 @@ export async function createApproval(args: CreateApprovalArgs): Promise<Approval
 }
 
 export type DecideResult =
-  | { ok: true; approval: ApprovalRow }
-  | { ok: false; code: "not_found" | "already_decided" };
+  { ok: true; approval: ApprovalRow } | { ok: false; code: "not_found" | "already_decided" };
 
 export async function decideApproval(
   projectId: string,

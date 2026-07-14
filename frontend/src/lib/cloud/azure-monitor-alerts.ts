@@ -20,7 +20,11 @@ export async function syncAksAlarmsToAlerts(opts: {
   clusterName: string;
   resourceGroup?: string;
 }): Promise<AzureSyncResult> {
-  const states = await describeAksAlertStates(opts.cloudProviderId, opts.clusterName, opts.resourceGroup);
+  const states = await describeAksAlertStates(
+    opts.cloudProviderId,
+    opts.clusterName,
+    opts.resourceGroup,
+  );
   if (!states.ok) return { ok: false, error: states.error };
 
   const existing = await prisma.alert.findMany({
@@ -43,7 +47,8 @@ export async function syncAksAlarmsToAlerts(opts: {
         sourceLabel: label,
         category: "Performance",
         severity: "high",
-        recommendation: "A node/cluster metric crossed its threshold — check load and scale the node pool if needed.",
+        recommendation:
+          "A node/cluster metric crossed its threshold — check load and scale the node pool if needed.",
       });
       opened++;
     } else if (a.state === "OK" && open) {

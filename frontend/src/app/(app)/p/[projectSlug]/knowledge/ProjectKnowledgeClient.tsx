@@ -48,7 +48,9 @@ export function ProjectKnowledgeClient({ slug }: { slug: string }) {
         sub="Runbooks, conventions and architecture context the agents read from."
         actions={
           <>
-            <Btn variant="outline" icon="book">Import from repo</Btn>
+            <Btn variant="outline" icon="book">
+              Import from repo
+            </Btn>
             <Btn variant="primary" icon="plus" onClick={() => setNewDocOpen(true)}>
               New doc
             </Btn>
@@ -77,7 +79,10 @@ export function ProjectKnowledgeClient({ slug }: { slug: string }) {
               className={`chip ${activeTag === tag ? "active" : ""}`}
               onClick={() => setActiveTag((prev) => (prev === tag ? null : tag))}
             >
-              {tag} <span className="faint" style={{ marginLeft: 4 }}>{n}</span>
+              {tag}{" "}
+              <span className="faint" style={{ marginLeft: 4 }}>
+                {n}
+              </span>
             </button>
           ))}
         </div>
@@ -132,10 +137,14 @@ function KnowledgeSection({
   return (
     <div className="col gap-3">
       <div className="row gap-2" style={{ alignItems: "baseline" }}>
-        <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase" }}>
+        <span
+          style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase" }}
+        >
           {label}
         </span>
-        <span className="faint" style={{ fontSize: 12 }}>{count}</span>
+        <span className="faint" style={{ fontSize: 12 }}>
+          {count}
+        </span>
       </div>
       <TileGrid minTile={320}>
         {docs.map((d) => (

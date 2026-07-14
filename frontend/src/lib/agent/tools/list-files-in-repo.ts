@@ -36,7 +36,7 @@ export const listFilesInRepoTool: Tool<Input, Output> = {
   description:
     "List files and subfolders at a path inside a GitHub or GitLab repo attached " +
     "to the current project. Use this to explore a repo before reading specific " +
-    "files. Pass path=\"\" or path=\"/\" for the root. Only repos returned by " +
+    'files. Pass path="" or path="/" for the root. Only repos returned by ' +
     "list_project_repos are accessible.",
   inputSchema: {
     type: "object",

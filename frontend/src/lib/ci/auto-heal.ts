@@ -47,18 +47,25 @@ function isDevopsFile(path: string): boolean {
     /\.conf$/i.test(base) ||
     /^\.github\/workflows\/.+\.ya?ml$/i.test(p) ||
     /^\.gitlab-ci\.ya?ml$/i.test(base) ||
-    /^(namespace|deployment|service|ingress|configmap|secret|hpa|pvc|manifest|kustomization)\.ya?ml$/i.test(base) ||
-    (/\.ya?ml$/i.test(base) && /(^|\/)(k8s|manifests?|kubernetes|deploy|kustomize|helm|charts?)(\/|$)/i.test(p))
+    /^(namespace|deployment|service|ingress|configmap|secret|hpa|pvc|manifest|kustomization)\.ya?ml$/i.test(
+      base,
+    ) ||
+    (/\.ya?ml$/i.test(base) &&
+      /(^|\/)(k8s|manifests?|kubernetes|deploy|kustomize|helm|charts?)(\/|$)/i.test(p))
   );
 }
 
 /** Parse the reviewer's strict-JSON {files:[{path,content}]} response. */
 function parseFixes(text: string): Record<string, string> {
-  const cleaned = text.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```\s*$/, "").trim();
+  const cleaned = text
+    .replace(/^```[a-zA-Z]*\n?/, "")
+    .replace(/\n?```\s*$/, "")
+    .trim();
   try {
     const j = JSON.parse(cleaned) as { files?: Array<{ path?: string; content?: string }> };
     const out: Record<string, string> = {};
-    for (const f of j.files ?? []) if (f.path && typeof f.content === "string") out[f.path.replace(/^\/+/, "")] = f.content;
+    for (const f of j.files ?? [])
+      if (f.path && typeof f.content === "string") out[f.path.replace(/^\/+/, "")] = f.content;
     return out;
   } catch {
     return {};
@@ -79,8 +86,16 @@ export async function autoHealPipeline(pipelineId: string): Promise<HealResult> 
   const p = await prisma.ciPipeline.findUnique({
     where: { id: pipelineId },
     select: {
-      id: true, projectId: true, repoId: true, name: true, branch: true,
-      files: true, workflowPath: true, agentReview: true, healAttempts: true, runId: true,
+      id: true,
+      projectId: true,
+      repoId: true,
+      name: true,
+      branch: true,
+      files: true,
+      workflowPath: true,
+      agentReview: true,
+      healAttempts: true,
+      runId: true,
     },
   });
   if (!p) return { ok: false, error: "pipeline not found" };
@@ -90,7 +105,10 @@ export async function autoHealPipeline(pipelineId: string): Promise<HealResult> 
   }
   if (!p.workflowPath) return { ok: true, healed: false, reason: "no workflow file to fix" };
 
-  const repo = await prisma.repo.findUnique({ where: { id: p.repoId }, select: { fullName: true, defaultBranch: true } });
+  const repo = await prisma.repo.findUnique({
+    where: { id: p.repoId },
+    select: { fullName: true, defaultBranch: true },
+  });
   if (!repo) return { ok: false, error: "repo missing" };
   const tok = await resolveTokenForRepo(p.repoId);
   if (!tok.ok) return { ok: false, error: tok.message };
@@ -120,9 +138,13 @@ export async function autoHealPipeline(pipelineId: string): Promise<HealResult> 
   const editablePaths = new Set(editable.map((f) => f.path.replace(/^\/+/, "")));
   const byPath = new Map(files.map((f) => [f.path.replace(/^\/+/, ""), f.content] as const));
   const changed = Object.entries(parseFixes(fix.text)).filter(
-    ([path, content]) => editablePaths.has(path) && content.trim() && content.trim() !== (byPath.get(path) ?? "").trim(),
+    ([path, content]) =>
+      editablePaths.has(path) &&
+      content.trim() &&
+      content.trim() !== (byPath.get(path) ?? "").trim(),
   );
-  if (changed.length === 0) return { ok: true, healed: false, reason: "reviewer produced no change" };
+  if (changed.length === 0)
+    return { ok: true, healed: false, reason: "reviewer produced no change" };
   const changeMap = new Map(changed);
   const newFiles = files.map((f) => {
     const key = f.path.replace(/^\/+/, "");
@@ -137,9 +159,17 @@ export async function autoHealPipeline(pipelineId: string): Promise<HealResult> 
   // 4 — re-commit + re-trigger.
   const branch = repo.defaultBranch || p.branch || "main";
   const commitList = changed.map(([path, content]) => ({ path, content }));
-  const commit = await commitFiles(gh, branch, commitList, `ci: auto-heal ${p.name} — fixed ${commitList.map((f) => f.path).join(", ")} (attempt ${attempt})`);
+  const commit = await commitFiles(
+    gh,
+    branch,
+    commitList,
+    `ci: auto-heal ${p.name} — fixed ${commitList.map((f) => f.path).join(", ")} (attempt ${attempt})`,
+  );
   if (!commit.ok) {
-    await prisma.ciPipeline.update({ where: { id: p.id }, data: { status: "error", lastError: commit.error } });
+    await prisma.ciPipeline.update({
+      where: { id: p.id },
+      data: { status: "error", lastError: commit.error },
+    });
     return { ok: false, error: commit.error };
   }
   const wfName = workflowFileName(p.workflowPath);
@@ -164,5 +194,11 @@ export async function autoHealPipeline(pipelineId: string): Promise<HealResult> 
     },
   });
 
-  return { ok: true, healed: true, attempt, runId: run ? String(run.id) : null, runUrl: run?.url ?? null };
+  return {
+    ok: true,
+    healed: true,
+    attempt,
+    runId: run ? String(run.id) : null,
+    runUrl: run?.url ?? null,
+  };
 }

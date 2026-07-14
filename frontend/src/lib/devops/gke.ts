@@ -110,7 +110,14 @@ export const GKE_DEFAULTS: GkeDefaults = {
   appMaxNodes: 10,
 };
 
-export const GKE_MACHINE_TYPES = ["e2-medium", "e2-standard-2", "e2-standard-4", "n2-standard-2", "n2-standard-4", "n2-standard-8"];
+export const GKE_MACHINE_TYPES = [
+  "e2-medium",
+  "e2-standard-2",
+  "e2-standard-4",
+  "n2-standard-2",
+  "n2-standard-4",
+  "n2-standard-8",
+];
 export const GKE_K8S_VERSIONS = ["1.36", "1.35", "1.34", "1.33", "1.32", "1.31", "1.30"];
 export const GKE_DISK_TYPES = ["pd-ssd", "pd-balanced", "pd-standard"];
 export const GKE_DISK_SIZES = [50, 100, 150, 200];
@@ -197,7 +204,9 @@ locals {
   const monitoring = spec.monitoring !== false;
   const dpv2 = spec.dataplaneV2 !== false;
   const masterCidrs = (spec.masterAuthorizedCidrs || "")
-    .split(",").map((c) => c.trim()).filter(Boolean);
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
 
   // Cluster-level production blocks.
   const clusterBlocks: string[] = [];
@@ -213,7 +222,8 @@ locals {
   }`);
   }
   if (spec.shieldedNodes !== false) clusterBlocks.push(`  enable_shielded_nodes = true`);
-  if (spec.intranodeVisibility !== false) clusterBlocks.push(`  enable_intranode_visibility = true`);
+  if (spec.intranodeVisibility !== false)
+    clusterBlocks.push(`  enable_intranode_visibility = true`);
   if (spec.binaryAuthorization !== false) {
     clusterBlocks.push(`  binary_authorization {
     evaluation_mode = "PROJECT_SINGLETON_POLICY_ENFORCE"
@@ -259,7 +269,12 @@ ${masterCidrs.map((c, i) => `    cidr_blocks {\n      cidr_block   = "${c}"\n   
   }`);
 
   // Reusable node_config (shielded + workload metadata + disk).
-  const nodeConfig = (machine: string, role: string, spot: boolean, taint: boolean) => `    node_config {
+  const nodeConfig = (
+    machine: string,
+    role: string,
+    spot: boolean,
+    taint: boolean,
+  ) => `    node_config {
       machine_type = "${machine}"
       image_type   = "COS_CONTAINERD"
       disk_type    = "${spec.systemDiskType || "pd-ssd"}"

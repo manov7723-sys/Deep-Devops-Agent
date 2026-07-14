@@ -68,8 +68,8 @@ export function ForgotClient() {
               }}
             >
               Resend
-            </button>
-            {" "}or{" "}
+            </button>{" "}
+            or{" "}
             <button
               type="button"
               className="auth-link"

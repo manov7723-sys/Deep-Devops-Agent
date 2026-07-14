@@ -43,10 +43,7 @@ export function useUpdateProfile() {
 export function useChangePassword() {
   return useMutation({
     mutationFn: async (input: { current: string; password: string; confirmPassword: string }) => {
-      const res = await api.post<{ ok: boolean; message?: string }>(
-        "/account/password",
-        input,
-      );
+      const res = await api.post<{ ok: boolean; message?: string }>("/account/password", input);
       if (!res.ok) throw new Error(res.message ?? "Could not change password.");
       return true;
     },

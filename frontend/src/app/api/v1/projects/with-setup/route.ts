@@ -31,7 +31,9 @@ const RepoChoice = z.object({
   /** Free-form GitHub description. */
   description: z.string().default(""),
   /** UI lets the user pick a RepoKind; defaults to Service. */
-  kind: z.enum(["Service", "Frontend", "Terraform", "Kubernetes", "Library", "Worker"]).default("Service"),
+  kind: z
+    .enum(["Service", "Frontend", "Terraform", "Kubernetes", "Library", "Worker"])
+    .default("Service"),
   /**
    * OAuthAccount.id whose access token grants visibility into this repo.
    * Required when the user has more than one connected GitHub identity so
@@ -98,7 +100,11 @@ export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, code: "invalid_request", message: parsed.error.errors[0]?.message ?? "Invalid input." },
+      {
+        ok: false,
+        code: "invalid_request",
+        message: parsed.error.errors[0]?.message ?? "Invalid input.",
+      },
       { status: 400 },
     );
   }

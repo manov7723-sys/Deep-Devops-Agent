@@ -48,8 +48,12 @@ export const generateHelmChartTool: Tool<Input, Output> = {
   },
   async execute(input) {
     if (!input.values?.name?.trim()) return { ok: false, error: "values.name is required." };
-    if (!input.values?.image?.trim()) return { ok: false, error: "values.image (image repository) is required." };
+    if (!input.values?.image?.trim())
+      return { ok: false, error: "values.image (image repository) is required." };
     const chart = buildHelmChart(input.values);
-    return { ok: true, output: { chartName: chart.chartName, fileCount: chart.fileCount, files: chart.files } };
+    return {
+      ok: true,
+      output: { chartName: chart.chartName, fileCount: chart.fileCount, files: chart.files },
+    };
   },
 };

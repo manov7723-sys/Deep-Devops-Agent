@@ -12,7 +12,14 @@ type Output = {
     kind: string;
     apiVersion: string;
     namespaced: boolean;
-    fields: Array<{ name: string; label: string; type: string; required: boolean; options?: string[]; default?: string }>;
+    fields: Array<{
+      name: string;
+      label: string;
+      type: string;
+      required: boolean;
+      options?: string[];
+      default?: string;
+    }>;
   }>;
 };
 

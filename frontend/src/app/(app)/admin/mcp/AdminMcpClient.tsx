@@ -21,7 +21,10 @@ type McpConnectorRow = {
 export function AdminMcpClient() {
   const { data: connectors, isError, error, refetch, isLoading } = useAdminMcpList();
   const action = useAdminMcpAction();
-  const [addOpen, setAddOpen] = useState<{ open: boolean; preset: Preset }>({ open: false, preset: null });
+  const [addOpen, setAddOpen] = useState<{ open: boolean; preset: Preset }>({
+    open: false,
+    preset: null,
+  });
   const [configureTarget, setConfigureTarget] = useState<McpConnectorRow | null>(null);
 
   const openWith = (preset: Preset) => setAddOpen({ open: true, preset });
@@ -41,8 +44,7 @@ export function AdminMcpClient() {
         {isError ? (
           <Block.Error
             message={
-              (error as { message?: string } | undefined)?.message ??
-              "Could not load MCP servers."
+              (error as { message?: string } | undefined)?.message ?? "Could not load MCP servers."
             }
             onRetry={() => refetch()}
           />
@@ -153,7 +155,9 @@ function PresetCard({
         </span>
         <span style={{ fontWeight: 700 }}>{title}</span>
       </span>
-      <span className="muted" style={{ fontSize: 12.5, lineHeight: 1.4 }}>{body}</span>
+      <span className="muted" style={{ fontSize: 12.5, lineHeight: 1.4 }}>
+        {body}
+      </span>
     </button>
   );
 }

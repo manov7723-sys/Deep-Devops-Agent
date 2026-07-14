@@ -4,7 +4,11 @@ import { prisma } from "@/lib/db/prisma";
 import { getActiveSession } from "@/lib/auth/session";
 import { encryptSecret } from "@/lib/auth/crypto";
 import { createProvider } from "@/lib/cloud/providers";
-import { exchangeAzureCode, listAzureSubscriptions, azureOAuthGraphEnabled } from "@/lib/cloud/azure-oauth";
+import {
+  exchangeAzureCode,
+  listAzureSubscriptions,
+  azureOAuthGraphEnabled,
+} from "@/lib/cloud/azure-oauth";
 import { autoProvisionSpFromOAuth } from "@/lib/cloud/azure-provision-sp";
 import { audit } from "@/lib/audit/log";
 
@@ -74,7 +78,8 @@ export async function GET(req: Request) {
   // 1 — exchange the code for tokens.
   const ex = await exchangeAzureCode(code, verifier);
   if (!ex.ok) return done(popup, false, ex.error);
-  if (!ex.tokens.refreshToken) return done(popup, false, "Microsoft returned no refresh token (offline_access not granted).");
+  if (!ex.tokens.refreshToken)
+    return done(popup, false, "Microsoft returned no refresh token (offline_access not granted).");
 
   // 2 — validate + resolve the subscription.
   const subsRes = await listAzureSubscriptions(ex.tokens.accessToken);
@@ -83,7 +88,8 @@ export async function GET(req: Request) {
     return done(popup, false, "Signed in, but no Azure subscriptions are visible to this account.");
   }
   const sub = subsRes.subs.find((s) => s.state === "Enabled") ?? subsRes.subs[0];
-  const tenantId = tenantFromToken(ex.tokens.accessToken) ?? process.env.AZURE_OAUTH_TENANT_ID ?? "";
+  const tenantId =
+    tenantFromToken(ex.tokens.accessToken) ?? process.env.AZURE_OAUTH_TENANT_ID ?? "";
 
   // 3 — store as an Azure CloudProvider (OAuth method). Convention: roleArn is
   // LEFT NULL for OAuth providers (SP providers always have a client id there),
@@ -94,8 +100,15 @@ export async function GET(req: Request) {
     // ISOLATION: resolve which project this connection belongs to (verify access).
     let projectId: string | undefined;
     if (projSlug) {
-      const proj = await prisma.project.findFirst({ where: { slug: projSlug }, select: { id: true, ownerId: true } });
-      const allowed = proj && (proj.ownerId === sess.userId || (await prisma.membership.count({ where: { projectId: proj.id, userId: sess.userId } })) > 0);
+      const proj = await prisma.project.findFirst({
+        where: { slug: projSlug },
+        select: { id: true, ownerId: true },
+      });
+      const allowed =
+        proj &&
+        (proj.ownerId === sess.userId ||
+          (await prisma.membership.count({ where: { projectId: proj.id, userId: sess.userId } })) >
+            0);
       if (proj && allowed) projectId = proj.id;
     }
 
@@ -103,14 +116,24 @@ export async function GET(req: Request) {
     // project refreshes the token; the same account in another project is a
     // separate row (that's the isolation guarantee).
     const existing = await prisma.cloudProvider.findFirst({
-      where: { userId: sess.userId, kind: "azure", accountRef: sub.id, projectId: projectId ?? null },
+      where: {
+        userId: sess.userId,
+        kind: "azure",
+        accountRef: sub.id,
+        projectId: projectId ?? null,
+      },
       select: { id: true },
     });
     let providerId: string;
     if (existing) {
       await prisma.cloudProvider.update({
         where: { id: existing.id },
-        data: { externalId: encRefresh, accountId: tenantId, status: "ok", name: `Azure · ${sub.displayName}`.slice(0, 80) },
+        data: {
+          externalId: encRefresh,
+          accountId: tenantId,
+          status: "ok",
+          name: `Azure · ${sub.displayName}`.slice(0, 80),
+        },
       });
       providerId = existing.id;
     } else {
@@ -129,7 +152,10 @@ export async function GET(req: Request) {
     // Bind to the project's environments that have no provider yet, so the
     // connection shows on the project's Cloud providers page.
     if (projectId) {
-      await prisma.env.updateMany({ where: { projectId, cloudProviderId: null }, data: { cloudProviderId: providerId } });
+      await prisma.env.updateMany({
+        where: { projectId, cloudProviderId: null },
+        data: { cloudProviderId: providerId },
+      });
     }
     await audit({
       userId: sess.userId,
@@ -151,7 +177,9 @@ export async function GET(req: Request) {
           userArmAccessToken: ex.tokens.accessToken,
           tenantId,
           subscriptionId: sub.id,
-          displayNameHint: `deepagent-${sub.displayName}`.replace(/[^A-Za-z0-9-]/g, "-").slice(0, 90),
+          displayNameHint: `deepagent-${sub.displayName}`
+            .replace(/[^A-Za-z0-9-]/g, "-")
+            .slice(0, 90),
         });
         if (sp.ok) {
           await prisma.cloudProvider.update({
@@ -175,11 +203,17 @@ export async function GET(req: Request) {
         }
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn(`[azure-oauth] SP auto-provisioning threw: ${e instanceof Error ? e.message : e}`);
+        console.warn(
+          `[azure-oauth] SP auto-provisioning threw: ${e instanceof Error ? e.message : e}`,
+        );
       }
     }
   } catch (e) {
-    return done(popup, false, e instanceof Error ? e.message : "Could not save the Azure provider.");
+    return done(
+      popup,
+      false,
+      e instanceof Error ? e.message : "Could not save the Azure provider.",
+    );
   }
 
   return done(popup, true, `Connected ${sub.displayName}`);

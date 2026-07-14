@@ -26,11 +26,22 @@ export const estimateInfraCostTool: Tool<Input, EstimateResult> = {
     type: "object",
     properties: {
       cloud: { type: "string", enum: ["aws", "azure", "gcp"], description: "Cloud provider." },
-      instanceType: { type: "string", description: "Node instance type, e.g. 't3.medium' (AWS), 'D2s_v3' (Azure), 'e2-medium' (GCP)." },
+      instanceType: {
+        type: "string",
+        description:
+          "Node instance type, e.g. 't3.medium' (AWS), 'D2s_v3' (Azure), 'e2-medium' (GCP).",
+      },
       nodeCount: { type: "number", description: "Number of worker nodes / VMs." },
-      managedK8s: { type: "boolean", description: "True if this is a managed Kubernetes cluster (EKS/AKS/GKE) — adds the control-plane charge." },
+      managedK8s: {
+        type: "boolean",
+        description:
+          "True if this is a managed Kubernetes cluster (EKS/AKS/GKE) — adds the control-plane charge.",
+      },
       storageGb: { type: "number", description: "Total persistent/block storage in GB." },
-      loadBalancers: { type: "number", description: "Number of public load balancers (exposed Services/Ingress)." },
+      loadBalancers: {
+        type: "number",
+        description: "Number of public load balancers (exposed Services/Ingress).",
+      },
     },
     required: ["cloud"],
     additionalProperties: false,

@@ -38,7 +38,11 @@ export function ChaosBanner() {
   if (!isOn) return null;
 
   const latencyLabel =
-    chaos.latency !== "off" ? chaos.latency : effective.latencyMs > 0 ? `${effective.latencyMs}ms` : "off";
+    chaos.latency !== "off"
+      ? chaos.latency
+      : effective.latencyMs > 0
+        ? `${effective.latencyMs}ms`
+        : "off";
   const failureLabel =
     chaos.failure !== "off"
       ? chaos.failure

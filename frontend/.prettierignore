@@ -1,0 +1,32 @@
+# Never format generated / vendored output
+.next/
+node_modules/
+dist/
+build/
+out/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma-managed (client is generated; migrations are frozen SQL history)
+prisma/migrations/
+prisma/generated/
+
+# Lockfiles / package manager output
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Env + kubeconfig caches (never touch)
+.env
+.env.*
+.kube/
+
+# Nested test apps
+dynamic-react-app/
+
+# Scaffold templates that use Go/Helm templating ({{ .Values.x }}) — Prettier
+# can't parse them as YAML. They're emitted verbatim into user repos.
+src/lib/scaffolds/

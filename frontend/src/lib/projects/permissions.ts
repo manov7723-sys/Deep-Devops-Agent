@@ -34,8 +34,7 @@ export type ProjectAccess = {
 };
 
 export type GateResult =
-  | { ok: true; access: ProjectAccess }
-  | { ok: false; status: 401 | 403 | 404 };
+  { ok: true; access: ProjectAccess } | { ok: false; status: 401 | 403 | 404 };
 
 export async function requireProjectAccess(
   slug: string,

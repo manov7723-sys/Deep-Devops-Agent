@@ -16,12 +16,7 @@ export function MobileSidebarDrawer({ area, projectSlug }: MobileSidebarDrawerPr
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
-        <Btn
-          variant="ghost"
-          size="icon"
-          className="dda-mob-menu-floating"
-          aria-label="Open menu"
-        >
+        <Btn variant="ghost" size="icon" className="dda-mob-menu-floating" aria-label="Open menu">
           <Icon name="menu" size={18} />
         </Btn>
       </Dialog.Trigger>

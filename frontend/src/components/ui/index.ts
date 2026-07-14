@@ -4,7 +4,14 @@ export { Field, type FieldProps } from "./Field";
 export { Input, Textarea } from "./Input";
 export { Select, type SelectProps, type SelectOption } from "./Select";
 export { Modal, type ModalProps } from "./Modal";
-export { Menu, MenuItem, MenuSeparator, MenuLabel, type MenuProps, type MenuItemProps } from "./Menu";
+export {
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  MenuLabel,
+  type MenuProps,
+  type MenuItemProps,
+} from "./Menu";
 export { Tabs, type TabsProps, type TabItem } from "./Tabs";
 export { Toggle, type ToggleProps } from "./Toggle";
 export { Badge, type BadgeProps, type BadgeTone } from "./Badge";

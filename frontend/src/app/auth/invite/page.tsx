@@ -54,18 +54,22 @@ export default async function InvitePage({ searchParams }: { searchParams: Searc
           sub={`${preview.inviterName} invited you as ${preview.role}.`}
         />
         <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>
-          Sign in with <b>{preview.invitedEmail}</b> to accept. If you don&apos;t have an account yet,
-          create one with the same email and you&apos;ll land back here.
+          Sign in with <b>{preview.invitedEmail}</b> to accept. If you don&apos;t have an account
+          yet, create one with the same email and you&apos;ll land back here.
         </p>
         <div className="col gap-3">
           <Link
-            href={`/auth/login?next=${encodeURIComponent(nextHref)}&email=${encodeURIComponent(preview.invitedEmail)}` as never}
+            href={
+              `/auth/login?next=${encodeURIComponent(nextHref)}&email=${encodeURIComponent(preview.invitedEmail)}` as never
+            }
             className="btn primary"
           >
             Sign in &amp; accept
           </Link>
           <Link
-            href={`/auth/signup?next=${encodeURIComponent(nextHref)}&email=${encodeURIComponent(preview.invitedEmail)}` as never}
+            href={
+              `/auth/signup?next=${encodeURIComponent(nextHref)}&email=${encodeURIComponent(preview.invitedEmail)}` as never
+            }
             className="btn outline"
           >
             Create an account

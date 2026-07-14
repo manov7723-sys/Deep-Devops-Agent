@@ -7,7 +7,13 @@ type Output = {
     id: string;
     title: string;
     detect: string;
-    fields: Array<{ key: string; type: string; description: string; default?: string | number; options?: string[] }>;
+    fields: Array<{
+      key: string;
+      type: string;
+      description: string;
+      default?: string | number;
+      options?: string[];
+    }>;
   }>;
 };
 

@@ -8,10 +8,7 @@ import type {
   AdminPlanSlice,
   AdminRecentSignup,
 } from "@/lib/api/schemas/admin-api";
-import type {
-  SeedAdminPlan,
-  SeedAdminSubscription,
-} from "@/lib/legacy-types";
+import type { SeedAdminPlan, SeedAdminSubscription } from "@/lib/legacy-types";
 import type { AdminUserRow } from "@/lib/admin/aggregates";
 
 export type AdminDashboard = AdminDashboardPayload;

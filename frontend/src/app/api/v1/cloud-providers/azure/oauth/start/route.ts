@@ -18,7 +18,12 @@ export async function GET(req: Request) {
   }
   if (!azureOAuthConfigured()) {
     return NextResponse.json(
-      { ok: false, code: "oauth_not_configured", message: "Azure OAuth isn't configured (set AZURE_OAUTH_CLIENT_ID / AZURE_OAUTH_CLIENT_SECRET)." },
+      {
+        ok: false,
+        code: "oauth_not_configured",
+        message:
+          "Azure OAuth isn't configured (set AZURE_OAUTH_CLIENT_ID / AZURE_OAUTH_CLIENT_SECRET).",
+      },
       { status: 400 },
     );
   }

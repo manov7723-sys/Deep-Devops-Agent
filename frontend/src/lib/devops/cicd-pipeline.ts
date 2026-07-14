@@ -152,7 +152,11 @@ function ciWorkflowFor(
       // vars.ECR_REPOSITORY (set by the /cicd/setup endpoint) — nothing hardcoded.
       // Multi-service repos pass useVars:false + a per-service context/name/file.
       return generateEcrWorkflow({
-        roleArn: r.roleArn, region: r.region, ecrRepositoryUri: r.ecrRepositoryUri, branch, scanGate,
+        roleArn: r.roleArn,
+        region: r.region,
+        ecrRepositoryUri: r.ecrRepositoryUri,
+        branch,
+        scanGate,
         useVars: opts?.useVars !== false,
         context: opts?.context,
         workflowName: opts?.workflowName,
@@ -214,13 +218,24 @@ function cdWorkflowAfterCi(opts: {
    * Keyless GKE auth: authenticate over WIF and `get-gke-credentials` — no
    * stored key. Mutually exclusive with eks.
    */
-  gke?: { workloadIdentityProvider: string; serviceAccount: string; clusterName: string; location: string };
+  gke?: {
+    workloadIdentityProvider: string;
+    serviceAccount: string;
+    clusterName: string;
+    location: string;
+  };
   /**
    * Keyless AKS auth: azure/login (federated OIDC) + admin AKS credentials
    * (bypasses in-cluster RBAC, mirroring the ADMIN kubeconfig this app itself
    * uses for AKS) — no stored key. Mutually exclusive with eks/gke.
    */
-  aks?: { clientId: string; tenantId: string; subscriptionId: string; clusterName: string; resourceGroup: string };
+  aks?: {
+    clientId: string;
+    tenantId: string;
+    subscriptionId: string;
+    clusterName: string;
+    resourceGroup: string;
+  };
 }): GeneratedFile {
   const app = sanitizeAppName(opts.appName);
   const ns = opts.namespace || "default";
@@ -363,13 +378,17 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
   if (spec.registry) {
     imageRef = registryImageLatest(spec.registry);
     if (want("ciWorkflow")) {
-      files.push(ciWorkflowFor(spec.branch, spec.scanGate !== false, spec.registry, {
-        context: ctx,
-        workflowName: spec.ciWorkflowName,
-        fileName: spec.ciFileName,
-        useVars: spec.registryUseVars,
-      }));
-      notes.push(`CI builds + scans + pushes to ${spec.registry.cloud.toUpperCase()} on "${spec.branch}"${ctx ? ` from ./${ctx}` : ""}.`);
+      files.push(
+        ciWorkflowFor(spec.branch, spec.scanGate !== false, spec.registry, {
+          context: ctx,
+          workflowName: spec.ciWorkflowName,
+          fileName: spec.ciFileName,
+          useVars: spec.registryUseVars,
+        }),
+      );
+      notes.push(
+        `CI builds + scans + pushes to ${spec.registry.cloud.toUpperCase()} on "${spec.branch}"${ctx ? ` from ./${ctx}` : ""}.`,
+      );
     }
   }
 
@@ -383,7 +402,11 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
     // than the app repo owning a Namespace resource.
     const written: string[] = [];
     const dm = buildDeployManifest(deploySpec);
-    const fileName: Record<string, string> = { Deployment: "deployment", Service: "service", Ingress: "ingress" };
+    const fileName: Record<string, string> = {
+      Deployment: "deployment",
+      Service: "service",
+      Ingress: "ingress",
+    };
     dm.yaml.split("---\n").forEach((doc, i) => {
       const kind = dm.resources[i] ?? `resource-${i}`;
       // Namespace is deliberately not a committed file here — see the comment above.
@@ -398,12 +421,16 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
   // CD workflow. With an AWS registry + eksCluster it's fully keyless (assumes
   // the same OIDC role as CI); otherwise it uses the KUBECONFIG_B64 secret.
   if (want("cdWorkflow")) {
-    const ciName = spec.ciWorkflowName || (spec.registry ? CI_WORKFLOW_NAME[spec.registry.cloud] : "Build and push to ECR");
+    const ciName =
+      spec.ciWorkflowName ||
+      (spec.registry ? CI_WORKFLOW_NAME[spec.registry.cloud] : "Build and push to ECR");
     const eks =
       spec.registry?.cloud === "aws" && spec.eksCluster
         ? {
-            roleRef: spec.registryUseVars !== false ? "${{ vars.AWS_ROLE_ARN }}" : spec.registry.roleArn,
-            regionRef: spec.registryUseVars !== false ? "${{ vars.AWS_REGION }}" : spec.registry.region,
+            roleRef:
+              spec.registryUseVars !== false ? "${{ vars.AWS_ROLE_ARN }}" : spec.registry.roleArn,
+            regionRef:
+              spec.registryUseVars !== false ? "${{ vars.AWS_REGION }}" : spec.registry.region,
             clusterName: spec.eksCluster.clusterName,
           }
         : undefined;
@@ -444,7 +471,11 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
         aks,
       }),
     );
-    notes.push(eks || gke || aks ? "CD deploys keyless (OIDC/WIF) after CI succeeds." : "CD needs the KUBECONFIG_B64 repo secret (the app sets it).");
+    notes.push(
+      eks || gke || aks
+        ? "CD deploys keyless (OIDC/WIF) after CI succeeds."
+        : "CD needs the KUBECONFIG_B64 repo secret (the app sets it).",
+    );
   }
 
   if (image) notes.push(`Deployed image: ${image}.`);

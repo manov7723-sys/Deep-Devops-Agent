@@ -113,7 +113,9 @@ export type CreateProjectWithSetupResult = {
 export function useCreateProjectWithSetup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: CreateProjectWithSetupInput): Promise<CreateProjectWithSetupResult> => {
+    mutationFn: async (
+      input: CreateProjectWithSetupInput,
+    ): Promise<CreateProjectWithSetupResult> => {
       const res = await api.post<{
         ok: boolean;
         project?: { id: string; slug: string };

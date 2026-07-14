@@ -51,12 +51,16 @@ export function Modal({
               <div className="col" style={{ gap: 2 }}>
                 {title && (
                   <Dialog.Title asChild>
-                    <span className="card-title" style={{ fontSize: 15 }}>{title}</span>
+                    <span className="card-title" style={{ fontSize: 15 }}>
+                      {title}
+                    </span>
                   </Dialog.Title>
                 )}
                 {description && (
                   <Dialog.Description asChild>
-                    <span className="faint" style={{ fontSize: 12 }}>{description}</span>
+                    <span className="faint" style={{ fontSize: 12 }}>
+                      {description}
+                    </span>
                   </Dialog.Description>
                 )}
               </div>

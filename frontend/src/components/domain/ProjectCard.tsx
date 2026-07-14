@@ -77,8 +77,20 @@ export function ProjectCard({ project, variant = "tile", onCreate, onDelete }: P
               type="button"
               aria-label="Delete project"
               className="row center"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
-              style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border-soft)", background: "var(--surface-1)", color: "var(--text-faint)", cursor: "pointer" }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete();
+              }}
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                border: "1px solid var(--border-soft)",
+                background: "var(--surface-1)",
+                color: "var(--text-faint)",
+                cursor: "pointer",
+              }}
             >
               <Icon name="trash" size={14} />
             </button>

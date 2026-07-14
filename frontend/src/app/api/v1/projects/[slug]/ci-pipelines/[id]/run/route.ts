@@ -18,7 +18,15 @@ export async function POST(_req: Request, ctx: { params: Promise<{ slug: string;
 
   const pipeline = await prisma.ciPipeline.findFirst({
     where: { id, projectId: gate.access.project.id },
-    select: { id: true, name: true, branch: true, files: true, workflowPath: true, repoId: true, healAttempts: true },
+    select: {
+      id: true,
+      name: true,
+      branch: true,
+      files: true,
+      workflowPath: true,
+      repoId: true,
+      healAttempts: true,
+    },
   });
   if (!pipeline) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
 
@@ -29,21 +37,35 @@ export async function POST(_req: Request, ctx: { params: Promise<{ slug: string;
   if (!repo) return NextResponse.json({ ok: false, code: "repo_missing" }, { status: 409 });
 
   const tok = await resolveTokenForRepo(pipeline.repoId);
-  if (!tok.ok) return NextResponse.json({ ok: false, code: "github_auth", message: tok.message }, { status: 409 });
+  if (!tok.ok)
+    return NextResponse.json(
+      { ok: false, code: "github_auth", message: tok.message },
+      { status: 409 },
+    );
 
   const files = (pipeline.files as FileEntry[]) ?? [];
-  if (files.length === 0) return NextResponse.json({ ok: false, code: "no_files" }, { status: 400 });
+  if (files.length === 0)
+    return NextResponse.json({ ok: false, code: "no_files" }, { status: 400 });
 
   const branch = repo.defaultBranch || pipeline.branch || "main";
   const gh = { token: tok.accessToken, repoFullName: repo.fullName };
 
-  await prisma.ciPipeline.update({ where: { id }, data: { status: "committing", lastError: null } });
+  await prisma.ciPipeline.update({
+    where: { id },
+    data: { status: "committing", lastError: null },
+  });
 
   // 1 — commit everything in one commit to the default branch.
   const commit = await commitFiles(gh, branch, files, `ci: ${pipeline.name} (via DeepAgent)`);
   if (!commit.ok) {
-    await prisma.ciPipeline.update({ where: { id }, data: { status: "error", lastError: commit.error } });
-    return NextResponse.json({ ok: false, code: "commit_failed", message: commit.error }, { status: 502 });
+    await prisma.ciPipeline.update({
+      where: { id },
+      data: { status: "error", lastError: commit.error },
+    });
+    return NextResponse.json(
+      { ok: false, code: "commit_failed", message: commit.error },
+      { status: 502 },
+    );
   }
 
   // 2 — trigger. The push to the default branch usually starts the run; also

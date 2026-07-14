@@ -21,7 +21,9 @@ const OPENAI_ANALYSIS_MODEL = "gpt-4.1-mini";
  * OpenAI-only deployment (or an expired Anthropic key) must not silently
  * break stack detection for every Automation feature + deploy_my_app.
  */
-async function analysisComplete(prompt: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+async function analysisComplete(
+  prompt: string,
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
     try {
@@ -31,7 +33,13 @@ async function analysisComplete(prompt: string): Promise<{ ok: true; text: strin
         max_tokens: 600,
         messages: [{ role: "user", content: prompt }],
       });
-      return { ok: true, text: msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("") };
+      return {
+        ok: true,
+        text: msg.content
+          .filter((b) => b.type === "text")
+          .map((b) => (b as { text: string }).text)
+          .join(""),
+      };
     } catch {
       /* fall through to OpenAI — e.g. the Anthropic key is expired/invalid */
     }
@@ -50,29 +58,56 @@ async function analysisComplete(prompt: string): Promise<{ ok: true; text: strin
       return { ok: false, error: e instanceof Error ? e.message : "LLM error" };
     }
   }
-  return { ok: false, error: "No usable LLM key on the server (ANTHROPIC_API_KEY invalid/missing and OPENAI_API_KEY missing)." };
+  return {
+    ok: false,
+    error:
+      "No usable LLM key on the server (ANTHROPIC_API_KEY invalid/missing and OPENAI_API_KEY missing).",
+  };
 }
 const KEY_FILES = [
-  "package.json", "requirements.txt", "pyproject.toml", "Pipfile", "go.mod", "index.html",
-  "vite.config.js", "vite.config.ts", "next.config.js", "next.config.ts", "angular.json", "Dockerfile",
+  "package.json",
+  "requirements.txt",
+  "pyproject.toml",
+  "Pipfile",
+  "go.mod",
+  "index.html",
+  "vite.config.js",
+  "vite.config.ts",
+  "next.config.js",
+  "next.config.ts",
+  "angular.json",
+  "Dockerfile",
 ];
 
 type GhEntry = { name: string; type: string; path: string };
 
 function ghHeaders(token: string) {
-  return { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
 }
 
 export async function ghListRoot(fullName: string, ref: string, token: string): Promise<GhEntry[]> {
-  const res = await fetch(`https://api.github.com/repos/${fullName}/contents?ref=${encodeURIComponent(ref)}`, {
-    headers: ghHeaders(token), cache: "no-store",
-  });
+  const res = await fetch(
+    `https://api.github.com/repos/${fullName}/contents?ref=${encodeURIComponent(ref)}`,
+    {
+      headers: ghHeaders(token),
+      cache: "no-store",
+    },
+  );
   if (!res.ok) return [];
   const data = (await res.json().catch(() => [])) as GhEntry[];
   return Array.isArray(data) ? data : [];
 }
 
-export async function ghReadFile(fullName: string, path: string, ref: string, token: string): Promise<string | null> {
+export async function ghReadFile(
+  fullName: string,
+  path: string,
+  ref: string,
+  token: string,
+): Promise<string | null> {
   const res = await fetch(
     `https://api.github.com/repos/${fullName}/contents/${encodeURIComponent(path).replace(/%2F/g, "/")}?ref=${encodeURIComponent(ref)}`,
     { headers: ghHeaders(token), cache: "no-store" },
@@ -81,7 +116,9 @@ export async function ghReadFile(fullName: string, path: string, ref: string, to
   const data = (await res.json().catch(() => ({}))) as { content?: string; encoding?: string };
   if (!data.content) return null;
   try {
-    return Buffer.from(data.content, (data.encoding as BufferEncoding) || "base64").toString("utf8");
+    return Buffer.from(data.content, (data.encoding as BufferEncoding) || "base64").toString(
+      "utf8",
+    );
   } catch {
     return null;
   }
@@ -96,7 +133,9 @@ export type ResolvedRepo = { id: string; fullName: string; ref: string; accessTo
  * virtually all of these (verified: stall → instant success on attempt 2).
  */
 async function listFilesWithRetry(
-  client: { listFiles: (path: string, ref: string) => Promise<Array<{ name: string; type: string }>> },
+  client: {
+    listFiles: (path: string, ref: string) => Promise<Array<{ name: string; type: string }>>;
+  },
   path: string,
   ref: string,
   attempts = 3,
@@ -125,7 +164,12 @@ export async function resolveAttachedRepo(
 
   return {
     ok: true,
-    repo: { id: repo.id, fullName: repo.fullName, ref: repo.defaultBranch || "main", accessToken: tok.accessToken },
+    repo: {
+      id: repo.id,
+      fullName: repo.fullName,
+      ref: repo.defaultBranch || "main",
+      accessToken: tok.accessToken,
+    },
   };
 }
 
@@ -145,7 +189,10 @@ export type StackDetection =
  * Read a connected repo and detect its stack + params. Shared by the
  * Dockerfile, CI-workflow and docker-compose automations.
  */
-export async function detectRepoStack(projectId: string, repoFullName: string): Promise<StackDetection> {
+export async function detectRepoStack(
+  projectId: string,
+  repoFullName: string,
+): Promise<StackDetection> {
   const resolved = await resolveAttachedRepo(projectId, repoFullName);
   if (!resolved.ok) return resolved;
   const { id, ref } = resolved.repo;
@@ -157,7 +204,8 @@ export async function detectRepoStack(projectId: string, repoFullName: string): 
   const client = rc.client;
 
   const rootFiles = await listFilesWithRetry(client, "", ref);
-  if (rootFiles.length === 0) return { ok: false, error: "Couldn't read the repository contents (empty repo or no access)." };
+  if (rootFiles.length === 0)
+    return { ok: false, error: "Couldn't read the repository contents (empty repo or no access)." };
 
   const present = new Set(rootFiles.map((f) => f.name.toLowerCase()));
   const keyContents: Record<string, string> = {};
@@ -179,7 +227,11 @@ ${stacksDesc}
 Repository root entries: ${fileList}
 
 Key file contents (truncated):
-${Object.entries(keyContents).map(([k, v]) => `### ${k}\n${v}`).join("\n\n") || "(no recognizable manifest files at the root)"}
+${
+  Object.entries(keyContents)
+    .map(([k, v]) => `### ${k}\n${v}`)
+    .join("\n\n") || "(no recognizable manifest files at the root)"
+}
 
 Respond with ONLY a JSON object, no prose:
 {"stack": "static-spa" | "node-service" | "python" | "go", "params": { ... }, "reasoning": "<one short sentence>"}
@@ -201,7 +253,8 @@ Respond with ONLY a JSON object, no prose:
 
   const stackId = (parsed.stack ?? "") as DockerStackId;
   const stack = getStack(stackId);
-  if (!stack) return { ok: false, error: `The analysis returned an unknown stack "${parsed.stack ?? ""}".` };
+  if (!stack)
+    return { ok: false, error: `The analysis returned an unknown stack "${parsed.stack ?? ""}".` };
 
   return {
     ok: true,
@@ -216,8 +269,19 @@ Respond with ONLY a JSON object, no prose:
 
 /** Common service-directory names to probe in a monorepo (frontend + backend). */
 const SERVICE_DIR_HINTS = [
-  "frontend", "backend", "client", "server", "web", "api", "app", "ui", "service",
-  "services", "apps", "packages", "src",
+  "frontend",
+  "backend",
+  "client",
+  "server",
+  "web",
+  "api",
+  "app",
+  "ui",
+  "service",
+  "services",
+  "apps",
+  "packages",
+  "src",
 ];
 
 export type AppService = {
@@ -236,18 +300,25 @@ export type AppService = {
 };
 
 export type ServicesDetection =
-  | { ok: true; monorepo: boolean; services: AppService[] }
-  | { ok: false; error: string };
+  { ok: true; monorepo: boolean; services: AppService[] } | { ok: false; error: string };
 
 const DEFAULT_PORT: Record<string, number> = {
-  "static-spa": 8080, "node-service": 3000, "python": 8000, go: 8080,
+  "static-spa": 8080,
+  "node-service": 3000,
+  python: 8000,
+  go: 8080,
 };
 
 /** "owner/My_Repo" + "backend" -> "my-repo-backend" (DNS/ECR-safe, ≤200). */
 function imageNameFor(repoFullName: string, role: string): string {
   const short = (repoFullName.split("/").pop() ?? "app").toLowerCase();
   const base = role && role !== "app" && role !== short ? `${short}-${role}` : short;
-  return base.replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, 200) || "app";
+  return (
+    base
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "")
+      .slice(0, 200) || "app"
+  );
 }
 
 /**
@@ -256,7 +327,10 @@ function imageNameFor(repoFullName: string, role: string): string {
  * asks the LLM to enumerate each service's build context, stack and port. Used
  * by the deploy flow to decide whether to ask the user for one ECR repo or two.
  */
-export async function analyzeAppServices(projectId: string, repoFullName: string): Promise<ServicesDetection> {
+export async function analyzeAppServices(
+  projectId: string,
+  repoFullName: string,
+): Promise<ServicesDetection> {
   const resolved = await resolveAttachedRepo(projectId, repoFullName);
   if (!resolved.ok) return resolved;
   const { id, ref } = resolved.repo;
@@ -266,7 +340,8 @@ export async function analyzeAppServices(projectId: string, repoFullName: string
   const client = rc.client;
 
   const rootFiles = await listFilesWithRetry(client, "", ref);
-  if (rootFiles.length === 0) return { ok: false, error: "Couldn't read the repository contents (empty repo or no access)." };
+  if (rootFiles.length === 0)
+    return { ok: false, error: "Couldn't read the repository contents (empty repo or no access)." };
   const rootDirs = rootFiles.filter((f) => f.type === "dir").map((f) => f.name);
 
   // Probe root + candidate service dirs for manifests. Keep it cheap: only dirs
@@ -277,7 +352,9 @@ export async function analyzeAppServices(projectId: string, repoFullName: string
   for (const dir of probePaths) {
     const files = dir === "" ? rootFiles : await listFilesWithRetry(client, dir, ref, 2);
     const names = files.map((f) => f.name);
-    const manifests = KEY_FILES.filter((k) => names.some((n) => n.toLowerCase() === k.toLowerCase()));
+    const manifests = KEY_FILES.filter((k) =>
+      names.some((n) => n.toLowerCase() === k.toLowerCase()),
+    );
     if (dir !== "" && manifests.length === 0) continue; // subdir with no manifest → not a service
     dirManifests[dir || "."] = manifests;
     const contents: Record<string, string> = {};
@@ -293,7 +370,10 @@ export async function analyzeAppServices(projectId: string, repoFullName: string
   const treeDesc = Object.entries(dirContents)
     .map(([dir, contents]) => {
       const header = dir === "." ? "(repo root)" : `${dir}/`;
-      const body = Object.entries(contents).map(([k, v]) => `#### ${k}\n${v}`).join("\n\n") || "(manifests present, no content read)";
+      const body =
+        Object.entries(contents)
+          .map(([k, v]) => `#### ${k}\n${v}`)
+          .join("\n\n") || "(manifests present, no content read)";
       return `### ${header} — manifests: ${dirManifests[dir]?.join(", ") || "none"}\n${body}`;
     })
     .join("\n\n");
@@ -316,7 +396,16 @@ Respond with ONLY a JSON object, no prose:
   const llm = await analysisComplete(prompt);
   if (!llm.ok) return { ok: false, error: `Analysis failed: ${llm.error}` };
 
-  let parsed: { monorepo?: boolean; services?: Array<{ name?: string; path?: string; stack?: string; params?: Record<string, unknown>; port?: number }> };
+  let parsed: {
+    monorepo?: boolean;
+    services?: Array<{
+      name?: string;
+      path?: string;
+      stack?: string;
+      params?: Record<string, unknown>;
+      port?: number;
+    }>;
+  };
   try {
     const start = llm.text.indexOf("{");
     const end = llm.text.lastIndexOf("}");
@@ -325,7 +414,10 @@ Respond with ONLY a JSON object, no prose:
     return { ok: false, error: "Couldn't parse the service analysis result. Try again." };
   }
 
-  const rawServices = Array.isArray(parsed.services) && parsed.services.length ? parsed.services : [{ name: "app", path: "", stack: parsed.services?.[0]?.stack }];
+  const rawServices =
+    Array.isArray(parsed.services) && parsed.services.length
+      ? parsed.services
+      : [{ name: "app", path: "", stack: parsed.services?.[0]?.stack }];
   const services: AppService[] = [];
   for (const s of rawServices) {
     const stackId = (s.stack ?? "") as DockerStackId;
@@ -336,7 +428,9 @@ Respond with ONLY a JSON object, no prose:
     const port = Number(s.port) > 0 ? Number(s.port) : (DEFAULT_PORT[stackId] ?? 8080);
     // Does this service dir already ship a Dockerfile?
     const dirKey = path || ".";
-    const hasDockerfile = (dirManifests[dirKey] ?? []).some((m) => m.toLowerCase() === "dockerfile");
+    const hasDockerfile = (dirManifests[dirKey] ?? []).some(
+      (m) => m.toLowerCase() === "dockerfile",
+    );
     services.push({
       name: role,
       path,
@@ -348,7 +442,11 @@ Respond with ONLY a JSON object, no prose:
       existingDockerfile: hasDockerfile,
     });
   }
-  if (services.length === 0) return { ok: false, error: "No deployable service with a recognizable stack was found in the repo." };
+  if (services.length === 0)
+    return {
+      ok: false,
+      error: "No deployable service with a recognizable stack was found in the repo.",
+    };
 
   return { ok: true, monorepo: services.length > 1 || parsed.monorepo === true, services };
 }
