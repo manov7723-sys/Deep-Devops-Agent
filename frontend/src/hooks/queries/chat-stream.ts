@@ -23,17 +23,33 @@ type Streaming =
  * patches the react-query chat cache with the real DB rows so the message
  * is preserved on subsequent re-renders.
  */
+export type SendOptions = {
+  /** Target thread. When omitted the server uses the most-recent or creates one. */
+  threadId?: string | null;
+  /**
+   * Fires once the server resolves which thread this turn landed in. Use this
+   * to switch the client's active thread when the send started with no active
+   * thread and the server had to create one.
+   */
+  onThreadResolved?: (threadId: string) => void;
+};
+
 export function useSendChatMessageStream(slug: string) {
   const qc = useQueryClient();
-  const cacheKey = ["p", slug, "chat"] as const;
   const [status, setStatus] = useState<Streaming>({ state: "idle" });
   const abortRef = useRef<AbortController | null>(null);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, opts: SendOptions = {}) => {
       abortRef.current?.abort();
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+
+      // Cache key is per-thread when known, else falls back to the flat chat
+      // cache (which the initial load uses). Compute it up front and reuse.
+      const cacheKey: readonly unknown[] = opts.threadId
+        ? ["p", slug, "chat", "threads", opts.threadId]
+        : ["p", slug, "chat"];
 
       // Optimistic user message immediately on the page.
       const prev = qc.getQueryData<SeedChatMessage[]>(cacheKey) ?? [];
@@ -46,11 +62,15 @@ export function useSendChatMessageStream(slug: string) {
       setStatus({ state: "sending", toolCalls });
 
       let partial = "";
+      // Effective cache key gets rewritten once the server resolves the
+      // thread id (server may have created one). Everything after `thread`
+      // event uses this to write back to the right cache.
+      let effectiveKey = cacheKey;
       try {
         const res = await fetch(`/api/v1/projects/${slug}/chat/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, ...(opts.threadId ? { threadId: opts.threadId } : {}) }),
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) {
@@ -86,9 +106,21 @@ export function useSendChatMessageStream(slug: string) {
               continue;
             }
 
-            if (event === "user_message") {
+            if (event === "thread") {
+              const { id: resolvedId } = parsed as { id: string };
+              // Server told us the real thread. If it differs from what we
+              // optimistically used, migrate the optimistic message across
+              // caches so the UI stays consistent.
+              const newKey: readonly unknown[] = ["p", slug, "chat", "threads", resolvedId];
+              if (JSON.stringify(newKey) !== JSON.stringify(effectiveKey)) {
+                const cur = qc.getQueryData<SeedChatMessage[]>(effectiveKey) ?? [];
+                qc.setQueryData<SeedChatMessage[]>(newKey, cur);
+                effectiveKey = newKey;
+              }
+              opts.onThreadResolved?.(resolvedId);
+            } else if (event === "user_message") {
               const msg = parsed as SeedChatMessage;
-              qc.setQueryData<SeedChatMessage[]>(cacheKey, (cur) =>
+              qc.setQueryData<SeedChatMessage[]>(effectiveKey, (cur) =>
                 (cur ?? []).map((m) => (m.id === optimisticId ? msg : m)),
               );
             } else if (event === "delta") {
@@ -118,10 +150,13 @@ export function useSendChatMessageStream(slug: string) {
               // turn boundary — nothing for the UI to do, mostly a debug marker.
             } else if (event === "done") {
               const msg = parsed as SeedChatMessage;
-              qc.setQueryData<SeedChatMessage[]>(cacheKey, (cur) => [
+              qc.setQueryData<SeedChatMessage[]>(effectiveKey, (cur) => [
                 ...(cur ?? []),
                 msg,
               ]);
+              // Bubble the update into the flat chat cache too (initial-load
+              // path) and the threads list so the rail's timestamps refresh.
+              qc.invalidateQueries({ queryKey: ["p", slug, "chat", "threads"] });
               setStatus({ state: "idle" });
             } else if (event === "error") {
               const { message } = parsed as { code: string; message: string };
@@ -141,7 +176,7 @@ export function useSendChatMessageStream(slug: string) {
         });
       }
     },
-    [slug, qc, cacheKey],
+    [slug, qc],
   );
 
   const cancel = useCallback(() => {

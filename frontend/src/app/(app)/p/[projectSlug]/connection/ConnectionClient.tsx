@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Block, Btn, Field, Input, PageHead, Select, Textarea } from "@/components/ui";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api/client";
-import { useClusterStatus, useConnectCluster, type ConnectClusterResult } from "@/hooks/queries/connectivity";
+import { useClusterStatus, useConnectCluster, useProvisionAzureTfstate, type ConnectClusterResult } from "@/hooks/queries/connectivity";
 import { useActiveEnv } from "@/hooks/useActiveEnv";
 
 type EnvRow = { id: string; key: string; name: string; cloudProviderId?: string | null; hasKubeconfig?: boolean };
@@ -221,6 +221,11 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
           </div>
         )}
       </Block>
+
+      {/* ── Terraform state backend ──────────────────────────────────────── */}
+      {envs && envs.length > 0 && (
+        <TerraformStateSection slug={slug} envs={envs} projectCloud={lockedCloud} />
+      )}
 
       {/* ── Kubernetes cluster ──────────────────────────────────────────── */}
       <Block>
@@ -446,6 +451,211 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
         )}
       </Block>
     </div>
+  );
+}
+
+type TfBackend = {
+  bucket: string | null;
+  region: string | null;
+  table: string | null;
+  gcsBucket: string | null;
+  azureResourceGroup: string | null;
+  azureStorageAccount: string | null;
+  azureContainer: string | null;
+  cloudKind: string | null;
+};
+
+/**
+ * Terraform remote-state backend per environment. The form shape is driven
+ * by the PROJECT's cloud (locked at project creation), not the env's attached
+ * provider — so a fresh GCP project shows the GCS form immediately, before
+ * any env has a provider attached. Set once per environment; every cluster
+ * or infra apply for that env references the same remote state.
+ *
+ *   • AWS   → S3 bucket + region + optional DynamoDB lock table
+ *   • GCP   → GCS bucket (locks via object generations, no separate table)
+ *   • Azure → Resource group + Storage Account + Blob Container (leases lock)
+ */
+function TerraformStateSection({
+  slug,
+  envs,
+  projectCloud,
+}: {
+  slug: string;
+  envs: EnvRow[];
+  projectCloud: Cloud | null;
+}) {
+  const qc = useQueryClient();
+  const [envKey, setEnvKey] = useState(envs[0]?.key ?? "");
+  const [bucket, setBucket] = useState("");
+  const [region, setRegion] = useState("us-east-1");
+  const [table, setTable] = useState("");
+  const [gcsBucket, setGcsBucket] = useState("");
+  const [azResourceGroup, setAzResourceGroup] = useState("");
+  const [azStorageAccount, setAzStorageAccount] = useState("");
+  const [azContainer, setAzContainer] = useState("");
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  const backend = useQuery<TfBackend>({
+    queryKey: ["p", slug, "tf-backend", envKey],
+    queryFn: () => api.get<TfBackend>(`/projects/${slug}/envs/${envKey}/tf-backend`),
+    enabled: !!envKey,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    setBucket(backend.data?.bucket ?? "");
+    setRegion(backend.data?.region ?? "us-east-1");
+    setTable(backend.data?.table ?? "");
+    setGcsBucket(backend.data?.gcsBucket ?? "");
+    setAzResourceGroup(backend.data?.azureResourceGroup ?? "");
+    setAzStorageAccount(backend.data?.azureStorageAccount ?? "");
+    setAzContainer(backend.data?.azureContainer ?? "");
+    setSaveMsg(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [envKey, backend.data]);
+
+  // Which form we show is a function of the project's cloud (locked at
+  // creation), not the env's currently-attached provider — the point of the
+  // Connection page is to set this BEFORE anything is applied. Legacy projects
+  // without a locked cloud fall through to the env's cloudKind, and finally to
+  // the S3 form to preserve the pre-multi-cloud behavior.
+  const effectiveCloud: Cloud | null =
+    projectCloud ?? (backend.data?.cloudKind as Cloud | null) ?? null;
+  const isGcp = effectiveCloud === "gcp";
+  const isAzure = effectiveCloud === "azure";
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<{ ok: boolean }>(
+        `/projects/${slug}/envs/${envKey}/tf-backend`,
+        isGcp
+          ? { gcsBucket: gcsBucket.trim() }
+          : isAzure
+            ? {
+                azureResourceGroup: azResourceGroup.trim(),
+                azureStorageAccount: azStorageAccount.trim(),
+                azureContainer: azContainer.trim(),
+              }
+            : {
+                bucket: bucket.trim(),
+                region: region.trim() || "us-east-1",
+                table: table.trim() || undefined,
+              },
+      ),
+    onSuccess: () => {
+      setSaveMsg("Saved — every apply for this environment will use it.");
+      qc.invalidateQueries({ queryKey: ["p", slug, "tf-backend", envKey] });
+    },
+    onError: (e: unknown) => setSaveMsg(e instanceof Error ? e.message : "Save failed."),
+  });
+
+  // Azure-only: provision the RG + storage account + container via ARM REST
+  // (using the env's stored Azure creds) so the user never has to touch the
+  // Azure Portal or CLI. Endpoint also persists the fields onto the env.
+  const provisionAzure = useProvisionAzureTfstate(slug, envKey);
+  const provisionMsg = provisionAzure.data?.ok
+    ? `✅ ${provisionAzure.data.steps?.join(" · ") ?? "Provisioned."} Saved onto the env — you can Rerun the apply now.`
+    : provisionAzure.error instanceof Error
+      ? provisionAzure.error.message
+      : provisionAzure.data && provisionAzure.data.ok === false
+        ? provisionAzure.data.message ?? "Provision failed."
+        : null;
+
+  const saveDisabled =
+    save.isPending ||
+    (isGcp
+      ? !gcsBucket.trim()
+      : isAzure
+        ? !azResourceGroup.trim() || !azStorageAccount.trim() || !azContainer.trim()
+        : !bucket.trim());
+
+  const sub = isGcp
+    ? "Where Terraform state lives for this environment's applies (GCS bucket — GCS uses object generations for locking, no separate lock table). Set once — required before any GKE/GCP apply."
+    : isAzure
+      ? "Where Terraform state lives for this environment's applies (Resource group + Storage Account + Blob Container — Azure uses blob leases for locking, no separate lock table). Set once — required before any AKS/Azure apply."
+      : "Where Terraform state lives for this environment's applies (S3 bucket + optional DynamoDB lock table). Set once per environment — required before any 'Apply to AWS' step.";
+
+  return (
+    <Block>
+      <Block.Header>
+        <Block.Title sub={sub}>
+          <span className="row gap-2" style={{ alignItems: "center" }}>
+            <Icon name="db" size={16} /> Terraform state backend
+          </span>
+        </Block.Title>
+      </Block.Header>
+      <div className="col gap-3" style={{ maxWidth: 480 }}>
+        <Field label="Environment">
+          <Select value={envKey} onValueChange={setEnvKey} ariaLabel="Environment"
+            options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))} />
+        </Field>
+        {isGcp ? (
+          <Field label="GCS state bucket" hint="Stores this environment's Terraform state remotely. Required before applying.">
+            <Input className="mono" value={gcsBucket} placeholder="tfstate-yourorg-projectname" onChange={(e) => setGcsBucket(e.target.value)} />
+          </Field>
+        ) : isAzure ? (
+          <>
+            <Field label="Resource group" hint="The resource group that owns the storage account.">
+              <Input className="mono" value={azResourceGroup} placeholder="tfstate-rg" onChange={(e) => setAzResourceGroup(e.target.value)} />
+            </Field>
+            <Field label="Storage account" hint="Globally unique, 3-24 lowercase letters/digits.">
+              <Input className="mono" value={azStorageAccount} placeholder="mytfstateacct" onChange={(e) => setAzStorageAccount(e.target.value)} />
+            </Field>
+            <Field label="Blob container" hint="Container inside the storage account. Required.">
+              <Input className="mono" value={azContainer} placeholder="tfstate" onChange={(e) => setAzContainer(e.target.value)} />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label="S3 state bucket" hint="Stores this environment's Terraform state remotely. Required before applying.">
+              <Input className="mono" value={bucket} placeholder="my-project-tfstate" onChange={(e) => setBucket(e.target.value)} />
+            </Field>
+            <Field label="Bucket region">
+              <Select value={region} onValueChange={setRegion} ariaLabel="Bucket region"
+                options={AWS_REGIONS.map((r) => ({ value: r, label: r }))} />
+            </Field>
+            <Field label="DynamoDB lock table" hint="Prevents concurrent applies from corrupting state. Optional.">
+              <Input className="mono" value={table} placeholder="terraform-locks" onChange={(e) => setTable(e.target.value)} />
+            </Field>
+          </>
+        )}
+        <div className="row gap-2 wrap" style={{ alignItems: "center" }}>
+          <Btn variant="primary" icon="check" loading={save.isPending} disabled={saveDisabled} onClick={() => save.mutate()}>
+            Save
+          </Btn>
+          {isAzure && (
+            <Btn
+              variant="outline"
+              icon="cloud"
+              loading={provisionAzure.isPending}
+              disabled={saveDisabled || provisionAzure.isPending}
+              title="Create the resource group, storage account, and blob container in Azure using this env's stored creds. 30-90s."
+              onClick={() =>
+                provisionAzure.mutate({
+                  resourceGroup: azResourceGroup.trim(),
+                  storageAccount: azStorageAccount.trim(),
+                  container: azContainer.trim(),
+                })
+              }
+            >
+              Provision in Azure
+            </Btn>
+          )}
+          {saveMsg && <span className="muted" style={{ fontSize: 12.5 }}>{saveMsg}</span>}
+          {provisionMsg && (
+            <span
+              style={{
+                fontSize: 12.5,
+                color: provisionAzure.data?.ok ? "var(--ok, #30a46c)" : "var(--danger, #e5484d)",
+              }}
+            >
+              {provisionMsg}
+            </span>
+          )}
+        </div>
+      </div>
+    </Block>
   );
 }
 

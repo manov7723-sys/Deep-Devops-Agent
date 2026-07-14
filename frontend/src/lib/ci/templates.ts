@@ -485,13 +485,23 @@ ${scanStep}
  * the setup_azure_github_oidc tool — injected here verbatim, never invented.
  */
 export function generateAcrWorkflow(args: {
-  clientId: string;
-  tenantId: string;
-  subscriptionId: string;
   /** ACR name (without .azurecr.io). */
   registry: string;
   image: string;
   branch: string;
+  /**
+   * Auth mode. "keyless" uses azure/login with an OIDC federated credential
+   * (needs a Service-Principal Azure connection). "secret" uses docker login
+   * with ACR admin credentials stored as GitHub Actions secrets — the OAuth
+   * fallback for tenants where keyless can't be set up.
+   */
+  mode?: "keyless" | "secret";
+  /** Keyless-mode only. Present when mode === "keyless". */
+  clientId?: string;
+  tenantId?: string;
+  subscriptionId?: string;
+  /** Secret-mode only. Prefix used for ACR_*_LOGIN_SERVER/USERNAME/PASSWORD in repo secrets. */
+  secretPrefix?: string;
   /** Insert a Trivy gate that stops the pipeline on HIGH/CRITICAL before push. Default true. */
   scanGate?: boolean;
   /** Build context / service subdir (e.g. "frontend"). Default "." (repo root). */
@@ -501,12 +511,58 @@ export function generateAcrWorkflow(args: {
   /** Workflow file basename. Default "build-and-push-acr.yml". */
   fileName?: string;
 }): GeneratedFile {
+  const mode = args.mode ?? "keyless";
   const imageBase = `${args.registry}.azurecr.io/${args.image}`;
   const scanStep = args.scanGate !== false ? trivyGateStep(`${imageBase}:\${{ github.sha }}`) : "";
   const ctx = (args.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
   const buildArgs = ctx ? `-f "${ctx}/Dockerfile" "${ctx}"` : ".";
   const workflowName = args.workflowName || "Build and push to ACR";
   const fileName = args.fileName || "build-and-push-acr.yml";
+
+  const permissions =
+    mode === "keyless"
+      ? "permissions:\n  id-token: write   # required to request the GitHub OIDC token\n  contents: read"
+      : "permissions:\n  contents: read";
+
+  const loginSteps =
+    mode === "keyless"
+      ? `      - name: Azure login (keyless OIDC — no stored secret)
+        uses: azure/login@v2
+        with:
+          client-id: ${args.clientId}
+          tenant-id: ${args.tenantId}
+          subscription-id: ${args.subscriptionId}
+
+      - name: Log in to ACR
+        run: az acr login --name ${args.registry}`
+      : // Preflight step BEFORE docker/login-action so a missing/empty secret fails
+        // with a clear, self-diagnosable marker instead of the cryptic upstream
+        // "Username and password required". The agent's wait_for_workflow_run
+        // watches for the DEEPAGENT_ACR_SECRETS_MISSING marker and auto-invokes
+        // repair_azure_acr_push_auth to self-heal without user intervention.
+        `      - name: Verify ACR push secrets are present
+        env:
+          ACR_LOGIN_SERVER: \${{ secrets.${args.secretPrefix}_LOGIN_SERVER }}
+          ACR_USERNAME: \${{ secrets.${args.secretPrefix}_USERNAME }}
+          ACR_PASSWORD: \${{ secrets.${args.secretPrefix}_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ${args.secretPrefix}_LOGIN_SERVER"
+          [ -z "$ACR_USERNAME" ] && missing="$missing ${args.secretPrefix}_USERNAME"
+          [ -z "$ACR_PASSWORD" ] && missing="$missing ${args.secretPrefix}_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=\${{ github.repository }} registry=${args.registry} missing=$missing"
+            echo "One or more ACR admin secrets are missing/empty on this repo. The agent can heal this — say 'repair the ACR push auth' and it will refresh them."
+            exit 1
+          fi
+
+      - name: Log in to ACR (admin credential from repo secrets)
+        uses: docker/login-action@v3
+        with:
+          registry: \${{ secrets.${args.secretPrefix}_LOGIN_SERVER }}
+          username: \${{ secrets.${args.secretPrefix}_USERNAME }}
+          password: \${{ secrets.${args.secretPrefix}_PASSWORD }}`;
+
   const content = `name: ${workflowName}
 
 on:
@@ -514,9 +570,7 @@ on:
     branches: ["${args.branch}"]
   workflow_dispatch:
 
-permissions:
-  id-token: write   # required to request the GitHub OIDC token
-  contents: read
+${permissions}
 
 jobs:
   build-and-push:
@@ -525,15 +579,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Azure login (keyless OIDC — no stored secret)
-        uses: azure/login@v2
-        with:
-          client-id: ${args.clientId}
-          tenant-id: ${args.tenantId}
-          subscription-id: ${args.subscriptionId}
-
-      - name: Log in to ACR
-        run: az acr login --name ${args.registry}
+${loginSteps}
 
       - name: Build and tag image
         env:

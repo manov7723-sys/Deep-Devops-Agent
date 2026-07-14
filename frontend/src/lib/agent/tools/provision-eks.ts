@@ -88,7 +88,7 @@ export const provisionEksTool: Tool<Input, Output> = {
     const spec: EksSpec = {
       name: input.name,
       region,
-      kubernetesVersion: input.kubernetesVersion ?? "1.30",
+      kubernetesVersion: input.kubernetesVersion ?? "1.33",
       instanceType: input.instanceType ?? "t3.medium",
       desiredNodes: input.desiredNodes ?? 2,
       minNodes: input.minNodes ?? 1,
@@ -135,7 +135,12 @@ export const provisionEksTool: Tool<Input, Output> = {
     let runId: string | undefined;
     if (wantsApply) {
       const backend = env.tfBackendBucket
-        ? { bucket: env.tfBackendBucket, region: env.tfBackendRegion ?? region, table: env.tfBackendTable ?? undefined }
+        ? {
+            kind: "s3" as const,
+            bucket: env.tfBackendBucket,
+            region: env.tfBackendRegion ?? region,
+            table: env.tfBackendTable ?? undefined,
+          }
         : null;
       const run = startTerraformRun({
         projectId: ctx.projectId,

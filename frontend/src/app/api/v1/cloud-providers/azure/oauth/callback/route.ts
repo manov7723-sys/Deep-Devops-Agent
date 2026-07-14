@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db/prisma";
 import { getActiveSession } from "@/lib/auth/session";
 import { encryptSecret } from "@/lib/auth/crypto";
 import { createProvider } from "@/lib/cloud/providers";
-import { exchangeAzureCode, listAzureSubscriptions } from "@/lib/cloud/azure-oauth";
+import { exchangeAzureCode, listAzureSubscriptions, azureOAuthGraphEnabled } from "@/lib/cloud/azure-oauth";
+import { autoProvisionSpFromOAuth } from "@/lib/cloud/azure-provision-sp";
 import { audit } from "@/lib/audit/log";
 
 const CLEAR = { httpOnly: true, path: "/", maxAge: 0 };
@@ -137,6 +138,46 @@ export async function GET(req: Request) {
       targetId: existing?.id ?? sub.id,
       metadata: { kind: "azure", method: "oauth", subscription: sub.id },
     });
+
+    // Hybrid auth: right after saving the OAuth provider, silently try to
+    // auto-provision an SP via Graph so keyless deploy/cluster ops work without
+    // the ACR-admin-secret fallback. Non-blocking — failures (no admin consent,
+    // user isn't sub Owner) just leave the columns null. The self-heal path
+    // (repair_azure_acr_push_auth) remains as the safety net.
+    if (azureOAuthGraphEnabled() && ex.tokens.refreshToken && tenantId) {
+      try {
+        const sp = await autoProvisionSpFromOAuth({
+          oauthRefreshToken: ex.tokens.refreshToken,
+          userArmAccessToken: ex.tokens.accessToken,
+          tenantId,
+          subscriptionId: sub.id,
+          displayNameHint: `deepagent-${sub.displayName}`.replace(/[^A-Za-z0-9-]/g, "-").slice(0, 90),
+        });
+        if (sp.ok) {
+          await prisma.cloudProvider.update({
+            where: { id: providerId },
+            data: {
+              spClientId: sp.data.clientId,
+              spClientSecretEnc: encryptSecret(sp.data.clientSecret),
+            },
+          });
+          await audit({
+            userId: sess.userId,
+            action: "cloud_provider.sp_provisioned",
+            targetType: "cloud_provider",
+            targetId: providerId,
+            metadata: { kind: "azure", subscription: sub.id, appName: sp.data.appDisplayName },
+          }).catch(() => {});
+        } else {
+          // Silent skip — OAuth is already saved, connect flow proceeds.
+          // eslint-disable-next-line no-console
+          console.warn(`[azure-oauth] SP auto-provisioning skipped for sub ${sub.id}: ${sp.error}`);
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(`[azure-oauth] SP auto-provisioning threw: ${e instanceof Error ? e.message : e}`);
+      }
+    }
   } catch (e) {
     return done(popup, false, e instanceof Error ? e.message : "Could not save the Azure provider.");
   }

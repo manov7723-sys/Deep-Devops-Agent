@@ -1,10 +1,34 @@
 import { NextResponse } from "next/server";
 import { PostMessageRequest } from "@/lib/api/schemas/agentops-api";
 import { requireProjectAccess } from "@/lib/projects/permissions";
-import { postUserMessage } from "@/lib/agentops/chat";
+import { getThreadDetail, postUserMessage } from "@/lib/agentops/chat";
 import { runAgentTurn } from "@/lib/agent/agent";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
+
+/**
+ * List a single thread's messages in the flat SeedChatMessage shape the chat
+ * UI uses. The right-side history rail hits this when the user clicks a past
+ * thread to load it into the main chat pane.
+ */
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ slug: string; id: string }> },
+) {
+  const { slug, id } = await ctx.params;
+  const gate = await requireProjectAccess(slug, "viewer");
+  if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
+  const detail = await getThreadDetail(gate.access.project.id, id);
+  if (!detail) return NextResponse.json({ ok: false, code: "thread_not_found" }, { status: 404 });
+  return NextResponse.json(
+    detail.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      text: m.text,
+      createdAt: m.createdAt,
+    })),
+  );
+}
 
 /**
  * Post a user message AND let the agent reply in the same round-trip.

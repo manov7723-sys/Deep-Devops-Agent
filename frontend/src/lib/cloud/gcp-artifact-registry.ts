@@ -154,16 +154,76 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
   if (!poolCreate.ok && !/already exists/i.test(poolCreate.error)) return { ok: false, error: `Creating the workload identity pool failed. ${poolCreate.error}` };
   if (poolCreate.ok && poolCreate.data.name) await awaitLro(token, poolCreate.data.name);
 
-  // 2 — OIDC provider in the pool, scoped to this GitHub repo.
+  // 2 — OIDC provider in the pool, scoped to this GitHub repo. The pool +
+  // provider are SHARED across every deploy_my_app run for this GCP project,
+  // so the attribute condition must accept EVERY repo the app is wired to —
+  // not just the first one that created the provider. On create: single-repo
+  // condition. On already-exists: read the current condition and PATCH it to
+  // append the new repo (idempotent — no-op if already listed) so future
+  // OIDC tokens from this repo are accepted.
   const provBase = `${poolBase}/${POOL_ID}/providers`;
+  const newRepoClause = `assertion.repository == "${repoFullName}"`;
   const provCreate = await gapi<{ name?: string }>(token, `${provBase}?workloadIdentityPoolProviderId=${PROVIDER_ID}`, "POST", {
     displayName: "GitHub",
     oidc: { issuerUri: "https://token.actions.githubusercontent.com" },
-    attributeMapping: { "google.subject": "assertion.sub", "attribute.repository": "assertion.repository" },
-    attributeCondition: `assertion.repository == "${repoFullName}"`,
+    attributeMapping: {
+      "google.subject": "assertion.sub",
+      "attribute.repository": "assertion.repository",
+      // Owner mapping isn't strictly needed for the current binding shape but
+      // keeps the provider usable for future org-wide bindings without a
+      // re-PATCH; the merge path above expects it too.
+      "attribute.repository_owner": "assertion.repository_owner",
+    },
+    attributeCondition: newRepoClause,
   });
   if (!provCreate.ok && !/already exists/i.test(provCreate.error)) return { ok: false, error: `Creating the OIDC provider failed. ${provCreate.error}` };
   if (provCreate.ok && provCreate.data.name) await awaitLro(token, provCreate.data.name);
+
+  if (!provCreate.ok) {
+    // Provider already exists — read it, then:
+    //   (a) extend attributeCondition to include THIS repo (multi-repo pool)
+    //   (b) rewrite attributeMapping to include `attribute.repository`
+    //       (some providers were created by earlier versions of this tool
+    //       without that mapping, or manually via gcloud without it — my
+    //       binding on principalSet://.../attribute.repository/<repo> never
+    //       matches unless the mapping is present)
+    const provUrl = `${provBase}/${PROVIDER_ID}`;
+    const existing = await gapi<{
+      attributeCondition?: string;
+      attributeMapping?: Record<string, string>;
+    }>(token, provUrl);
+    if (!existing.ok) return { ok: false, error: `Reading the existing OIDC provider failed. ${existing.error}` };
+    const current = (existing.data.attributeCondition ?? "").trim();
+    const currentMapping = existing.data.attributeMapping ?? {};
+    const patchBody: { attributeCondition?: string; attributeMapping?: Record<string, string> } = {};
+    const updateFields: string[] = [];
+    if (!current.includes(newRepoClause)) {
+      patchBody.attributeCondition = current ? `${current} || ${newRepoClause}` : newRepoClause;
+      updateFields.push("attributeCondition");
+    }
+    const expectedMapping: Record<string, string> = {
+      "google.subject": "assertion.sub",
+      "attribute.repository": "assertion.repository",
+      "attribute.repository_owner": "assertion.repository_owner",
+    };
+    const mappingNeedsUpdate = Object.entries(expectedMapping).some(
+      ([k, v]) => currentMapping[k] !== v,
+    );
+    if (mappingNeedsUpdate) {
+      patchBody.attributeMapping = { ...currentMapping, ...expectedMapping };
+      updateFields.push("attributeMapping");
+    }
+    if (updateFields.length > 0) {
+      const patch = await gapi<{ name?: string }>(
+        token,
+        `${provUrl}?updateMask=${updateFields.join(",")}`,
+        "PATCH",
+        patchBody,
+      );
+      if (!patch.ok) return { ok: false, error: `Updating the OIDC provider (${updateFields.join(", ")}) failed. ${patch.error}` };
+      if (patch.data.name) await awaitLro(token, patch.data.name);
+    }
+  }
 
   // 3 — Service account (ignore ALREADY_EXISTS).
   const saId = "deepagent-gha";
@@ -178,10 +238,41 @@ export async function setupGithubWif(cloudProviderId: string, repoFullName: stri
   const grant = await addProjectBinding(token, project, `serviceAccount:${saEmail}`, "roles/artifactregistry.writer");
   if (!grant.ok) return { ok: false, error: `Granting Artifact Registry Writer to the service account failed. ${grant.error}` };
 
-  // 5 — Let the GitHub repo principal impersonate the SA.
+  // 5 — Let the GitHub repo principal impersonate the SA. We grant BOTH:
+  //   - roles/iam.workloadIdentityUser: canonical WIF impersonation grant,
+  //     includes iam.serviceAccounts.getAccessToken.
+  //   - roles/iam.serviceAccountTokenCreator: some auth flows in the docker
+  //     credential helper path check permissions against the tokenCreator
+  //     role explicitly instead of workloadIdentityUser; granting both closes
+  //     that gap. Belt-and-suspenders for the `gcloud.auth.docker-helper:
+  //     'iam.serviceAccounts.getAccessToken' denied` failure the user hits
+  //     even when the workloadIdentityUser binding is present.
   const principal = `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${repoFullName}`;
   const impersonate = await addServiceAccountBinding(token, project, saEmail, principal, "roles/iam.workloadIdentityUser");
   if (!impersonate.ok) return { ok: false, error: `Binding the GitHub repo to the service account failed. ${impersonate.error}` };
+  const tokenCreator = await addServiceAccountBinding(token, project, saEmail, principal, "roles/iam.serviceAccountTokenCreator");
+  if (!tokenCreator.ok) return { ok: false, error: `Granting tokenCreator on the service account failed. ${tokenCreator.error}` };
+
+  // Verify the binding is actually visible on the SA policy — protects against
+  // "setIamPolicy returned 200 but read-after-write shows stale state" cases
+  // that would otherwise silently roll back at the runner side.
+  const verify = await gapi<{ bindings?: Array<{ role: string; members: string[] }> }>(
+    token,
+    `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts/${saEmail}:getIamPolicy`,
+    "POST",
+    {},
+  );
+  if (verify.ok) {
+    const wiu = verify.data.bindings?.find((b) => b.role === "roles/iam.workloadIdentityUser");
+    if (!wiu?.members?.includes(principal)) {
+      return {
+        ok: false,
+        error:
+          `Verified read of SA policy shows the workloadIdentityUser binding for ${repoFullName} did not stick. ` +
+          `Retry, or add it manually in the GCP console (Service accounts → ${saEmail} → Permissions → Grant Access).`,
+      };
+    }
+  }
 
   return {
     ok: true,

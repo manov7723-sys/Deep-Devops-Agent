@@ -36,7 +36,22 @@ export type CicdRegistry =
       repository: string;
       image: string;
     }
-  | { cloud: "azure"; clientId: string; tenantId: string; subscriptionId: string; registry: string; image: string };
+  | {
+      cloud: "azure";
+      registry: string;
+      image: string;
+      /**
+       * "keyless" → azure/login OIDC with clientId/tenantId/subscriptionId.
+       * "secret"  → docker login with ACR admin creds stored as repo secrets
+       *             under `<secretPrefix>_LOGIN_SERVER/USERNAME/PASSWORD` (the
+       *             OAuth-friendly fallback).
+       */
+      mode?: "keyless" | "secret";
+      clientId?: string;
+      tenantId?: string;
+      subscriptionId?: string;
+      secretPrefix?: string;
+    };
 
 /** Which files to write. Every flag defaults to true (undefined = include). */
 export type FileToggles = {
@@ -159,9 +174,11 @@ function ciWorkflowFor(
       });
     case "azure":
       return generateAcrWorkflow({
+        mode: r.mode ?? "keyless",
         clientId: r.clientId,
         tenantId: r.tenantId,
         subscriptionId: r.subscriptionId,
+        secretPrefix: r.secretPrefix,
         registry: r.registry,
         image: r.image,
         branch,
@@ -400,7 +417,12 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
           }
         : undefined;
     const aks =
-      spec.registry?.cloud === "azure" && spec.aksCluster
+      spec.registry?.cloud === "azure" &&
+      spec.registry.mode !== "secret" &&
+      spec.registry.clientId &&
+      spec.registry.tenantId &&
+      spec.registry.subscriptionId &&
+      spec.aksCluster
         ? {
             clientId: spec.registry.clientId,
             tenantId: spec.registry.tenantId,

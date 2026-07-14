@@ -248,6 +248,49 @@ export function useChatThread(slug: string) {
   });
 }
 
+export type ChatThreadSummary = {
+  id: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageAt: string | null;
+  messageCount: number;
+};
+
+/** List the project's chat threads (newest first) for the history rail. */
+export function useChatThreads(slug: string) {
+  return useQuery({
+    queryKey: pk(slug, "chat", "threads"),
+    queryFn: () => api.get<ChatThreadSummary[]>(`/projects/${slug}/chat/threads`),
+    staleTime: 5_000,
+  });
+}
+
+/** Fetch a specific thread's messages when the user clicks it in the rail. */
+export function useChatThreadMessages(slug: string, threadId: string | null) {
+  return useQuery({
+    queryKey: pk(slug, "chat", "threads", threadId ?? "_none"),
+    queryFn: () =>
+      api.get<SeedChatMessage[]>(`/projects/${slug}/chat/threads/${threadId}/messages`),
+    enabled: !!threadId,
+    staleTime: 5_000,
+  });
+}
+
+/** Create a new empty chat thread (New chat button). */
+export function useCreateChatThread(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (title?: string) =>
+      api.post<{ ok: boolean; threadId: string }>(`/projects/${slug}/chat/threads`, {
+        title,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: pk(slug, "chat", "threads") });
+    },
+  });
+}
+
 /** Clear the project's chat (deletes threads + messages) and reset the view. */
 export function useClearChat(slug: string) {
   const qc = useQueryClient();

@@ -27,6 +27,8 @@ import { setupGithubOidcEcrTool } from "./setup-github-oidc-ecr";
 import { grantEksAccessTool } from "./grant-eks-access";
 import { listEcrReposTool } from "./list-ecr-repos";
 import { analyzeAppServicesTool } from "./analyze-app-services";
+import { listRepoBranchesTool } from "./list-repo-branches";
+import { repairCdKubeconfigTool } from "./repair-cd-kubeconfig";
 import { deployMyAppTool } from "./deploy-my-app";
 import { listDockerfileStacksTool } from "./list-dockerfile-stacks";
 import { generateDockerfileTool } from "./generate-dockerfile";
@@ -35,8 +37,14 @@ import { verifyDockerBuildTool } from "./verify-docker-build";
 import { savePipelineToProjectTool } from "./save-pipeline-to-project";
 import { runTerraformTool } from "./run-terraform";
 import { provisionEksTool } from "./provision-eks";
+import { provisionAksTool } from "./provision-aks";
+import { provisionGkeTool } from "./provision-gke";
 import { provisionProxmoxVmTool } from "./provision-proxmox-vm";
+import { runVmCommandTool } from "./run-vm-command";
+import { generateProxmoxDeployWorkflowTool } from "./generate-proxmox-deploy-workflow";
+import { deployToProxmoxVmTool } from "./deploy-to-proxmox-vm";
 import { requestInfraApprovalTool } from "./request-infra-approval";
+import { applyRepoTerraformTool } from "./apply-repo-terraform";
 import { listK8sManifestKindsTool } from "./list-k8s-manifest-kinds";
 import { generateK8sManifestTool } from "./generate-k8s-manifest";
 import { applyK8sManifestTool } from "./apply-k8s-manifest";
@@ -52,7 +60,8 @@ import { getProjectCostTool } from "./get-project-cost";
 import { analyzeCostOptimizationTool } from "./cost-optim-tool";
 import { estimateInfraCostTool } from "./estimate-infra-cost";
 import { listArtifactRegistriesTool, createArtifactRegistryTool, setupGcpGithubWifTool, generateGarWorkflowTool } from "./gcp-registry-tools";
-import { listAcrTool, createAcrTool, setupAzureGithubOidcTool, generateAcrWorkflowTool } from "./azure-registry-tools";
+import { repairGcpWifBindingTool } from "./repair-gcp-wif";
+import { listAcrTool, createAcrTool, setupAzureGithubOidcTool, generateAcrWorkflowTool, repairAzureAcrPushAuthTool } from "./azure-registry-tools";
 import { listDeployTargetsTool, listRegistryImagesTool, deployAppTool, deploymentStatusTool, writeCdFilesTool, waitForWorkflowRunTool, setKubeconfigSecretTool } from "./deploy-tools";
 import { scheduleDeploymentTool, listScheduledDeploymentsTool, cancelScheduledDeploymentTool } from "./scheduled-deploy-tools";
 import { rollbackDeploymentTool, listRolloutHistoryTool } from "./rollback-tools";
@@ -141,16 +150,24 @@ export const ALL_TOOLS: Tool[] = [
   createArtifactRegistryTool,
   setupGcpGithubWifTool,
   generateGarWorkflowTool,
+  repairGcpWifBindingTool,
   // Azure CI → ACR (keyless OIDC)
   listAcrTool,
   createAcrTool,
   setupAzureGithubOidcTool,
   generateAcrWorkflowTool,
+  repairAzureAcrPushAuthTool,
   // Infra (IaC)
   provisionEksTool,
+  provisionAksTool,
+  provisionGkeTool,
   provisionProxmoxVmTool,
+  runVmCommandTool,
+  generateProxmoxDeployWorkflowTool,
+  deployToProxmoxVmTool,
   runTerraformTool,
   requestInfraApprovalTool,
+  applyRepoTerraformTool,
   // Kubernetes manifests
   listK8sManifestKindsTool,
   generateK8sManifestTool,
@@ -180,6 +197,8 @@ export const ALL_TOOLS: Tool[] = [
   // Registry + service analysis for the deploy flow (list ECR repos, detect frontend/backend)
   listEcrReposTool,
   analyzeAppServicesTool,
+  listRepoBranchesTool,
+  repairCdKubeconfigTool,
   // The single from-scratch flow: analyze repo → Dockerfile + CI + manifests → registry → (build → deploy)
   deployMyAppTool,
 ] as Tool[];
@@ -199,7 +218,12 @@ export function getTool(name: string): Tool | undefined {
 const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp" | "proxmox"> = {
   list_ec2_instances: "aws",
   provision_eks: "aws",
+  provision_aks: "azure",
+  provision_gke: "gcp",
   provision_proxmox_vm: "proxmox",
+  run_vm_command: "proxmox",
+  generate_proxmox_deploy_workflow: "proxmox",
+  deploy_to_proxmox_vm: "proxmox",
   setup_cloudwatch_alarms: "aws",
   setup_github_oidc_ecr: "aws",
   generate_ecr_workflow: "aws",
@@ -222,10 +246,12 @@ const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp" | "proxmox"> = {
   create_artifact_registry: "gcp",
   setup_gcp_github_wif: "gcp",
   generate_gar_workflow: "gcp",
+  repair_gcp_wif_binding: "gcp",
   list_acr: "azure",
   create_acr: "azure",
   setup_azure_github_oidc: "azure",
   generate_acr_workflow: "azure",
+  repair_azure_acr_push_auth: "azure",
 };
 
 /**
@@ -240,11 +266,16 @@ const TOOL_GIT_PROVIDER: Record<string, "github"> = {
   generate_ecr_workflow: "github",
   setup_gcp_github_wif: "github",
   generate_gar_workflow: "github",
+  repair_gcp_wif_binding: "github",
   setup_azure_github_oidc: "github",
   generate_acr_workflow: "github",
+  repair_azure_acr_push_auth: "github",
   generate_trivy_workflow: "github",
   set_github_actions_secret: "github",
   deploy_my_app: "github",
+  // Proxmox deploy orchestrator writes .github/workflows/*.yml + sets repo
+  // secrets; only meaningful with a GitHub repo attached.
+  deploy_to_proxmox_vm: "github",
 };
 
 /**

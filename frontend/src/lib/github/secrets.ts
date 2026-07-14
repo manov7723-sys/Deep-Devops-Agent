@@ -29,6 +29,7 @@ function sealedBox(publicKeyB64: string, value: string): string {
 
 /** Create or update a repository Actions secret. */
 export async function setRepoActionsSecret(token: string, fullName: string, name: string, value: string): Promise<Res> {
+  if (!value) return { ok: false, error: `Refusing to write empty value to GitHub secret "${name}".` };
   let pk: Response;
   try {
     pk = await fetch(`${GH}/repos/${fullName}/actions/secrets/public-key`, { headers: headers(token), cache: "no-store" });
@@ -63,7 +64,43 @@ export async function setRepoActionsSecret(token: string, fullName: string, name
     const t = await put.text().catch(() => "");
     return { ok: false, error: `Couldn't set the secret (HTTP ${put.status}). ${t.slice(0, 160)}` };
   }
+
+  // Read-back verification — GitHub's PUT returns 204 even when secrets writes
+  // race and end up missing. The GET returns the secret's metadata (no value)
+  // if it exists, 404 otherwise. Fail loudly if the write didn't stick, so a
+  // downstream CI docker/login-action doesn't hit "Username and password required".
+  const exists = await repoActionsSecretExists(token, fullName, name);
+  if (!exists.ok) return exists;
+  if (!exists.data) {
+    return { ok: false, error: `Secret "${name}" was written but doesn't appear on the repo — retry.` };
+  }
   return { ok: true };
+}
+
+/**
+ * Check whether a repo Actions secret exists. GitHub does not expose the value,
+ * but the metadata endpoint returns 200 if the name is present, 404 otherwise.
+ * Used to verify a write actually landed and to preflight CI auth before a
+ * generated workflow runs against missing secrets.
+ */
+export async function repoActionsSecretExists(
+  token: string,
+  fullName: string,
+  name: string,
+): Promise<{ ok: true; data: boolean } | { ok: false; error: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`${GH}/repos/${fullName}/actions/secrets/${encodeURIComponent(name)}`, {
+      headers: headers(token),
+      cache: "no-store",
+    });
+  } catch (e) {
+    return { ok: false, error: `Network error reading the secret: ${e instanceof Error ? e.message : "error"}` };
+  }
+  if (res.status === 200) return { ok: true, data: true };
+  if (res.status === 404) return { ok: true, data: false };
+  const t = await res.text().catch(() => "");
+  return { ok: false, error: `Couldn't check the secret (HTTP ${res.status}). ${t.slice(0, 160)}` };
 }
 
 /**

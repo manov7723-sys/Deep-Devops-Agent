@@ -6,7 +6,11 @@ import { runAgentTurnStream } from "@/lib/agent/agent";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
-const PostBody = z.object({ text: z.string().trim().min(1).max(8000) });
+const PostBody = z.object({
+  text: z.string().trim().min(1).max(8000),
+  /** Optional target thread. If omitted, uses the most-recent thread (or creates one). */
+  threadId: z.string().uuid().optional(),
+});
 
 /**
  * POST /projects/[slug]/chat/stream
@@ -40,12 +44,28 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     });
   }
 
-  // Find or create the default thread for this project.
-  let thread = await prisma.chatThread.findFirst({
-    where: { projectId: gate.access.project.id },
-    orderBy: { updatedAt: "desc" },
-    select: { id: true },
-  });
+  // Resolve target thread. Priority: explicit threadId from the client (must
+  // belong to this project) → most-recent thread → create a fresh one.
+  let thread: { id: string } | null = null;
+  if (parsed.data.threadId) {
+    thread = await prisma.chatThread.findFirst({
+      where: { id: parsed.data.threadId, projectId: gate.access.project.id },
+      select: { id: true },
+    });
+    if (!thread) {
+      return new Response(JSON.stringify({ ok: false, code: "thread_not_found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+  if (!thread) {
+    thread = await prisma.chatThread.findFirst({
+      where: { projectId: gate.access.project.id },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true },
+    });
+  }
   if (!thread) {
     const created = await createThread(
       gate.access.project.id,
@@ -100,8 +120,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      // First event: the saved user message so the client can swap its
-      // optimistic placeholder for the real DB row.
+      // Tell the client which thread this turn landed in — critical when
+      // the client didn't supply a threadId and we picked/created one, so
+      // the UI can switch its active thread + refresh the history rail.
+      send(controller, "thread", { id: threadId });
+      // Then the saved user message so the client can swap its optimistic
+      // placeholder for the real DB row.
       send(controller, "user_message", userMessage);
 
       try {

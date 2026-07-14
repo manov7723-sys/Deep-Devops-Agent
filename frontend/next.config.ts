@@ -15,7 +15,16 @@ const nextConfig: NextConfig = {
   },
   // argon2 ships a native .node binding; don't bundle, load via Node at runtime.
   // @prisma/client + @prisma/engines must also be external for the same reason.
-  serverExternalPackages: ["argon2", "@prisma/client", "@prisma/engines"],
+  // ssh2 pulls in cpu-features (native) for its cipher path — Turbopack chokes
+  // on the .node binding unless we mark it external. `cpu-features` is listed
+  // explicitly too so its resolve doesn't get eagerly followed from ssh2.
+  serverExternalPackages: [
+    "argon2",
+    "@prisma/client",
+    "@prisma/engines",
+    "ssh2",
+    "cpu-features",
+  ],
 };
 
 export default nextConfig;

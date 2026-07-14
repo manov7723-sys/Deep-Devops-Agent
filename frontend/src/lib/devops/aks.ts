@@ -76,7 +76,7 @@ export type AksDefaults = Omit<AksSpec, "name" | "resourceGroup">;
 
 export const AKS_DEFAULTS: AksDefaults = {
   location: "eastus",
-  kubernetesVersion: "1.30",
+  kubernetesVersion: "1.33",
   vmSize: "Standard_D4s_v3",
   desiredNodes: 2,
   minNodes: 2,
@@ -111,7 +111,7 @@ export const AKS_DEFAULTS: AksDefaults = {
 };
 
 export const AKS_VM_SIZES = ["Standard_B2s", "Standard_DS2_v2", "Standard_D2s_v3", "Standard_D4s_v3", "Standard_D8s_v3", "Standard_E4s_v3"];
-export const AKS_K8S_VERSIONS = ["1.31", "1.30", "1.29", "1.28"];
+export const AKS_K8S_VERSIONS = ["1.36", "1.35", "1.34", "1.33", "1.32", "1.31", "1.30"];
 export const AKS_DISK_SIZES = [64, 128, 256, 512];
 export const AKS_REGIONS = [
   "eastus", "eastus2", "westus2", "westus3", "centralus", "northeurope", "westeurope",
@@ -281,6 +281,15 @@ ${clusterFlags}
 ${blocks.join("\n\n")}
 
   tags = local.tags
+
+  # AKS creates typically take 15-25 min; private clusters + workload identity
+  # + monitoring add-ons can push past 30. Give the provider room so it
+  # doesn't give up while Azure is still working.
+  timeouts {
+    create = "45m"
+    update = "45m"
+    delete = "30m"
+  }
 }
 ${appPool ? `
 resource "azurerm_kubernetes_cluster_node_pool" "app" {
@@ -316,9 +325,11 @@ output "update_kubeconfig_command" {
 }
 `;
 
+  // Flat, relative filenames — the caller supplies the destination folder;
+  // embedding it here too would double it up.
   return {
-    [`terraform/aks/${cluster}/versions.tf`]: versions,
-    [`terraform/aks/${cluster}/main.tf`]: main,
-    [`terraform/aks/${cluster}/outputs.tf`]: outputs,
+    "versions.tf": versions,
+    "main.tf": main,
+    "outputs.tf": outputs,
   };
 }

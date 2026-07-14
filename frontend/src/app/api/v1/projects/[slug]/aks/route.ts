@@ -10,6 +10,7 @@ import {
   AKS_DISK_SIZES,
   type AksSpec,
 } from "@/lib/devops/aks";
+import { envBySlugAndKey } from "@/lib/devops/envs";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
@@ -88,6 +89,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     kedaVpa: a.kedaVpa,
   };
 
+  // Remote state (Azure): read from the env's stored backend if one is set on
+  // the Connection page. Nothing to persist here — the state fields live on
+  // the env, updated only via the tf-backend endpoint. Blank fields fall back
+  // to local state.
+  if (a.envKey) {
+    const env = await envBySlugAndKey(gate.access.project.id, a.envKey);
+    if (env?.tfBackendAzureStorageAccount && env.tfBackendAzureContainer) {
+      spec.stateResourceGroup = env.tfBackendAzureResourceGroup ?? undefined;
+      spec.stateStorageAccount = env.tfBackendAzureStorageAccount;
+      spec.stateContainer = env.tfBackendAzureContainer;
+    }
+  }
+
   const files = buildAksTerraform(spec);
 
   const meta = extractRequestMeta(req);
@@ -108,6 +122,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     location: a.location,
     fileCount: Object.keys(files).length,
     files,
-    hasRemoteState: false,
+    hasRemoteState: !!(spec.stateStorageAccount && spec.stateContainer),
   });
 }

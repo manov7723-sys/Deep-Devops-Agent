@@ -15,8 +15,22 @@ import { createHash, randomBytes } from "node:crypto";
 
 const LOGIN = "https://login.microsoftonline.com";
 const ARM = "https://management.azure.com";
-/** Delegated ARM scope + offline_access (so we get a refresh token) + identity. */
+/** Delegated ARM scope + offline_access (so we get a refresh token) + identity.
+ *  Kept ARM-only — Azure v2 token requests must be single-audience, so the
+ *  Graph token used for SP auto-provisioning is acquired SEPARATELY from the
+ *  refresh token via `refreshAzureGraphToken` below. */
 const OAUTH_SCOPE = `${ARM}/user_impersonation offline_access openid profile`;
+/** Delegated Graph scope for creating AD apps + client secrets. Requested from
+ *  the refresh token AFTER sign-in, so it only requires the app registration
+ *  to declare this permission + admin consent — no scope changes in the
+ *  interactive redirect. Set AZURE_OAUTH_GRAPH_ENABLED=true once the portal
+ *  side is ready; the callback will try SP auto-provisioning silently and skip
+ *  it (falling through to the existing OAuth-only path) if disabled. */
+const GRAPH_SCOPE = "https://graph.microsoft.com/Application.ReadWrite.OwnedBy offline_access";
+
+export function azureOAuthGraphEnabled(): boolean {
+  return process.env.AZURE_OAUTH_GRAPH_ENABLED === "true";
+}
 
 export function azureOAuthConfigured(): boolean {
   return !!(process.env.AZURE_OAUTH_CLIENT_ID && process.env.AZURE_OAUTH_CLIENT_SECRET);
@@ -126,6 +140,23 @@ export function refreshAzureToken(refreshToken: string, tenantOverride?: string)
     // account that owns a subscription, the generic /organizations/ authority
     // yields a "live.com#…" passthrough token that can't run privileged AKS
     // actions; targeting the subscription's real tenant fixes that.
+    tenantOverride,
+  );
+}
+
+/** Mint a Graph-audience access token from the same refresh token. Used for
+ *  SP auto-provisioning right after OAuth sign-in. Returns AADSTS-consent-
+ *  needed errors verbatim so the caller can log them and gracefully skip
+ *  auto-provisioning (the OAuth flow itself remains successful). */
+export function refreshAzureGraphToken(refreshToken: string, tenantOverride?: string): Promise<TokenResult> {
+  return tokenRequest(
+    new URLSearchParams({
+      client_id: process.env.AZURE_OAUTH_CLIENT_ID ?? "",
+      client_secret: process.env.AZURE_OAUTH_CLIENT_SECRET ?? "",
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      scope: GRAPH_SCOPE,
+    }),
     tenantOverride,
   );
 }

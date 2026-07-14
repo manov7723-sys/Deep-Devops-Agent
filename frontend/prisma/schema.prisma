@@ -722,6 +722,12 @@ model Project {
   cloud       String? // the cloud this project targets: "aws" | "gcp" | "azure" (locks the Connect-provider UI)
   activeEnvKey String? // the project's ACTIVE environment — env-scoped pages default to it (user-selectable)
   alertEmails String[]     @default([]) // extra addresses that get alert emails (managed in the UI)
+  // Ed25519 deploy keypair used to SSH into Proxmox VMs the project provisions.
+  // Public key is baked into VM cloud-init on create; private key is stored
+  // AES-GCM-encrypted (via lib/auth/crypto) and copied into a repo secret when
+  // wiring the Proxmox deploy workflow. Both null until first Proxmox deploy.
+  deployPublicKey     String? // OpenSSH format ("ssh-ed25519 AAAA… deploy@dda")
+  deployPrivateKeyEnc String? // AES-256-GCM encrypted private key (PEM)
   archivedAt  DateTime? // "Archive project" (reversible) — read-only, agents paused
   deletedAt   DateTime? // soft-delete; retained for undo/audit before hard purge
   createdAt   DateTime     @default(now())
@@ -763,6 +769,7 @@ model Project {
   settings          ProjectSetting?
   costSnapshots     CostSnapshot[]
   costTrend         CostTrendPoint[]
+  tfRuns            TfRun[]
 
   @@index([ownerId])
 }
@@ -946,6 +953,20 @@ model Env {
   tfBackendBucket     String?
   tfBackendRegion     String?
   tfBackendTable      String?
+  /**
+   * GCP remote-state backend: single GCS bucket per env. GCS uses object
+   * generations for locking, so no separate lock table is needed. Null means
+   * "no GCS backend configured yet" — the tool falls back to local state.
+   */
+  tfBackendGcsBucket  String?
+  /**
+   * Azure remote-state backend: resource group + storage account + blob
+   * container. Azure uses blob leases for locking natively (no separate lock
+   * table needed). All three nullable — populated together or not at all.
+   */
+  tfBackendAzureResourceGroup   String?
+  tfBackendAzureStorageAccount  String?
+  tfBackendAzureContainer       String?
   promotionRank       Int      @default(0) // ordering: alpha(0) -> beta(1) -> release(2)
   currentDeploymentId String?  @unique @db.Uuid // active deployment; re-point to roll back
   createdAt           DateTime @default(now())
@@ -966,9 +987,44 @@ model Env {
   tasks             Task[]
   securityBindings  EnvSecurityBinding[]
   costByEnv         CostByEnv[]
+  tfRuns            TfRun[]
 
   @@unique([projectId, key])
   @@index([projectId])
+}
+
+// Persistent Terraform pipeline run. Mirrors what used to live only in the
+// runner's in-memory Map (which vanished on process restart / HMR). The
+// runner still keeps a live copy for streaming logs; this row is upserted at
+// each stage boundary so history + rerun capability survive restarts.
+//
+// stages / sourceFiles / sourceBackend are JSON because their shapes are
+// tightly coupled to code in lib/devops/terraform-run.ts — modelling them as
+// separate tables would spread the schema across everywhere the runner
+// updates a stage.
+model TfRun {
+  id              String    @id // "tf_<random>" — set by runner, not a uuid
+  projectId       String    @db.Uuid
+  envId           String    @db.Uuid
+  envKey          String
+  cloudProviderId String?   @db.Uuid
+  name            String
+  action          String // "plan" | "apply"
+  status          String // "queued" | "running" | "succeeded" | "failed"
+  stages          Json      @default("[]") // TfStage[]
+  sourceFiles     Json      @default("{}") // Record<path, content> — replays via Rerun
+  sourceStack     String?
+  sourceBackend   Json? // TfBackendCfg | null
+  errorMessage    String?
+  createdAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  env     Env     @relation(fields: [envId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, envId, createdAt(sort: Desc)])
+  @@index([envId, createdAt(sort: Desc)])
 }
 
 // Immutable deployment snapshot — the unit of rollback. Each deploy records the
@@ -1639,6 +1695,18 @@ model CloudProvider {
   // access key + secret (KV v2). The secrets never touch Postgres — the runner
   // reads them from Vault at execution time. Null = no long-lived keys stored.
   credVaultPath String?
+  // Hybrid Azure auth. Populated when the OAuth callback auto-provisions a
+  // Service Principal via Microsoft Graph (create AD app + password credential +
+  // Contributor role assignment). Every keyless deploy / cluster op (federated
+  // credentials, AKS admin grant, ACR OIDC) prefers these when present, so an
+  // OAuth-connected project never falls back to ACR admin secrets.
+  //   spClientId        = the auto-provisioned app registration's client id
+  //   spClientSecretEnc = encrypted client secret (same AES-256-GCM as externalId)
+  // Null on OAuth providers where auto-provisioning failed (permission consent
+  // missing or the signed-in user isn't subscription Owner) and on legacy full-
+  // SP connections (which still use roleArn + externalId for backward compat).
+  spClientId        String?
+  spClientSecretEnc String?
   region     String
   // Azure active context (the agent remembers the user's picks per project):
   resourceGroup    String? // active Azure resource group

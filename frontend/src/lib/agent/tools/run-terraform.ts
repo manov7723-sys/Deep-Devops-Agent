@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { startTerraformRun } from "@/lib/devops/terraform-run";
+import { pickBackendForEnv } from "@/lib/devops/envs";
 import type { Tool } from "./types";
 
 type Input = {
@@ -79,6 +80,11 @@ export const runTerraformTool: Tool<Input, Output> = {
         tfBackendBucket: true,
         tfBackendRegion: true,
         tfBackendTable: true,
+        tfBackendGcsBucket: true,
+        tfBackendAzureResourceGroup: true,
+        tfBackendAzureStorageAccount: true,
+        tfBackendAzureContainer: true,
+        cloudProvider: { select: { kind: true } },
       },
     });
     if (!env) {
@@ -87,13 +93,14 @@ export const runTerraformTool: Tool<Input, Output> = {
     if (input.action === "apply" && !env.cloudProviderId) {
       return {
         ok: false,
-        error: `Env "${input.envKey}" has no cloud provider connected, so apply can't authenticate. Connect AWS on the Cloud providers tab, or use action='plan'.`,
+        error: `Env "${input.envKey}" has no cloud provider connected, so apply can't authenticate. Connect a cloud on the Cloud providers tab, or use action='plan'.`,
       };
     }
 
-    const backend = env.tfBackendBucket
-      ? { bucket: env.tfBackendBucket, region: env.tfBackendRegion ?? "us-east-1", table: env.tfBackendTable ?? undefined }
-      : null;
+    // Pick the backend that matches the env's cloud (S3 for AWS, GCS for GCP,
+    // azurerm for Azure) — never blindly S3, which used to force AWS creds
+    // onto every apply regardless of cloud.
+    const backend = pickBackendForEnv(env);
 
     const run = startTerraformRun({
       projectId: ctx.projectId,

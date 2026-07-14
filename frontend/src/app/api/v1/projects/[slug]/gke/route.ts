@@ -10,6 +10,7 @@ import {
   GKE_DISK_SIZES,
   type GkeSpec,
 } from "@/lib/devops/gke";
+import { envBySlugAndKey, setEnvGcsBackend } from "@/lib/devops/envs";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
@@ -94,6 +95,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     appMaxNodes: a.appMaxNodes,
   };
 
+  // Remote state (GCS): prefer a bucket entered on this form (persist it onto
+  // the env so future GKE creates reuse it), else fall back to whatever the
+  // env already has. Matches the EKS S3-backend flow.
+  if (a.envKey && a.stateBucket?.trim()) {
+    spec.stateBucket = a.stateBucket.trim();
+    await setEnvGcsBackend(gate.access.project.id, a.envKey, { bucket: spec.stateBucket }).catch(() => {});
+  } else if (a.envKey) {
+    const env = await envBySlugAndKey(gate.access.project.id, a.envKey);
+    if (env?.tfBackendGcsBucket) {
+      spec.stateBucket = env.tfBackendGcsBucket;
+    }
+  }
+
   const files = buildGkeTerraform(spec);
 
   const meta = extractRequestMeta(req);
@@ -114,6 +128,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     location: a.location,
     fileCount: Object.keys(files).length,
     files,
-    hasRemoteState: false,
+    hasRemoteState: !!spec.stateBucket,
   });
 }

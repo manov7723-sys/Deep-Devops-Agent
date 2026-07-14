@@ -18,6 +18,20 @@ import { writeRepoFileTool } from "./write-repo-file";
 import type { Tool } from "./types";
 
 /**
+ * URL-encode a git ref path (e.g. `deploy/dynamic-react-app-abc`) with the
+ * slashes KEPT literal. GitHub's `/git/refs/heads/{ref}` endpoint 404s when
+ * slashes are percent-encoded (`%2F`), so encodeURIComponent breaks any
+ * multi-segment ref name. Preserve the slash structure, encode each segment.
+ */
+function encodeRefPath(ref: string): string {
+  return ref
+    .split("/")
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join("/");
+}
+
+/**
  * deploy_my_app — the single from-scratch flow for non-DevOps users.
  *
  *   1. ANALYZE the repo → every deployable service (one app, OR a monorepo with
@@ -56,6 +70,13 @@ type Input = {
    */
   namespace: string;
   /**
+   * Git branch the CI/CD workflow triggers from — the USER's choice, asked via
+   * list_repo_branches + one ```options``` block ("existing branches + Create
+   * new: <default>"). If the chosen branch doesn't exist on GitHub yet, the
+   * tool auto-creates it off the repo's default branch before pushing.
+   */
+  branch: string;
+  /**
    * Explicit per-service targets (from analyze_app_services + the user's ECR
    * choice). Omit to auto-deploy every detected service with suggested ECR names.
    */
@@ -63,7 +84,7 @@ type Input = {
   /** Base app name (lowercase DNS label). Defaults to the repo name. */
   appName?: string;
   replicas?: number;
-  /** "pr" (default — review then merge) or "direct" (commit to the default branch). */
+  /** "pr" (default — review then merge) or "direct" (commit to the chosen branch). */
   commitMode?: "pr" | "direct";
   overwriteDockerfile?: boolean;
 };
@@ -135,6 +156,14 @@ export const deployMyAppTool: Tool<Input, Output> = {
           "Ask via list_kubernetes_resources(envKey, kind:'namespaces') then an ```options``` question (existing " +
           "namespaces + 'Create new: <default>').",
       },
+      branch: {
+        type: "string",
+        description:
+          "REQUIRED. Git branch the CI/CD workflow will trigger from — the USER's choice, never defaulted to " +
+          "the repo's default silently. Ask via list_repo_branches then an ```options``` question (existing " +
+          "branches + 'Create new: <default>'). If the branch name doesn't exist on GitHub yet, this tool " +
+          "creates it off the repo's default branch before pushing.",
+      },
       services: {
         type: "array",
         description:
@@ -158,7 +187,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
       commitMode: { type: "string", enum: ["pr", "direct"], description: "'pr' (default) opens one PR; 'direct' commits to the default branch." },
       overwriteDockerfile: { type: "boolean", description: "Replace an existing Dockerfile with the vetted template. Default false." },
     },
-    required: ["repoFullName", "envKey", "namespace", "services"],
+    required: ["repoFullName", "envKey", "namespace", "branch", "services"],
     additionalProperties: false,
   },
   async execute(input, ctx) {
@@ -217,10 +246,27 @@ export const deployMyAppTool: Tool<Input, Output> = {
     }
 
     const multi = plans.length > 1;
-    const branch = repo.defaultBranch || "main";
     const short = sanitizeAppName(input.repoFullName.split("/").pop() || "app");
     const baseApp = sanitizeAppName(input.appName || short);
     const tok = await resolveTokenForRepo(repo.id);
+
+    // GATE: the branch is the USER's choice — never default to the repo's
+    // default silently. The model must have asked (options built from
+    // list_repo_branches) and pass the answer. If the branch doesn't exist on
+    // GitHub yet, create it off the repo's default so the workflow can trigger.
+    const requestedBranch = (input.branch || "").trim();
+    if (!requestedBranch) {
+      return {
+        ok: false,
+        error:
+          `Missing the user's branch choice. Do NOT default to "${repo.defaultBranch || "main"}" silently: ` +
+          "(1) call list_repo_branches(repoFullName), (2) ask ONE ```options``` question — the returned branch " +
+          `names plus "Create new: ${repo.defaultBranch || "main"}", (3) call deploy_my_app again with the user's answer as \`branch\`.`,
+      };
+    }
+    const branch = requestedBranch;
+    const branchCreated = await ensureBranchExists(tok, input.repoFullName, branch, repo.defaultBranch || "main");
+    if (!branchCreated.ok) return branchCreated;
 
     // Which cloud is this env on? Drives the registry (ECR / Artifact Registry /
     // ACR) and the keyless CD auth (EKS OIDC / GKE WIF / AKS federated OIDC).
@@ -241,6 +287,33 @@ export const deployMyAppTool: Tool<Input, Output> = {
     if (envRow?.kubeconfigRef) {
       try {
         const kc = await decryptSecret(envRow.kubeconfigRef);
+        // Cross-cloud pre-check: parse the kubeconfig for cluster kind REGARDLESS
+        // of the env's cloudProviderId. If the cluster is on a different cloud
+        // than the connected provider, the CD workflow can't authenticate — the
+        // runner would have no creds for that cloud. Refuse loudly with a
+        // remediation the user can act on, instead of generating a workflow
+        // that fails with "NoCredentials" mid-CD.
+        const wrongCloudEks = cloud !== "aws" && parseEksClusterRef(kc);
+        const wrongCloudGke = cloud !== "gcp" && parseGkeClusterRef(kc);
+        if (wrongCloudEks) {
+          return {
+            ok: false,
+            error:
+              `The env "${input.envKey}"'s cluster is EKS (cluster="${wrongCloudEks.clusterName}", region="${wrongCloudEks.region}") ` +
+              `but the connected cloud provider on this env is "${cloud}". A GitHub Actions CD workflow needs AWS credentials in the runner to reach EKS, ` +
+              `and the app has none because no AWS cloud provider is connected. Connect AWS on the Cloud providers page, then set the env's cloud provider to that AWS one, and rerun deploy_my_app. ` +
+              `Alternatively, deploy server-side with deploy_app — the app has cluster access via the stored kubeconfig and does not need AWS creds in a runner.`,
+          };
+        }
+        if (wrongCloudGke) {
+          return {
+            ok: false,
+            error:
+              `The env "${input.envKey}"'s cluster is GKE (cluster="${wrongCloudGke.clusterName}") ` +
+              `but the connected cloud provider on this env is "${cloud}". A GitHub Actions CD workflow needs a GCP identity to reach GKE, and the app has none. ` +
+              `Connect GCP on the Cloud providers page and set the env's cloud provider to it, then rerun deploy_my_app — or deploy server-side with deploy_app.`,
+          };
+        }
         if (cloud === "aws") eksRef = parseEksClusterRef(kc);
         else if (cloud === "gcp") gkeRef = parseGkeClusterRef(kc);
         else {
@@ -283,6 +356,12 @@ export const deployMyAppTool: Tool<Input, Output> = {
       const manifestDir = multi ? `k8s/${input.envKey}/${svc.name}` : `k8s/${input.envKey}`;
       const keepDockerfile = svc.existingDockerfile && !input.overwriteDockerfile;
       const label = multi ? `[${svc.name}] ` : "";
+      // Static-SPA's vetted Dockerfile ALWAYS COPYs nginx.conf. When we keep an
+      // existing Dockerfile (from a prior deploy attempt), we still need to
+      // commit nginx.conf next to it or `docker build` fails with
+      // "COPY nginx.conf: not found". Only skip nginx.conf when we're also
+      // keeping a NON-static-spa Dockerfile (which won't reference it).
+      const needsNginxConf = svc.stack === "static-spa";
       const commonSpec = {
         stack: svc.stack,
         dockerParams: svc.params,
@@ -290,7 +369,12 @@ export const deployMyAppTool: Tool<Input, Output> = {
         context: svc.path,
         cdWorkflowName,
         cdFileName: cdWorkflowFile,
-        include: { dockerfile: !keepDockerfile, nginx: !keepDockerfile, compose: !keepDockerfile, cdWorkflow: true },
+        include: {
+          dockerfile: !keepDockerfile,
+          nginx: needsNginxConf || !keepDockerfile,
+          compose: !keepDockerfile,
+          cdWorkflow: true,
+        },
         deploy: { appName, namespace, replicas: Math.max(1, input.replicas ?? 1), containerPort: svc.port, env: [], expose, host },
         manifestDir,
       };
@@ -324,18 +408,29 @@ export const deployMyAppTool: Tool<Input, Output> = {
         const azureAcrName = imageName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50) || "app";
         const az = await setupAzureDeployRegistry(cloudProviderId, input.repoFullName, resourceGroup, azureAcrName, location, branch, aksRef ?? undefined);
         if (!az.ok) return { ok: false, error: `Registry/OIDC setup for "${svc.name}" failed: ${az.error}` };
-        registrySteps.push(`${label}ACR "${azureAcrName}" + keyless federated OIDC ready.`);
-        if (aksRef) cdNotes.push(`${label}Granted the CI app AKS admin credential access (keyless CD ready).`);
+        const keyless = az.data.mode === "keyless";
+        registrySteps.push(
+          keyless
+            ? `${label}ACR "${azureAcrName}" + keyless federated OIDC ready.`
+            : `${label}ACR "${azureAcrName}" ready (Azure connection is OAuth — using ACR admin credentials stored as GitHub secrets instead of keyless OIDC).`,
+        );
+        if (aksRef && keyless) cdNotes.push(`${label}Granted the CI app AKS admin credential access (keyless CD ready).`);
+        if (aksRef && !keyless) cdNotes.push(`${label}AKS CD via GitHub Actions isn't wired (needs a service-principal Azure connection). Once the image is pushed, use deploy_app to deploy server-side with the stored kubeconfig.`);
         workflowFile = multi ? `build-and-push-${svc.name}-acr.yml` : "build-and-push-acr.yml";
         const ciWorkflowName = multi ? `Build and push ${svc.name} to ACR` : "Build and push to ACR";
         registryUri = `${az.data.loginServer}/${appName}`;
+        const azureRegistry =
+          az.data.mode === "keyless"
+            ? { cloud: "azure" as const, mode: "keyless" as const, clientId: az.data.clientId, tenantId: az.data.tenantId, subscriptionId: az.data.subscriptionId, registry: az.data.registry, image: appName }
+            : { cloud: "azure" as const, mode: "secret" as const, secretPrefix: az.data.secretPrefix, registry: az.data.registry, image: appName };
         built = buildCicdArtifacts({
           ...commonSpec,
           ciWorkflowName,
           ciFileName: workflowFile,
           registryUseVars: false,
-          registry: { cloud: "azure", clientId: az.data.clientId, tenantId: az.data.tenantId, subscriptionId: az.data.subscriptionId, registry: az.data.registry, image: appName },
-          aksCluster: aksRef ? { clusterName: aksRef.clusterName, resourceGroup: aksRef.resourceGroup } : undefined,
+          registry: azureRegistry,
+          // Only wire the keyless AKS CD when we actually have SP creds.
+          aksCluster: aksRef && keyless ? { clusterName: aksRef.clusterName, resourceGroup: aksRef.resourceGroup } : undefined,
         });
       } else {
         const oidc = await setupGithubOidcEcrTool.execute({ repoFullName: input.repoFullName, ecrRepoName: imageName }, ctx);
@@ -383,9 +478,18 @@ export const deployMyAppTool: Tool<Input, Output> = {
     }
     registrySteps.push(...cdNotes);
 
-    // 4 — Push everything as ONE PR (or straight to the default branch).
+    // 4 — Push everything as ONE PR (or straight to the chosen branch).
+    // For PR mode, use a UNIQUE branch name per run (`deploy/${baseApp}-<n>`)
+    // so a prior failed deploy_my_app attempt CANNOT collide with this one —
+    // eliminates the whole class of "not a fast forward" errors that plagued
+    // reused `deploy/${baseApp}` branches. Trade-off: leaves harmless orphan
+    // branches on the repo; the user can delete stale ones anytime, and the
+    // PR link is stable per run (PR gets closed → source branch may be deleted).
+    // Suffix derived from process.hrtime.bigint so ordering is deterministic
+    // within a run and unique across runs without needing Date.now().
     const direct = input.commitMode === "direct";
-    const pushBranch = direct ? branch : `deploy/${baseApp}`;
+    const runId = process.hrtime.bigint().toString(36).slice(-8);
+    const pushBranch = direct ? branch : `deploy/${baseApp}-${runId}`;
     const svcList = deployed.map((d) => `**${d.name}**${d.path ? ` (\`./${d.path}\`)` : ""} → \`${d.imageRef}\``).join("\n- ");
     const prBody =
       `End-to-end pipeline generated by DeepAgent for **${baseApp}**` +
@@ -394,10 +498,19 @@ export const deployMyAppTool: Tool<Input, Output> = {
       allFiles.map((f) => `- \`${f.path}\``).join("\n") +
       `\n\nOn \`${branch}\`: CI builds → scans → pushes each image, then the CD workflow deploys it to the cluster automatically (${eksRef || gkeRef || aksRef ? "keyless — no stored cluster credentials" : "via the KUBECONFIG_B64 secret"}).`;
 
+    // Commit every file to the push branch FIRST (no PR yet), then open the
+    // PR on the LAST file. Previously we opened the PR on file 1, which had
+    // two failure modes: (a) if the PR-open API call failed silently (old
+    // catch-swallow bug), files 2..N still landed but no PR ever opened;
+    // (b) GitHub occasionally 422'd "no commits between branches" when only
+    // one commit existed at PR-open time. Opening on the last commit avoids
+    // both — the branch has all commits by then, and a real failure surfaces
+    // as an explicit error the agent can retry.
     const committed: string[] = [];
     let pullRequest: { number: number; url: string } | undefined;
-    let first = true;
-    for (const f of allFiles) {
+    for (let i = 0; i < allFiles.length; i++) {
+      const f = allFiles[i];
+      const isLast = i === allFiles.length - 1;
       const res = await writeRepoFileTool.execute(
         {
           repoFullName: input.repoFullName,
@@ -405,7 +518,11 @@ export const deployMyAppTool: Tool<Input, Output> = {
           content: f.content,
           branch: pushBranch,
           message: `Add app pipeline for ${baseApp} (DeepAgent)`,
-          openPullRequest: !direct && first,
+          openPullRequest: !direct && isLast,
+          // PR base = the branch the user picked in the deploy-config form,
+          // NOT the repo's default branch. Otherwise CI (which triggers on
+          // push to `branch`) never fires after merging into the default.
+          targetBranch: branch,
           pullRequestBody: prBody,
         },
         ctx,
@@ -413,7 +530,14 @@ export const deployMyAppTool: Tool<Input, Output> = {
       if (!res.ok) return { ok: false, error: `Failed writing ${f.path}: ${res.error}` };
       committed.push(f.path);
       if (res.output.pullRequest) pullRequest = res.output.pullRequest;
-      first = false;
+    }
+    if (!direct && !pullRequest) {
+      return {
+        ok: false,
+        error:
+          `Committed ${committed.length} file(s) to branch "${pushBranch}" but the PR into "${branch}" wasn't opened. ` +
+          `Open it manually from ${input.repoFullName} → New pull request (${pushBranch} → ${branch}), or delete the branch and re-run deploy_my_app.`,
+      };
     }
 
     const watchHint = deployed
@@ -438,3 +562,133 @@ export const deployMyAppTool: Tool<Input, Output> = {
     };
   },
 };
+
+/**
+ * Reset `branch` to the tip of `targetBranch`. Called before writing to the
+ * PR's source branch (`deploy/${baseApp}`) so every deploy_my_app run starts
+ * from a clean state — stale commits from prior failed runs otherwise trip
+ * "Update is not a fast forward" on the ref PATCH inside commitFiles.
+ *
+ * Strategy: if the branch exists, DELETE it first, then create it fresh at
+ * targetBranch's tip. DELETE + CREATE is bulletproof — no history alignment
+ * check applies, unlike PATCH-with-force which GitHub sometimes refuses even
+ * when force:true is set (branch protection edge cases, ref state drift).
+ *
+ * Safe here because deploy/${baseApp} is authored ONLY by this tool; no
+ * user commits get lost. If a PR is open against this branch, GitHub keeps
+ * the PR intact and re-points it at the new commits after we recreate.
+ */
+async function resetBranchToTarget(
+  tok: Awaited<ReturnType<typeof resolveTokenForRepo>>,
+  repoFullName: string,
+  branch: string,
+  targetBranch: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!tok.ok) return { ok: false, error: `Couldn't resolve a GitHub token for "${repoFullName}": ${tok.message}` };
+  const headers = {
+    Authorization: `Bearer ${tok.accessToken}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json",
+  };
+  // Look up target's head sha — the point we want branch to sit at.
+  const target = await fetch(
+    `https://api.github.com/repos/${repoFullName}/git/refs/heads/${encodeRefPath(targetBranch)}`,
+    { headers, cache: "no-store" },
+  ).catch(() => null);
+  if (!target || !target.ok) return { ok: false, error: `Couldn't read target branch "${targetBranch}".` };
+  const targetSha = ((await target.json().catch(() => ({}))) as { object?: { sha?: string } }).object?.sha;
+  if (!targetSha) return { ok: false, error: `Target branch "${targetBranch}" has no sha.` };
+
+  // Does branch exist? If yes, delete it first — no PATCH-force ambiguity.
+  const existing = await fetch(
+    `https://api.github.com/repos/${repoFullName}/git/refs/heads/${encodeRefPath(branch)}`,
+    { headers, cache: "no-store" },
+  ).catch(() => null);
+  if (existing && existing.ok) {
+    const del = await fetch(
+      `https://api.github.com/repos/${repoFullName}/git/refs/heads/${encodeRefPath(branch)}`,
+      { method: "DELETE", headers },
+    ).catch(() => null);
+    if (!del || (del.status !== 204 && del.status !== 422)) {
+      const t = del ? await del.text().catch(() => "") : "network error";
+      return { ok: false, error: `Deleting stale "${branch}" failed (HTTP ${del?.status ?? "?"}). ${t.slice(0, 160)}` };
+    }
+  } else if (existing && existing.status !== 404) {
+    return { ok: false, error: `Unexpected GitHub response reading "${branch}" (HTTP ${existing.status}).` };
+  }
+
+  // Create fresh at target's tip. Retry once on 422 (rare race with a still-
+  // propagating delete) with a brief pause.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const create = await fetch(`https://api.github.com/repos/${repoFullName}/git/refs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: targetSha }),
+    }).catch(() => null);
+    if (!create) return { ok: false, error: `Network error creating "${branch}".` };
+    if (create.status === 201) return { ok: true };
+    if (create.status === 422 && attempt < 2) {
+      // GitHub may still see the just-deleted ref as existing for a moment.
+      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      continue;
+    }
+    const t = await create.text().catch(() => "");
+    return { ok: false, error: `GitHub refused to create "${branch}" (HTTP ${create.status}). ${t.slice(0, 160)}` };
+  }
+  return { ok: false, error: `Timed out recreating "${branch}" after DELETE.` };
+}
+
+/**
+ * Confirm the requested target branch exists on GitHub; if not, create it off
+ * the repo's default branch's tip sha. This is what makes "Create new: staging"
+ * actually work — user picks a new name in the options block and we materialize
+ * it before the first write_repo_file, so CI/CD triggers on push resolve.
+ * Idempotent: creating an existing ref returns 422, which is treated as ok.
+ */
+async function ensureBranchExists(
+  tok: Awaited<ReturnType<typeof resolveTokenForRepo>>,
+  repoFullName: string,
+  branch: string,
+  defaultBranch: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!tok.ok) return { ok: false, error: `Couldn't resolve a GitHub token for "${repoFullName}": ${tok.message}` };
+  const headers = {
+    Authorization: `Bearer ${tok.accessToken}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  // Already exists? Nothing to do.
+  const check = await fetch(
+    `https://api.github.com/repos/${repoFullName}/git/refs/heads/${encodeRefPath(branch)}`,
+    { headers, cache: "no-store" },
+  ).catch(() => null);
+  if (check && check.ok) return { ok: true };
+  if (check && check.status !== 404) {
+    return { ok: false, error: `GitHub returned ${check.status} checking branch "${branch}".` };
+  }
+  // Look up the default branch's tip so we know where to branch from.
+  const base = await fetch(
+    `https://api.github.com/repos/${repoFullName}/git/refs/heads/${encodeRefPath(defaultBranch)}`,
+    { headers, cache: "no-store" },
+  ).catch(() => null);
+  if (!base || !base.ok) {
+    return {
+      ok: false,
+      error: `Couldn't read the default branch "${defaultBranch}" of "${repoFullName}" to branch from — is the repo empty?`,
+    };
+  }
+  const sha = ((await base.json().catch(() => ({}))) as { object?: { sha?: string } }).object?.sha;
+  if (!sha) return { ok: false, error: `Default branch "${defaultBranch}" has no sha.` };
+  // Create it.
+  const create = await fetch(`https://api.github.com/repos/${repoFullName}/git/refs`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
+  }).catch(() => null);
+  if (!create) return { ok: false, error: `Network error creating branch "${branch}".` };
+  if (create.status === 201) return { ok: true };
+  if (create.status === 422) return { ok: true }; // race — someone created it first
+  const t = await create.text().catch(() => "");
+  return { ok: false, error: `GitHub refused to create branch "${branch}" (HTTP ${create.status}). ${t.slice(0, 160)}` };
+}

@@ -150,20 +150,40 @@ export const VaultStatusResponse = z.object({
 export type VaultStatusResponse = z.infer<typeof VaultStatusResponse>;
 
 // ──────────────────────────────────────────────────────────────────
-// Terraform remote-state backend (S3 + DynamoDB lock) per environment
+// Terraform remote-state backend per environment. Two shapes:
+//   • AWS/S3: { bucket, region, table? } (DynamoDB lock table optional)
+//   • GCP/GCS: { gcsBucket } (GCS uses object generations for locking)
+// The endpoint discriminates by field shape.
 // ──────────────────────────────────────────────────────────────────
-export const SetTfBackendRequest = z.object({
+export const SetTfBackendS3Request = z.object({
   bucket: z.string().trim().min(3).max(63),
   region: z.string().trim().min(1).max(40),
-  // DynamoDB lock table is optional (Terraform can run without state locking).
   table: z.string().trim().max(255).optional(),
 });
+export const SetTfBackendGcsRequest = z.object({
+  gcsBucket: z.string().trim().min(3).max(63),
+});
+export const SetTfBackendAzureRequest = z.object({
+  azureResourceGroup: z.string().trim().min(1).max(90),
+  azureStorageAccount: z.string().trim().min(3).max(24),
+  azureContainer: z.string().trim().min(3).max(63),
+});
+export const SetTfBackendRequest = z.union([
+  SetTfBackendS3Request,
+  SetTfBackendGcsRequest,
+  SetTfBackendAzureRequest,
+]);
 export type SetTfBackendRequest = z.infer<typeof SetTfBackendRequest>;
 
 export const TfBackendStatus = z.object({
   bucket: z.string().nullable(),
   region: z.string().nullable(),
   table: z.string().nullable(),
+  gcsBucket: z.string().nullable(),
+  azureResourceGroup: z.string().nullable(),
+  azureStorageAccount: z.string().nullable(),
+  azureContainer: z.string().nullable(),
+  cloudKind: z.string().nullable(),
 });
 export type TfBackendStatus = z.infer<typeof TfBackendStatus>;
 
@@ -182,8 +202,12 @@ export const CreateEksRequest = z.object({
   minNodes: z.number().int().min(1).max(50),
   maxNodes: z.number().int().min(1).max(100),
   endpointPublic: z.boolean().default(true),
-  // Optional: tie the cluster's Terraform state to an env's S3 backend.
+  // Optional: tie the cluster's Terraform state to an env's S3 backend. When
+  // provided, this ALSO persists onto the env (setEnvTfBackend) so future
+  // creates for the same env reuse it without re-asking.
   envKey: z.string().trim().max(60).optional(),
+  stateBucket: z.string().trim().max(63).optional(),
+  stateTable: z.string().trim().max(255).optional(),
   // VPC: create a new one (default) or reuse an existing VPC to avoid the
   // account's VPC-per-region limit. When createVpc=false, existingVpcId is used
   // (subnets auto-discovered unless existingSubnetIds is provided).
@@ -272,6 +296,9 @@ export const CreateGkeRequest = z.object({
   appSpot: z.boolean().optional(),
   appMinNodes: z.number().int().min(0).max(50).optional(),
   appMaxNodes: z.number().int().min(1).max(100).optional(),
+  // Remote state (GCS): bucket. GCS uses object generations for locking,
+  // so no separate lock table is needed. Persisted onto the env when set.
+  stateBucket: z.string().trim().min(3).max(63).optional(),
 });
 export type CreateGkeRequest = z.infer<typeof CreateGkeRequest>;
 

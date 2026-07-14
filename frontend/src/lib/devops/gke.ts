@@ -77,7 +77,7 @@ export type GkeDefaults = Omit<GkeSpec, "name" | "project">;
 
 export const GKE_DEFAULTS: GkeDefaults = {
   location: "us-central1",
-  kubernetesVersion: "1.30",
+  kubernetesVersion: "1.33",
   machineType: "n2-standard-4",
   desiredNodes: 1,
   minNodes: 1,
@@ -111,7 +111,7 @@ export const GKE_DEFAULTS: GkeDefaults = {
 };
 
 export const GKE_MACHINE_TYPES = ["e2-medium", "e2-standard-2", "e2-standard-4", "n2-standard-2", "n2-standard-4", "n2-standard-8"];
-export const GKE_K8S_VERSIONS = ["1.31", "1.30", "1.29", "1.28"];
+export const GKE_K8S_VERSIONS = ["1.36", "1.35", "1.34", "1.33", "1.32", "1.31", "1.30"];
 export const GKE_DISK_TYPES = ["pd-ssd", "pd-balanced", "pd-standard"];
 export const GKE_DISK_SIZES = [50, 100, 150, 200];
 
@@ -316,12 +316,36 @@ ${nodeConfig(spec.appMachineType || spec.machineType, "application", spec.appSpo
   }
 }
 
+# Enable the GCP APIs the cluster + node pools need. Brand-new GCP projects
+# have every API disabled by default, so without these an apply on a fresh
+# project fails with SERVICE_DISABLED (Kubernetes Engine API not enabled).
+# disable_on_destroy = false so terraform destroy doesn't turn them off for
+# any other resources in the project that also depend on them.
+resource "google_project_service" "container" {
+  project            = "${spec.project}"
+  service            = "container.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "compute" {
+  project            = "${spec.project}"
+  service            = "compute.googleapis.com"
+  disable_on_destroy = false
+}
+
 ${networkSection}
 # Regional cluster with the default node pool removed so the node pools below
 # are the single source of truth (manageable size, autoscaling, taints).
 resource "google_container_cluster" "primary" {
   name     = local.cluster_name
   location = local.location
+
+  # Wait for the API enablement before creating — GCP takes ~30-60s to
+  # propagate a fresh service enablement.
+  depends_on = [
+    google_project_service.container,
+    google_project_service.compute,
+  ]
 
   remove_default_node_pool = true
   initial_node_count       = 1
@@ -340,6 +364,15 @@ resource "google_container_cluster" "primary" {
 ${clusterBlocks.join("\n\n")}
 
   resource_labels = local.labels
+
+  # Regional GKE creates legitimately take 20-30 min (control-plane replicas
+  # across zones, ILB, metadata service). Give the provider room so it doesn't
+  # give up while Google is still working.
+  timeouts {
+    create = "45m"
+    update = "45m"
+    delete = "30m"
+  }
 }
 
 resource "google_container_node_pool" "system_nodes" {
@@ -386,9 +419,11 @@ output "update_kubeconfig_command" {
 }
 `;
 
+  // Flat, relative filenames — the caller supplies the destination folder;
+  // embedding it here too would double it up.
   return {
-    [`terraform/gke/${cluster}/versions.tf`]: versions,
-    [`terraform/gke/${cluster}/main.tf`]: main,
-    [`terraform/gke/${cluster}/outputs.tf`]: outputs,
+    "versions.tf": versions,
+    "main.tf": main,
+    "outputs.tf": outputs,
   };
 }

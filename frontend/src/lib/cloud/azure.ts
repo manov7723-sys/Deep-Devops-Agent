@@ -132,24 +132,44 @@ export type DecryptedAzureCreds =
   | { ok: true; tenantId: string; clientId: string; clientSecret: string; subscriptionId: string }
   | { ok: false; error: string };
 
-/** Load + decrypt an Azure provider's Service-Principal credentials. */
+/** Load + decrypt an Azure provider's Service-Principal credentials.
+ *  Prefers the hybrid columns (spClientId + spClientSecretEnc, populated by the
+ *  OAuth callback's auto-provisioning) and falls back to the legacy columns
+ *  (roleArn + externalId) for full-SP connects. */
 export async function getDecryptedAzureCreds(cloudProviderId: string): Promise<DecryptedAzureCreds> {
   const cp = await prisma.cloudProvider.findUnique({
     where: { id: cloudProviderId },
-    select: { kind: true, accountRef: true, accountId: true, roleArn: true, externalId: true },
+    select: {
+      kind: true,
+      accountRef: true,
+      accountId: true,
+      roleArn: true,
+      externalId: true,
+      spClientId: true,
+      spClientSecretEnc: true,
+    },
   });
   if (!cp) return { ok: false, error: "Cloud provider not found." };
   if (cp.kind !== "azure") return { ok: false, error: "Not an Azure provider." };
-  if (!cp.accountId || !cp.roleArn || !cp.externalId) {
-    return { ok: false, error: "Azure provider is missing tenant/client/secret." };
+  if (!cp.accountId) return { ok: false, error: "Azure provider has no tenant id." };
+
+  if (cp.spClientId && cp.spClientSecretEnc) {
+    try {
+      const clientSecret = decryptSecret(cp.spClientSecretEnc);
+      return { ok: true, tenantId: cp.accountId, clientId: cp.spClientId, clientSecret, subscriptionId: cp.accountRef };
+    } catch {
+      return { ok: false, error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision." };
+    }
   }
-  let clientSecret: string;
-  try {
-    clientSecret = decryptSecret(cp.externalId);
-  } catch {
-    return { ok: false, error: "Could not decrypt the Azure client secret. Reconnect the provider." };
+  if (cp.roleArn && cp.externalId) {
+    try {
+      const clientSecret = decryptSecret(cp.externalId);
+      return { ok: true, tenantId: cp.accountId, clientId: cp.roleArn, clientSecret, subscriptionId: cp.accountRef };
+    } catch {
+      return { ok: false, error: "Could not decrypt the Azure client secret. Reconnect the provider." };
+    }
   }
-  return { ok: true, tenantId: cp.accountId, clientId: cp.roleArn, clientSecret, subscriptionId: cp.accountRef };
+  return { ok: false, error: "Azure provider has no service-principal credentials (OAuth-only). Auto-provisioning may not have run yet." };
 }
 
 // Well-known AKS Microsoft Entra **server** application — the audience a
@@ -170,40 +190,66 @@ export async function getAksAadToken(cloudProviderId: string): Promise<AzureToke
 }
 
 /**
- * Get a usable ARM access token for a stored Azure provider, handling BOTH
- * connection methods. Convention on the row: `roleArn` holds the SP client id
- * (Service Principal) and is NULL for OAuth providers, where `externalId` holds
- * the encrypted refresh token instead of a client secret.
+ * Get a usable ARM access token for a stored Azure provider. Three shapes:
+ *   1. LEGACY SP    — roleArn (clientId) + externalId (encrypted secret)
+ *   2. OAUTH only   — externalId (encrypted refresh token), no SP
+ *   3. HYBRID       — externalId (OAuth refresh token) AND
+ *                     spClientId + spClientSecretEnc (auto-provisioned SP).
+ *                     Prefers OAuth for ARM (delegated tokens carry the user's
+ *                     actual RBAC), transparently falls back to SP if the
+ *                     refresh token has been revoked or expired — so an OAuth
+ *                     token going stale never breaks the app for hybrid rows.
  */
 export async function getAzureAccessToken(cloudProviderId: string, tenantOverride?: string): Promise<AzureTokenResult> {
   const cp = await prisma.cloudProvider.findUnique({
     where: { id: cloudProviderId },
-    select: { kind: true, accountId: true, roleArn: true, externalId: true },
+    select: { kind: true, accountId: true, roleArn: true, externalId: true, spClientId: true, spClientSecretEnc: true },
   });
   if (!cp || cp.kind !== "azure") return { ok: false, error: "Not an Azure provider." };
-  if (!cp.externalId) return { ok: false, error: "Azure provider has no stored credentials." };
 
-  let secret: string;
-  try {
-    secret = decryptSecret(cp.externalId);
-  } catch {
-    return { ok: false, error: "Could not decrypt the stored Azure credential. Reconnect the provider." };
-  }
-
-  // Service Principal — client id present. Already scoped to its own tenant.
-  if (cp.roleArn) {
+  // Legacy full-SP row — roleArn + externalId. Client-credentials only.
+  if (cp.roleArn && cp.externalId) {
+    let secret: string;
+    try {
+      secret = decryptSecret(cp.externalId);
+    } catch {
+      return { ok: false, error: "Could not decrypt the stored Azure credential. Reconnect the provider." };
+    }
     return getAzureSpToken({ tenantId: tenantOverride || cp.accountId || "", clientId: cp.roleArn, clientSecret: secret });
   }
 
-  // OAuth — `secret` is a refresh token. Mint an ARM token (optionally against a
-  // specific tenant to avoid personal-account passthrough limits) and rotate the
-  // refresh token if Microsoft issued a new one.
-  const r = await refreshAzureToken(secret, tenantOverride);
-  if (!r.ok) return { ok: false, error: r.error };
-  if (r.tokens.refreshToken && r.tokens.refreshToken !== secret) {
-    await prisma.cloudProvider
-      .update({ where: { id: cloudProviderId }, data: { externalId: encryptSecret(r.tokens.refreshToken) } })
-      .catch(() => {});
+  // OAuth (with or without hybrid SP). Try refresh first — delegated tokens
+  // carry the user's actual RBAC and are the preferred path when working.
+  let oauthErr: string | null = null;
+  if (cp.externalId) {
+    let secret: string;
+    try {
+      secret = decryptSecret(cp.externalId);
+      const r = await refreshAzureToken(secret, tenantOverride);
+      if (r.ok) {
+        if (r.tokens.refreshToken && r.tokens.refreshToken !== secret) {
+          await prisma.cloudProvider
+            .update({ where: { id: cloudProviderId }, data: { externalId: encryptSecret(r.tokens.refreshToken) } })
+            .catch(() => {});
+        }
+        return { ok: true, accessToken: r.tokens.accessToken, expiresIn: r.tokens.expiresIn };
+      }
+      oauthErr = r.error;
+    } catch {
+      oauthErr = "Could not decrypt the stored OAuth refresh token.";
+    }
   }
-  return { ok: true, accessToken: r.tokens.accessToken, expiresIn: r.tokens.expiresIn };
+
+  // Hybrid fallback — auto-provisioned SP for when OAuth refresh fails/expires.
+  if (cp.spClientId && cp.spClientSecretEnc) {
+    let secret: string;
+    try {
+      secret = decryptSecret(cp.spClientSecretEnc);
+    } catch {
+      return { ok: false, error: "Could not decrypt the auto-provisioned SP secret. Reconnect Azure to re-provision." };
+    }
+    return getAzureSpToken({ tenantId: tenantOverride || cp.accountId || "", clientId: cp.spClientId, clientSecret: secret });
+  }
+
+  return { ok: false, error: oauthErr || "Azure provider has no stored credentials." };
 }

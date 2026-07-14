@@ -67,7 +67,7 @@ export type EksDefaults = Omit<EksSpec, "name">;
 
 export const EKS_DEFAULTS: EksDefaults = {
   region: "us-east-1",
-  kubernetesVersion: "1.30",
+  kubernetesVersion: "1.33",
   instanceType: "m5.large",
   desiredNodes: 2,
   minNodes: 2,
@@ -90,7 +90,7 @@ export const EKS_DEFAULTS: EksDefaults = {
 };
 
 export const EKS_INSTANCE_TYPES = ["t3.medium", "t3.large", "m5.large", "m5.xlarge", "m5.2xlarge", "c5.xlarge"];
-export const EKS_K8S_VERSIONS = ["1.31", "1.30", "1.29", "1.28"];
+export const EKS_K8S_VERSIONS = ["1.36", "1.35", "1.34", "1.33", "1.32", "1.31", "1.30"];
 export const EKS_DISK_SIZES = [50, 100, 150, 200];
 export const EKS_CAPACITY_TYPES = ["ON_DEMAND", "SPOT"];
 export const EKS_ACCESS_POLICIES: EksAccessPolicy[] = [
@@ -345,9 +345,12 @@ output "update_kubeconfig_command" {
 }
 `;
 
+  // Flat, relative filenames — the caller (chat form's ghPath, or a chat
+  // tool's `path` input) supplies the destination folder. Embedding it here
+  // too would double it up (e.g. "terraform/eks/x/terraform/eks/x/main.tf").
   return {
-    [`terraform/eks/${cluster}/versions.tf`]: versions,
-    [`terraform/eks/${cluster}/main.tf`]: main,
-    [`terraform/eks/${cluster}/outputs.tf`]: outputs,
+    "versions.tf": versions,
+    "main.tf": main,
+    "outputs.tf": outputs,
   };
 }

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { buildProxmoxVmTerraform, type ProxmoxVmSpec } from "@/lib/devops/proxmox-vm";
+import { getProjectDeployPublicKey } from "@/lib/devops/deploy-keypair";
 import { startTerraformRun } from "@/lib/devops/terraform-run";
 import { writeRepoFileTool } from "./write-repo-file";
 import type { Tool } from "./types";
@@ -17,6 +18,12 @@ type Input = {
   isoFile?: string;
   ipv4?: string;
   gateway?: string;
+  /** Skip the deploy-user + docker cloud-init bake-in. Default false — the VM boots deploy-ready. */
+  skipDeployPrep?: boolean;
+  /** Don't install Docker via cloud-init (still adds the deploy user + SSH key). Default false. */
+  skipInstallDocker?: boolean;
+  /** Datastore with snippets content enabled for cloud-init. Default "local". */
+  snippetsDatastore?: string;
   mode: "push" | "apply" | "push_and_apply";
   repoFullName?: string;
   path?: string;
@@ -63,6 +70,9 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
       isoFile: { type: "string", description: "Boot ISO (e.g. 'local:iso/ubuntu-24.04.iso') when not cloning." },
       ipv4: { type: "string", description: "cloud-init IPv4: 'dhcp' or a CIDR like '10.0.0.50/24'." },
       gateway: { type: "string", description: "cloud-init gateway (with a static ipv4)." },
+      skipDeployPrep: { type: "boolean", description: "Skip auto-baking the deploy user + SSH key. Default false." },
+      skipInstallDocker: { type: "boolean", description: "Skip installing Docker via cloud-init (still adds the deploy user). Default false." },
+      snippetsDatastore: { type: "string", description: "Proxmox datastore with snippets content enabled. Default 'local'." },
       mode: { type: "string", enum: ["push", "apply", "push_and_apply"], description: "Execution mode the user chose." },
       repoFullName: { type: "string", description: "owner/repo to push to (required for push modes)." },
       path: { type: "string", description: "Repo folder for the files. Default terraform/proxmox/<name>." },
@@ -102,6 +112,15 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
       }
     }
 
+    // Bake the project's SSH deploy key into cloud-init unless the caller
+    // opted out. The keypair is generated lazily on first read, so the very
+    // first Proxmox VM in a project mints the pair; every subsequent VM
+    // reuses it. This is what makes run_vm_command + the Proxmox deploy
+    // workflow able to SSH in without any manual key setup.
+    const sshPublicKey = input.skipDeployPrep
+      ? undefined
+      : await getProjectDeployPublicKey(ctx.projectId);
+
     const spec: ProxmoxVmSpec = {
       name: input.name,
       node: (input.node ?? env.cloudProvider?.region ?? "pve").trim(),
@@ -114,6 +133,9 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
       isoFile: input.isoFile,
       ipv4: input.ipv4,
       gateway: input.gateway,
+      sshPublicKey,
+      installDocker: !input.skipInstallDocker,
+      snippetsDatastore: input.snippetsDatastore,
     };
     if (spec.cores < 1 || spec.memoryMB < 128 || spec.diskGB < 1) {
       return { ok: false, error: "cores ≥ 1, memoryMB ≥ 128 and diskGB ≥ 1 are required." };

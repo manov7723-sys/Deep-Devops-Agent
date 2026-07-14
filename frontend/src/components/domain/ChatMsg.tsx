@@ -4,6 +4,7 @@ import { Avatar, Badge, Btn, Icon, type IconName } from "@/components/ui";
 import { MarkdownText } from "@/components/domain/MarkdownText";
 import { ProxmoxVmBox } from "@/components/domain/ProxmoxVmBox";
 import { CicdSetupBox } from "@/components/domain/CicdSetupBox";
+import { OptionsFormBox, type OptionsFormData } from "@/components/domain/OptionsFormBox";
 import { EksChatBox } from "@/components/domain/EksChatBox";
 import { GkeChatBox } from "@/components/domain/GkeChatBox";
 import { AksChatBox } from "@/components/domain/AksChatBox";
@@ -31,6 +32,7 @@ type ApprovalCardData = { approvalId: string };
 type Segment =
   | { type: "text"; value: string }
   | { type: "options"; data: OptionsData }
+  | { type: "options-form"; data: OptionsFormData }
   | { type: "proxmox-vm" }
   | { type: "cicd-setup" }
   | { type: "eks-create" }
@@ -142,7 +144,7 @@ function dedupeOptions(segs: Segment[]): Segment[] {
  */
 function parseSegments(text: string): Segment[] {
   const segs: Segment[] = [];
-  const re = /```(options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
+  const re = /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
@@ -153,6 +155,21 @@ function parseSegments(text: string): Segment[] {
       try {
         const data = JSON.parse(m[2].trim()) as ApprovalCardData;
         if (data && typeof data.approvalId === "string" && data.approvalId) segs.push({ type: "approval-card", data });
+        else segs.push({ type: "text", value: m[0] });
+      } catch {
+        segs.push({ type: "text", value: m[0] });
+      }
+    } else if (m[1] === "options-form") {
+      try {
+        const data = JSON.parse(m[2].trim()) as OptionsFormData;
+        const questionsOk =
+          data &&
+          Array.isArray(data.questions) &&
+          data.questions.length > 0 &&
+          data.questions.every(
+            (q) => typeof q?.key === "string" && typeof q?.question === "string" && Array.isArray(q?.options) && q.options.length > 0,
+          );
+        if (questionsOk) segs.push({ type: "options-form", data });
         else segs.push({ type: "text", value: m[0] });
       } catch {
         segs.push({ type: "text", value: m[0] });
@@ -227,6 +244,8 @@ export function ChatMsg({ message: m, authorName = "You", onApprove, onRefine, i
           {parseSegments(m.text).map((seg, i) =>
             seg.type === "options" ? (
               <OptionsBlock key={`opt-${i}`} data={seg.data} interactive={interactive} onSelect={onOption} />
+            ) : seg.type === "options-form" ? (
+              <OptionsFormBox key={`optform-${i}`} data={seg.data} interactive={interactive} onSubmit={onOption} />
             ) : seg.type === "proxmox-vm" ? (
               slug ? <ProxmoxVmBox key={`pvm-${i}`} slug={slug} /> : null
             ) : seg.type === "cicd-setup" ? (

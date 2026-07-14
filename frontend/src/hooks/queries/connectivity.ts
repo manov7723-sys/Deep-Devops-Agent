@@ -390,3 +390,93 @@ export function useStartTerraformRun(slug: string, envKey: string) {
       qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
   });
 }
+
+export type RerunTfRunInput = {
+  runId: string;
+  /** Override the source run's action ("plan" → "apply" upgrades a preview). Default: reuse. */
+  action?: "plan" | "apply";
+};
+
+export type DeleteGkeClusterInput = {
+  project: string;
+  location: string;
+  name: string;
+};
+
+export type ProvisionAzureTfstateInput = {
+  resourceGroup: string;
+  storageAccount: string;
+  container: string;
+  location?: string;
+};
+
+export type ProvisionAzureTfstateResult = {
+  ok: boolean;
+  steps?: string[];
+  backend?: {
+    resourceGroup: string;
+    storageAccount: string;
+    container: string;
+    location: string;
+  };
+  code?: string;
+  message?: string;
+};
+
+/**
+ * Provision the resource group + storage account + blob container that
+ * Terraform's azurerm backend needs — via Azure REST using the env's stored
+ * creds, no CLI. Server also persists the three names onto the env row on
+ * success, so the tfstate form doesn't need a separate Save click after.
+ */
+export function useProvisionAzureTfstate(slug: string, envKey: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ProvisionAzureTfstateInput) =>
+      api.post<ProvisionAzureTfstateResult>(
+        `/projects/${slug}/envs/${envKey}/azure-tfstate-provision`,
+        input,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["p", slug, "tf-backend", envKey] });
+    },
+  });
+}
+
+/**
+ * Delete an orphaned GKE cluster via the env's stored GCP creds — used by
+ * the "Delete existing cluster" button on failed apply runs when Terraform
+ * hit 409 alreadyExists (typically after an earlier apply timed out mid-create
+ * and lost state). Server fires DELETE + polls the operation until DONE.
+ */
+export function useDeleteGkeCluster(slug: string, envKey: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DeleteGkeClusterInput) =>
+      api.post<{ ok: boolean; deleted?: boolean; alreadyGone?: boolean; code?: string; message?: string }>(
+        `/projects/${slug}/envs/${envKey}/gke-cluster-delete`,
+        input,
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+  });
+}
+
+/**
+ * Rerun a prior Terraform run by id — replays the same files/stack/backend
+ * held in the server's in-memory ring. Server returns 410 gone if the run's
+ * source spec has been evicted (older than the last 100 runs); the mutation
+ * surfaces that as an error the UI can render inline.
+ */
+export function useRerunTerraformRun(slug: string, envKey: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: RerunTfRunInput) =>
+      api.post<{ ok: boolean; run?: TfRun; code?: string; message?: string }>(
+        `/projects/${slug}/envs/${envKey}/terraform/${input.runId}/rerun`,
+        input.action ? { action: input.action } : {},
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+  });
+}

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/lib/db/prisma";
 import { requireProjectAccess } from "@/lib/projects/permissions";
-import { envBySlugAndKey } from "@/lib/devops/envs";
-import { listTerraformRuns, startTerraformRun } from "@/lib/devops/terraform-run";
+import { envBySlugAndKey, pickBackendForEnv } from "@/lib/devops/envs";
+import { listTerraformRunsAsync, startTerraformRun } from "@/lib/devops/terraform-run";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
@@ -19,7 +20,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
   const env = await envBySlugAndKey(gate.access.project.id, key);
   if (!env) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
-  return NextResponse.json({ ok: true, runs: listTerraformRuns(env.id) });
+  return NextResponse.json({ ok: true, runs: await listTerraformRunsAsync(env.id) });
 }
 
 const StartBody = z.object({
@@ -41,7 +42,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
-  const env = await envBySlugAndKey(gate.access.project.id, key);
+  const env = await prisma.env.findUnique({
+    where: { projectId_key: { projectId: gate.access.project.id, key } },
+    select: {
+      id: true,
+      key: true,
+      cloudProviderId: true,
+      tfBackendBucket: true,
+      tfBackendRegion: true,
+      tfBackendTable: true,
+      tfBackendGcsBucket: true,
+      tfBackendAzureResourceGroup: true,
+      tfBackendAzureStorageAccount: true,
+      tfBackendAzureContainer: true,
+      cloudProvider: { select: { kind: true } },
+    },
+  });
   if (!env) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
 
   const parsed = StartBody.safeParse(await req.json().catch(() => ({})));
@@ -53,15 +69,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   }
   const { action, name, files, stack } = parsed.data;
 
-  // `apply` without a configured S3 backend would leave state in a throwaway
-  // temp dir — refuse so users don't think their infra state is durable.
-  if (action === "apply" && !env.tfBackendBucket) {
+  // Pick the backend that matches the env's cloud (S3/GCS/azurerm) — never
+  // blindly S3, which used to force AWS creds onto every apply. Refuse `apply`
+  // without any backend so state doesn't land in a throwaway temp dir.
+  const backend = pickBackendForEnv(env);
+  if (action === "apply" && !backend) {
     return NextResponse.json(
       {
         ok: false,
         code: "no_state_backend",
         message:
-          "Set a Terraform state bucket for this environment before applying (Cloud tab → Terraform state).",
+          "Set a Terraform state backend for this environment before applying (Cluster connection page → Terraform state backend).",
       },
       { status: 409 },
     );
@@ -76,13 +94,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
     action,
     files,
     stack,
-    backend: env.tfBackendBucket
-      ? {
-          bucket: env.tfBackendBucket,
-          region: env.tfBackendRegion ?? "us-east-1",
-          table: env.tfBackendTable ?? undefined,
-        }
-      : null,
+    backend,
   });
 
   const meta = extractRequestMeta(req);

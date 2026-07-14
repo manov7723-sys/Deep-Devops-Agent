@@ -105,7 +105,7 @@ export class GithubRepoClient implements GitRepoClient {
 
   private async refSha(branch: string): Promise<string | null> {
     const res = await this.http(
-      `${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodeURIComponent(branch)}`,
+      `${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodePath(branch)}`,
       { headers: this.headers(), cache: "no-store" },
     );
     if (!res.ok) return null;
@@ -119,6 +119,13 @@ export class GithubRepoClient implements GitRepoClient {
     if (!baseSha) throw new Error(`Could not read base branch "${fromRef || this.defaultBranch}" of ${this.fullName}`);
     const res = await this.post(`/repos/${this.fullName}/git/refs`, { ref: `refs/heads/${branch}`, sha: baseSha });
     if (!res.ok) throw new Error(`Could not create branch ${branch}: ${res.status} ${await res.text().catch(() => "")}`);
+    // GitHub's ref-read API can lag a beat behind the write that just
+    // succeeded — a subsequent commitFiles() call can otherwise 404 on a
+    // branch we just created. Poll briefly until it's actually readable.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (await this.refSha(branch)) return { created: true };
+      await new Promise((r) => setTimeout(r, 300));
+    }
     return { created: true };
   }
 
@@ -149,7 +156,7 @@ export class GithubRepoClient implements GitRepoClient {
     if (!commit.ok) throw new Error(`Commit failed: ${commit.status} ${await commit.text().catch(() => "")}`);
     const newCommitSha = ((await commit.json()) as { sha: string }).sha;
 
-    const patch = await this.http(`${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
+    const patch = await this.http(`${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodePath(branch)}`, {
       method: "PATCH",
       headers: { ...this.headers(), "Content-Type": "application/json" },
       body: JSON.stringify({ sha: newCommitSha }),

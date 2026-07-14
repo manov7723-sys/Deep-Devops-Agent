@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { CreateEksRequest } from "@/lib/api/schemas/connectivity-api";
 import { requireProjectAccess } from "@/lib/projects/permissions";
-import { envBySlugAndKey } from "@/lib/devops/envs";
+import { envBySlugAndKey, setEnvTfBackend } from "@/lib/devops/envs";
 import {
   buildEksTerraform,
   EKS_DEFAULTS,
@@ -88,8 +88,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     accessEntries: a.accessEntries,
   };
 
-  // If the chosen env has an S3 backend, wire the cluster's remote state to it.
-  if (a.envKey) {
+  // Remote state: prefer a bucket entered on this form (and persist it onto the
+  // env for future creates), else fall back to whatever the env already has.
+  if (a.envKey && a.stateBucket?.trim()) {
+    const backend = { bucket: a.stateBucket.trim(), region: a.region, table: a.stateTable?.trim() || undefined };
+    spec.stateBucket = backend.bucket;
+    spec.stateRegion = backend.region;
+    spec.stateTable = backend.table;
+    await setEnvTfBackend(gate.access.project.id, a.envKey, backend).catch(() => {});
+  } else if (a.envKey) {
     const env = await envBySlugAndKey(gate.access.project.id, a.envKey);
     if (env?.tfBackendBucket) {
       spec.stateBucket = env.tfBackendBucket;

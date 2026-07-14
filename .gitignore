@@ -25,3 +25,13 @@ backend.zip
 venv/
 **/__pycache__/
 *.py[cod]
+
+# Kubeconfig caches (contain cluster tokens — never commit)
+**/.kube/
+
+# Nested test apps used for local integration checks
+frontend/dynamic-react-app/
+
+# Playwright / test output
+**/test-results/
+**/playwright-report/

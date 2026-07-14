@@ -13,8 +13,14 @@ type Input = {
   message: string;
   /** Branch to commit to. Created from the default branch if it doesn't exist. */
   branch: string;
-  /** Open a pull request from `branch` → default branch. */
+  /** Open a pull request from `branch` → `targetBranch` (default: repo default). */
   openPullRequest?: boolean;
+  /**
+   * Base branch the PR targets. Defaults to the repo's default branch. Pass a
+   * different branch when you want CI/CD to trigger from a non-default branch
+   * (e.g. the branch the user selected in the deploy-config form).
+   */
+  targetBranch?: string;
   /** PR body (markdown). Used only when openPullRequest is true. */
   pullRequestBody?: string;
 };
@@ -59,6 +65,7 @@ export const writeRepoFileTool: Tool<Input, Output> = {
       message: { type: "string", description: "Commit message. Also used as PR title prefix." },
       branch: { type: "string", description: 'Branch to commit to. Must differ from the default branch.' },
       openPullRequest: { type: "boolean", description: "Open a PR after committing." },
+      targetBranch: { type: "string", description: "PR base branch. Defaults to the repo's default branch." },
       pullRequestBody: { type: "string", description: "PR body (markdown). Used only when openPullRequest=true." },
     },
     required: ["repoFullName", "path", "content", "message", "branch"],
@@ -85,10 +92,11 @@ export const writeRepoFileTool: Tool<Input, Output> = {
     }
 
     const branch = input.branch.replace(/^\/+/, "");
-    if (branch === repo.defaultBranch) {
+    const targetBranch = (input.targetBranch || repo.defaultBranch).replace(/^\/+/, "");
+    if (branch === targetBranch) {
       return {
         ok: false,
-        error: `Refusing to commit directly to the default branch (${repo.defaultBranch}). Use a feature branch and set openPullRequest=true.`,
+        error: `Refusing to commit directly to the target branch (${targetBranch}). Use a feature branch for the commit and open a PR into ${targetBranch}.`,
       };
     }
 
@@ -99,9 +107,11 @@ export const writeRepoFileTool: Tool<Input, Output> = {
     const client = resolved.client;
     const cleanPath = input.path.replace(/^\/+/, "");
 
-    // Step 1 — ensure the branch exists (created off the default branch).
+    // Step 1 — ensure the branch exists (created off the target branch so a
+    // non-default target branch gets the new commits on top of it, not from
+    // the repo default).
     try {
-      await client.ensureBranch(branch, repo.defaultBranch);
+      await client.ensureBranch(branch, targetBranch);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : `Could not create branch ${branch}.` };
     }
@@ -116,18 +126,28 @@ export const writeRepoFileTool: Tool<Input, Output> = {
     }
 
     // Step 3 — optionally open a pull request (GitHub) / merge request (GitLab).
+    // NB: `openChangeRequest` is idempotent — HTTP 422 (a PR already exists) is
+    // resolved server-side into a lookup that returns the existing open PR, so
+    // this catch only fires on real errors (auth expired, no diff yet, etc.).
+    // We now RETURN the error instead of swallowing it, because a silent
+    // failure here means the agent tells the user "PR opened" with no link.
     let pr: { number: number; url: string } | undefined;
     if (input.openPullRequest) {
       try {
         pr = await client.openChangeRequest({
           sourceBranch: branch,
-          targetBranch: repo.defaultBranch,
+          targetBranch,
           title: input.message,
           body: input.pullRequestBody ?? `Authored by DeepAgent for project ${ctx.projectId.slice(0, 8)}.`,
         });
-      } catch {
-        // The commit succeeded — don't fail the whole tool if the PR/MR can't
-        // open (e.g. one already exists). Return the commit; agent can retry.
+      } catch (err) {
+        return {
+          ok: false,
+          error:
+            `Committed ${cleanPath} to ${branch}, but opening the PR into ${targetBranch} failed: ` +
+            (err instanceof Error ? err.message : "unknown error") +
+            `. Retry, or open the PR manually from ${branch} → ${targetBranch}.`,
+        };
       }
     }
 

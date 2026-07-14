@@ -170,7 +170,22 @@ export const deployAppTool: Tool<DeployInput, {
 // ── wait_for_workflow_run ────────────────────────────────────────────────────
 export const waitForWorkflowRunTool: Tool<
   { repoFullName: string; workflowFile?: string; branch?: string; timeoutSeconds?: number },
-  { done: boolean; status: string; conclusion: string | null; headSha: string; htmlUrl: string; run: WorkflowRun | null }
+  {
+    done: boolean;
+    status: string;
+    conclusion: string | null;
+    headSha: string;
+    htmlUrl: string;
+    /**
+     * On conclusion="failure", a classified reason so the agent can self-heal
+     * without asking the user. "acr_secrets_missing" → call
+     * repair_azure_acr_push_auth(repoFullName) — it re-syncs the ACR admin
+     * secrets and re-runs the failed jobs automatically.
+     */
+    failureKind: WorkflowRun["failureKind"];
+    failureHint: string | null;
+    run: WorkflowRun | null;
+  }
 > = {
   name: "wait_for_workflow_run",
   description:
@@ -178,7 +193,10 @@ export const waitForWorkflowRunTool: Tool<
     "workflow BEFORE writing/deploying the CD side. Pass workflowFile (e.g. 'build-and-push.yml') to target the " +
     "CI workflow. Returns done=true with conclusion 'success'/'failure' when finished; if it returns done=false " +
     "(still running after the timeout), call again to keep waiting. On success, call list_registry_images to get " +
-    "the freshly pushed image, then write_cd_files / deploy_app with it.",
+    "the freshly pushed image, then write_cd_files / deploy_app with it. " +
+    "ON FAILURE: check `failureKind`. failureKind='acr_secrets_missing' → the ACR docker-login secrets on the " +
+    "repo are missing/empty; call repair_azure_acr_push_auth(repoFullName) IMMEDIATELY (do NOT ask the user), " +
+    "then wait_for_workflow_run again — the repair rewrites the secrets and re-triggers the failed jobs.",
   inputSchema: {
     type: "object",
     properties: {
@@ -206,6 +224,8 @@ export const waitForWorkflowRunTool: Tool<
         conclusion: run?.conclusion ?? null,
         headSha: run?.headSha ?? "",
         htmlUrl: run?.htmlUrl ?? "",
+        failureKind: run?.failureKind ?? null,
+        failureHint: run?.failureHint ?? null,
         run,
       },
     };

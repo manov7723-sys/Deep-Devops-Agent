@@ -1,21 +1,58 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Btn, Icon, StatusDot } from "@/components/ui";
 import { ChatMsg } from "@/components/domain/ChatMsg";
 import { ChatComposer } from "@/components/domain/ChatComposer";
-import { useChatSuggestions, useChatThread, useClearChat } from "@/hooks/queries/project";
+import { ChatHistoryRail } from "@/components/domain/ChatHistoryRail";
+import {
+  useChatSuggestions,
+  useChatThread,
+  useChatThreadMessages,
+  useChatThreads,
+  useClearChat,
+  useCreateChatThread,
+} from "@/hooks/queries/project";
 import { useSendChatMessageStream, type ToolCallView } from "@/hooks/queries/chat-stream";
 
 export interface ProjectChatClientProps {
   slug: string;
 }
 
+const RAIL_STORAGE_KEY = "dda:chat:railOpen";
+
 export function ProjectChatClient({ slug }: ProjectChatClientProps) {
-  const { data: thread } = useChatThread(slug);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  // Rail open/closed — persisted in localStorage so it survives refresh.
+  // SSR-safe: start closed, then adopt the stored value on mount to avoid
+  // a hydration mismatch flash.
+  const [railOpen, setRailOpen] = useState(true);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(RAIL_STORAGE_KEY);
+      if (stored !== null) setRailOpen(stored === "1");
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAIL_STORAGE_KEY, railOpen ? "1" : "0");
+    } catch {}
+  }, [railOpen]);
+
+  const { data: threads } = useChatThreads(slug);
+  const { data: flatThread } = useChatThread(slug); // fallback for the initial paint
+  const { data: activeMessages } = useChatThreadMessages(slug, activeThreadId);
   const { data: suggestions } = useChatSuggestions(slug);
   const { send, status } = useSendChatMessageStream(slug);
   const clearChat = useClearChat(slug);
+  const createChatThread = useCreateChatThread(slug);
+
+  // Adopt the most-recent thread as active on first load (once the list arrives).
+  useEffect(() => {
+    if (activeThreadId) return;
+    if (!threads || threads.length === 0) return;
+    setActiveThreadId(threads[0]!.id);
+  }, [threads, activeThreadId]);
 
   const isThinking = status.state === "sending";
   const isStreaming = status.state === "streaming";
@@ -25,20 +62,43 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
     status.state === "streaming" || status.state === "sending" || status.state === "error"
       ? status.toolCalls
       : [];
+  const busy = isThinking || isStreaming || createChatThread.isPending;
+
+  const messages = activeThreadId ? (activeMessages ?? []) : (flatThread ?? []);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!scrollRef.current) return;
     scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [thread, partial, isThinking]);
-
-  const messages = thread ?? [];
+  }, [messages, partial, isThinking]);
 
   function handleSend(text: string) {
-    send(text).catch(() => {});
+    send(text, {
+      threadId: activeThreadId,
+      onThreadResolved: (id) => {
+        if (id !== activeThreadId) setActiveThreadId(id);
+      },
+    }).catch(() => {});
+  }
+
+  async function handleNewChat() {
+    if (busy) return;
+    try {
+      const res = await createChatThread.mutateAsync(undefined);
+      setActiveThreadId(res.threadId);
+    } catch {
+      // mutation surfaces its own error state; nothing else to do here.
+    }
+  }
+
+  async function handleClear() {
+    if (busy) return;
+    await clearChat.mutateAsync();
+    setActiveThreadId(null);
   }
 
   return (
+    <div className={`dda-chat-shell${railOpen ? "" : " is-rail-closed"}`}>
     <div className="dda-chat-page">
       <header className="dda-chat-head">
         <div className="row gap-3">
@@ -61,19 +121,20 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
             variant="outline"
             icon="trash"
             loading={clearChat.isPending}
-            disabled={clearChat.isPending || isThinking || isStreaming || messages.length === 0}
-            onClick={() => clearChat.mutate()}
+            disabled={clearChat.isPending || busy || messages.length === 0}
+            onClick={handleClear}
           >
             Clear
           </Btn>
           <Btn
-            size="sm"
+            size="icon"
             variant="outline"
-            icon="plus"
-            disabled={clearChat.isPending || isThinking || isStreaming}
-            onClick={() => clearChat.mutate()}
+            aria-label={railOpen ? "Hide recent chats" : "Show recent chats"}
+            aria-pressed={railOpen}
+            title={railOpen ? "Hide recent chats" : "Show recent chats"}
+            onClick={() => setRailOpen((v) => !v)}
           >
-            New chat
+            <Icon name={railOpen ? "chevR" : "chevL"} size={16} />
           </Btn>
         </div>
       </header>
@@ -146,6 +207,14 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
           disabled={isThinking || isStreaming}
         />
       </div>
+    </div>
+      <ChatHistoryRail
+        slug={slug}
+        activeThreadId={activeThreadId}
+        onSelect={(id) => !busy && setActiveThreadId(id)}
+        onNewChat={handleNewChat}
+        disabled={busy}
+      />
     </div>
   );
 }

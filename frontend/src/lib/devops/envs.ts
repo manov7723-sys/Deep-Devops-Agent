@@ -6,6 +6,7 @@
 import type { Env } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { encryptSecret } from "@/lib/auth/crypto";
+import type { TfBackendCfg } from "@/lib/devops/terraform-run";
 
 export type EnvRow = {
   id: string;
@@ -269,6 +270,54 @@ export async function envBySlugAndKey(projectId: string, key: string) {
 }
 
 export type TfBackend = { bucket: string; region: string; table?: string };
+
+/**
+ * Read the per-env Terraform backend config in the shape the runner expects
+ * (tagged by cloud). The kind is chosen by matching the connected cloud
+ * provider's kind — an AWS env uses S3, a GCP env uses GCS, etc. — so a
+ * GKE apply on a GCP env never accidentally uses an S3 backend even if
+ * legacy tfBackendBucket columns are set from before.
+ *
+ * Returns null when the env has no backend configured for its cloud OR
+ * has no cloud provider attached yet (durable local state kicks in).
+ */
+export type EnvWithBackend = {
+  cloudProvider: { kind: string } | null;
+  tfBackendBucket: string | null;
+  tfBackendRegion: string | null;
+  tfBackendTable: string | null;
+  tfBackendGcsBucket: string | null;
+  tfBackendAzureResourceGroup: string | null;
+  tfBackendAzureStorageAccount: string | null;
+  tfBackendAzureContainer: string | null;
+};
+export function pickBackendForEnv(env: EnvWithBackend): TfBackendCfg | null {
+  const kind = env.cloudProvider?.kind;
+  if (kind === "aws" && env.tfBackendBucket) {
+    return {
+      kind: "s3",
+      bucket: env.tfBackendBucket,
+      region: env.tfBackendRegion ?? "us-east-1",
+      table: env.tfBackendTable ?? undefined,
+    };
+  }
+  if (kind === "gcp" && env.tfBackendGcsBucket) {
+    return { kind: "gcs", bucket: env.tfBackendGcsBucket };
+  }
+  if (
+    kind === "azure" &&
+    env.tfBackendAzureStorageAccount &&
+    env.tfBackendAzureContainer
+  ) {
+    return {
+      kind: "azurerm",
+      resourceGroup: env.tfBackendAzureResourceGroup ?? "",
+      storageAccount: env.tfBackendAzureStorageAccount,
+      container: env.tfBackendAzureContainer,
+    };
+  }
+  return null;
+}
 export type SetTfBackendResult =
   | { ok: true; backend: { bucket: string | null; region: string | null; table: string | null } }
   | { ok: false; code: "not_found" };
@@ -300,6 +349,71 @@ export async function setEnvTfBackend(
       bucket: updated.tfBackendBucket,
       region: updated.tfBackendRegion,
       table: updated.tfBackendTable,
+    },
+  };
+}
+
+export type GcsBackend = { bucket: string };
+export type SetGcsBackendResult =
+  | { ok: true; backend: { bucket: string | null } }
+  | { ok: false; code: "not_found" };
+
+/**
+ * Set the GCP remote-state backend (GCS bucket) for an env. Referenced by
+ * generated HCL so every GKE apply for this env shares the same remote state.
+ * GCS uses object generations for locking — no separate lock table.
+ */
+export async function setEnvGcsBackend(
+  projectId: string,
+  key: string,
+  backend: GcsBackend,
+): Promise<SetGcsBackendResult> {
+  const env = await prisma.env.findUnique({ where: { projectId_key: { projectId, key } } });
+  if (!env) return { ok: false, code: "not_found" };
+  const updated = await prisma.env.update({
+    where: { id: env.id },
+    data: { tfBackendGcsBucket: backend.bucket },
+    select: { tfBackendGcsBucket: true },
+  });
+  return { ok: true, backend: { bucket: updated.tfBackendGcsBucket } };
+}
+
+export type AzureBackend = { resourceGroup: string; storageAccount: string; container: string };
+export type SetAzureBackendResult =
+  | { ok: true; backend: { resourceGroup: string | null; storageAccount: string | null; container: string | null } }
+  | { ok: false; code: "not_found" };
+
+/**
+ * Set the Azure remote-state backend for an env. Azure uses blob leases for
+ * locking natively (no separate lock table needed). Referenced by generated
+ * HCL so every AKS apply for this env shares the same remote state.
+ */
+export async function setEnvAzureBackend(
+  projectId: string,
+  key: string,
+  backend: AzureBackend,
+): Promise<SetAzureBackendResult> {
+  const env = await prisma.env.findUnique({ where: { projectId_key: { projectId, key } } });
+  if (!env) return { ok: false, code: "not_found" };
+  const updated = await prisma.env.update({
+    where: { id: env.id },
+    data: {
+      tfBackendAzureResourceGroup: backend.resourceGroup,
+      tfBackendAzureStorageAccount: backend.storageAccount,
+      tfBackendAzureContainer: backend.container,
+    },
+    select: {
+      tfBackendAzureResourceGroup: true,
+      tfBackendAzureStorageAccount: true,
+      tfBackendAzureContainer: true,
+    },
+  });
+  return {
+    ok: true,
+    backend: {
+      resourceGroup: updated.tfBackendAzureResourceGroup,
+      storageAccount: updated.tfBackendAzureStorageAccount,
+      container: updated.tfBackendAzureContainer,
     },
   };
 }
