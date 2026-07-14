@@ -1402,7 +1402,40 @@ const Sidebar = ({ active, onSelect, activeProject, onSwitchProject }) => html`
     </div>
   </aside>`;
 
-const Topbar = ({ theme, onToggleTheme, project }) => html`
+const UserMenu = ({ session, onLogout }) => {
+  const [open, setOpen] = useState(false);
+  const initials = (session.name || session.email || "?").split(/\s+|@/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  return html`
+    <div style=${{position: "relative"}}>
+      <button class="btn ghost icon sm" style=${{fontSize: 11, fontWeight: 700}} onClick=${() => setOpen(!open)}>${initials}</button>
+      ${open && html`
+        <div style=${{position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 240, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "var(--shadow-lg)", zIndex: 150, overflow: "hidden"}}>
+          <div style=${{padding: "12px 14px", borderBottom: "1px solid var(--border-soft)"}}>
+            <div style=${{fontWeight: 700, fontSize: 13.5}}>${session.name || session.email}</div>
+            <div class="faint" style=${{fontSize: 12}}>${session.email}${session.via ? " · via " + session.via : ""}</div>
+          </div>
+          <div style=${{padding: 6}}>
+            ${[
+              { icon: "user", label: "Account settings" },
+              { icon: "settings", label: "Preferences" },
+              { icon: "key", label: "API keys" },
+            ].map((i) => html`
+              <button style=${{display: "flex", width: "100%", padding: "8px 10px", background: "transparent", border: "none", textAlign: "left", cursor: "pointer", color: "var(--text)", fontFamily: "inherit", fontSize: 13, alignItems: "center", gap: 10, borderRadius: 6}} onMouseOver=${(e) => e.currentTarget.style.background = "var(--surface-3)"} onMouseOut=${(e) => e.currentTarget.style.background = "transparent"}>
+                <${Icon} name=${i.icon} size=${15} />
+                <span>${i.label}</span>
+              </button>`)}
+          </div>
+          <div style=${{padding: 6, borderTop: "1px solid var(--border-soft)"}}>
+            <button style=${{display: "flex", width: "100%", padding: "8px 10px", background: "transparent", border: "none", textAlign: "left", cursor: "pointer", color: "var(--danger)", fontFamily: "inherit", fontSize: 13, alignItems: "center", gap: 10, borderRadius: 6}} onClick=${() => { setOpen(false); onLogout(); }} onMouseOver=${(e) => e.currentTarget.style.background = "var(--danger-soft)"} onMouseOut=${(e) => e.currentTarget.style.background = "transparent"}>
+              <${Icon} name="x" size=${15} />
+              <span style=${{fontWeight: 600}}>Log out</span>
+            </button>
+          </div>
+        </div>`}
+    </div>`;
+};
+
+const Topbar = ({ theme, onToggleTheme, project, session, onLogout }) => html`
   <header class="dda-topbar row between" style=${{display: "flex", alignItems: "center"}}>
     <div class="row gap-3" style=${{alignItems: "center"}}>
       <${Btn} variant="ghost" size="icon"><${Icon} name="menu" size=${18} /><//>
@@ -1420,11 +1453,221 @@ const Topbar = ({ theme, onToggleTheme, project }) => html`
       <${Btn} size="sm"><${Icon} name="box" size=${14} /> Project workspace <${Icon} name="chevD" size=${12} /><//>
       <${Btn} variant="ghost" size="icon" onClick=${onToggleTheme}><${Icon} name=${theme === "dark" ? "sun" : "moon"} size=${16} /><//>
       <${Btn} variant="ghost" size="icon"><${Icon} name="bell" size=${16} /><//>
-      <${Btn} variant="ghost" size="icon" style=${{fontSize: 11, fontWeight: 700}}>MV<//>
+      <${UserMenu} session=${session} onLogout=${onLogout} />
     </div>
   </header>`;
 
+// ═════════════════════════════════════════════════════════════════════
+// Auth pages — Login / Signup, styled to match the live
+// src/components/auth/AuthFrame.tsx + LoginClient.tsx
+// ═════════════════════════════════════════════════════════════════════
+const AUTH_FEATURES = [
+  { icon: "zap", label: "Generate Terraform & K8s from a prompt" },
+  { icon: "shield", label: "Agents review every change against requirements" },
+  { icon: "approve", label: "Human-in-the-loop approvals on risky steps" },
+];
+
+const AuthFrame = ({ children, foot }) => html`
+  <div class="auth-frame">
+    <aside class="auth-brand">
+      <div class="auth-brand-glow"></div>
+      <div class="auth-brand-inner">
+        <div class="row gap-2" style=${{alignItems: "center"}}>
+          <span style=${{width: 34, height: 34, borderRadius: 10, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 15}}>◐</span>
+          <span style=${{fontWeight: 800, fontSize: 17, letterSpacing: "-.01em"}}>DeepAgent</span>
+        </div>
+        <div class="auth-brand-pitch">
+          <h1>Run real infrastructure without the DevOps team.</h1>
+          <p class="muted tx-pretty">Connect a repo, describe what you want, and Deep Agent writes the Terraform and Kubernetes, ships it through your environments, and watches it 24/7 — with you approving the moves that matter.</p>
+          <div class="col gap-3" style=${{marginTop: 8}}>
+            ${AUTH_FEATURES.map((f) => html`
+              <div class="row gap-3">
+                <span class="auth-feat"><${Icon} name=${f.icon} size=${17} /></span>
+                <span style=${{fontSize: 14, fontWeight: 600}}>${f.label}</span>
+              </div>`)}
+          </div>
+        </div>
+        <div class="row gap-3 faint auth-brand-foot">
+          <span>SOC 2 Type II</span><span>·</span><span>99.95% uptime</span><span>·</span><span>© 2026 DeepAgent</span>
+        </div>
+      </div>
+    </aside>
+    <section class="auth-form-wrap">
+      <div class="auth-form-col">
+        <div class="auth-logo-mobile">
+          <span style=${{width: 32, height: 32, borderRadius: 10, background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14}}>◐</span>
+        </div>
+        ${children}
+        ${foot && html`<div style=${{marginTop: 16}}>${foot}</div>`}
+      </div>
+    </section>
+  </div>`;
+
+const AuthHead = ({ title, sub }) => html`
+  <div class="col gap-2">
+    <h2 style=${{fontSize: 25, fontWeight: 800, letterSpacing: "-.02em", margin: 0}}>${title}</h2>
+    ${sub && html`<p class="muted" style=${{fontSize: 14, margin: 0}}>${sub}</p>`}
+  </div>`;
+
+const LoginPage = ({ onLogin, onGoSignup }) => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
+  const [emailError, setEmailError] = useState(null);
+  const [pwdError, setPwdError] = useState(null);
+  const [serverError, setServerError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = (e) => {
+    e && e.preventDefault();
+    let bad = false;
+    if (!email) { setEmailError("Email is required"); bad = true; }
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setEmailError("Enter a valid email"); bad = true; }
+    else setEmailError(null);
+    if (!password) { setPwdError("Password is required"); bad = true; }
+    else if (password.length < 8) { setPwdError("At least 8 characters"); bad = true; }
+    else setPwdError(null);
+    if (bad) return;
+    setServerError(null);
+    setSubmitting(true);
+    // Demo: any valid-shape email + any 8+ char password succeeds.
+    setTimeout(() => { setSubmitting(false); onLogin({ email }); }, 400);
+  };
+
+  const oauth = (provider) => {
+    setSubmitting(true);
+    setTimeout(() => { setSubmitting(false); onLogin({ email: "manoi.vv@example.com", via: provider }); }, 500);
+  };
+
+  return html`
+    <${AuthFrame} foot=${html`
+      <p class="muted" style=${{textAlign: "center", fontSize: 13}}>
+        New here? <a class="auth-link" onClick=${onGoSignup} style=${{cursor: "pointer"}}>Create an account</a>
+      </p>
+    `}>
+      <${AuthHead} title="Welcome back" sub="Log in to your DeepAgent workspace." />
+      <div class="col gap-3" style=${{marginTop: 20}}>
+        <a class="btn outline" style=${{display: "flex", justifyContent: "center", gap: 8, cursor: "pointer"}} onClick=${() => oauth("github")}>
+          <${Icon} name="github" size=${16} />
+          Continue with GitHub
+        </a>
+        <a class="btn outline" style=${{display: "flex", justifyContent: "center", gap: 8, cursor: "pointer"}} onClick=${() => oauth("google")}>
+          <span style=${{width: 16, height: 16, borderRadius: "50%", background: "linear-gradient(135deg, #4285F4 0%, #34A853 50%, #FBBC05 75%, #EA4335 100%)", display: "inline-block"}}></span>
+          Continue with Google
+        </a>
+      </div>
+      <div class="auth-divider">
+        <div class="divider"></div>
+        <span>or</span>
+        <div class="divider"></div>
+      </div>
+      <form class="col gap-4" onSubmit=${submit} noValidate>
+        <label class="col gap-1">
+          <span class="field-label">Work email</span>
+          <input class="input" type="email" placeholder="you@company.com" value=${email} onInput=${(e) => setEmail(e.target.value)} />
+          ${emailError && html`<span style=${{fontSize: 11.5, marginTop: 4, color: "var(--danger)"}}>${emailError}</span>`}
+        </label>
+        <label class="col gap-1">
+          <span class="field-label">Password</span>
+          <input class="input" type="password" placeholder="••••••••" value=${password} onInput=${(e) => setPassword(e.target.value)} />
+          ${pwdError && html`<span style=${{fontSize: 11.5, marginTop: 4, color: "var(--danger)"}}>${pwdError}</span>`}
+        </label>
+        <div class="row between">
+          <label class="row gap-2" style=${{cursor: "pointer", alignItems: "center"}} onClick=${() => setRemember(!remember)}>
+            <span style=${{width: 32, height: 18, borderRadius: 999, background: remember ? "var(--accent)" : "var(--surface-3)", padding: 2, transition: "background .15s"}}>
+              <span style=${{width: 14, height: 14, borderRadius: "50%", background: "white", display: "block", transform: remember ? "translateX(14px)" : "translateX(0)", transition: "transform .15s"}}></span>
+            </span>
+            <span style=${{fontSize: 13, fontWeight: 600}}>Remember me</span>
+          </label>
+          <a class="auth-link" style=${{fontSize: 13, cursor: "pointer"}}>Forgot password?</a>
+        </div>
+        ${serverError && html`<p style=${{fontSize: 12.5, color: "var(--danger)", margin: 0}}>${serverError}</p>`}
+        <button type="submit" class="btn primary lg block" disabled=${submitting}>
+          ${submitting ? "Signing in…" : "Log in"} <${Icon} name="chevR" size=${16} />
+        </button>
+        <p class="faint" style=${{fontSize: 11.5, textAlign: "center", margin: 0}}>
+          Demo: any email + any 8-char password works.
+        </p>
+      </form>
+    <//>`;
+};
+
+const SignupPage = ({ onLogin, onGoLogin }) => {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const passwordReqs = [
+    { met: password.length >= 8, label: "At least 8 characters" },
+    { met: /[A-Z]/.test(password), label: "One uppercase letter" },
+    { met: /[0-9]/.test(password), label: "One digit" },
+  ];
+  const canSubmit = name && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && passwordReqs.every((r) => r.met);
+  const submit = (e) => {
+    e && e.preventDefault();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setTimeout(() => { setSubmitting(false); onLogin({ email, name }); }, 400);
+  };
+  return html`
+    <${AuthFrame} foot=${html`
+      <p class="muted" style=${{textAlign: "center", fontSize: 13}}>
+        Already have an account? <a class="auth-link" onClick=${onGoLogin} style=${{cursor: "pointer"}}>Log in</a>
+      </p>
+    `}>
+      <${AuthHead} title="Create your workspace" sub="Sign up to start using DeepAgent." />
+      <form class="col gap-4" onSubmit=${submit} style=${{marginTop: 20}}>
+        <label class="col gap-1">
+          <span class="field-label">Full name</span>
+          <input class="input" type="text" placeholder="Jane Doe" value=${name} onInput=${(e) => setName(e.target.value)} />
+        </label>
+        <label class="col gap-1">
+          <span class="field-label">Work email</span>
+          <input class="input" type="email" placeholder="you@company.com" value=${email} onInput=${(e) => setEmail(e.target.value)} />
+        </label>
+        <label class="col gap-1">
+          <span class="field-label">Password</span>
+          <input class="input" type="password" placeholder="Create a password" value=${password} onInput=${(e) => setPassword(e.target.value)} />
+          <ul class="auth-pwd-checklist" style=${{listStyle: "none", padding: 0, margin: "8px 0 0"}}>
+            ${passwordReqs.map((r) => html`
+              <li class=${"auth-pwd-req" + (r.met ? " met" : "")} style=${{display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: r.met ? "var(--ok)" : "var(--text-muted)", padding: "2px 0"}}>
+                <${Icon} name=${r.met ? "check" : "x"} size=${12} />
+                <span>${r.label}</span>
+              </li>`)}
+          </ul>
+        </label>
+        <button type="submit" class="btn primary lg block" disabled=${!canSubmit || submitting}>
+          ${submitting ? "Creating…" : "Create workspace"} <${Icon} name="chevR" size=${16} />
+        </button>
+        <p class="faint" style=${{fontSize: 11.5, textAlign: "center", margin: 0}}>
+          By continuing you agree to the Terms and Privacy Policy.
+        </p>
+      </form>
+    <//>`;
+};
+
 const App = () => {
+  // Auth: on first mount, user is at the login screen. localStorage keeps
+  // them signed in across refreshes so you don't have to re-log-in every
+  // time you regenerate the wireframe. Clicking "Log out" in the user
+  // dropdown clears the flag and drops you back to the login page.
+  const [session, setSession] = useState(() => {
+    try {
+      const raw = localStorage.getItem("dda-wf-session");
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  });
+  const [authScreen, setAuthScreen] = useState("login"); // "login" | "signup"
+  const login = (user) => {
+    setSession(user);
+    try { localStorage.setItem("dda-wf-session", JSON.stringify(user)); } catch (e) {}
+  };
+  const logout = () => {
+    setSession(null);
+    try { localStorage.removeItem("dda-wf-session"); } catch (e) {}
+    location.hash = "";
+  };
+
   const [active, setActive] = useState(() => (location.hash.slice(1) in PAGES ? location.hash.slice(1) : "dashboard"));
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem("dda-wf-theme") || "dark"; } catch (e) { return "dark"; }
@@ -1442,6 +1685,14 @@ const App = () => {
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
+
+  // Not signed in → show the auth pages instead of the app shell.
+  if (!session) {
+    return authScreen === "login"
+      ? html`<${LoginPage} onLogin=${login} onGoSignup=${() => setAuthScreen("signup")} />`
+      : html`<${SignupPage} onLogin=${login} onGoLogin=${() => setAuthScreen("login")} />`;
+  }
+
   const select = (id) => { setActive(id); location.hash = id; };
   const Page = PAGES[active].component;
   const isChat = active === "chat";
@@ -1451,7 +1702,7 @@ const App = () => {
       <div class="dda-shell" style=${{display: "flex", height: "100vh", overflow: "hidden"}}>
         <${Sidebar} active=${active} onSelect=${select} activeProject=${projectSlug} onSwitchProject=${setProjectSlug} />
         <div class="col grow" style=${{minWidth: 0, minHeight: 0}}>
-          <${Topbar} theme=${theme} onToggleTheme=${() => setTheme(theme === "dark" ? "light" : "dark")} project=${project} />
+          <${Topbar} theme=${theme} onToggleTheme=${() => setTheme(theme === "dark" ? "light" : "dark")} project=${project} session=${session} onLogout=${logout} />
           <main class="dda-main grow">
             <div class="dda-page-wrap col gap-5" style=${isChat ? {maxWidth: "none", padding: 0, height: "100%"} : null}>
               <${Page} />
