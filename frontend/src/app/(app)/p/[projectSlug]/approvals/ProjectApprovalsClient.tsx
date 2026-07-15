@@ -14,6 +14,9 @@ import {
 } from "@/hooks/queries/project";
 
 const ENV_TONE: Record<string, "ok" | "warn" | "info" | "default"> = {
+  prod: "ok",
+  staging: "warn",
+  dev: "info",
   release: "ok",
   beta: "warn",
   alpha: "info",

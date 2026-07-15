@@ -3,7 +3,7 @@
 import { Badge, Btn, Icon, Progress, type IconName } from "@/components/ui";
 import type { SeedTask } from "@/lib/legacy-types";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info" } as const;
 
 const STATUS_COLOR: Record<SeedTask["status"], string> = {
   ok: "var(--ok)",

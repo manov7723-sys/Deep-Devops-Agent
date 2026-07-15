@@ -3,7 +3,10 @@ import { z } from "zod";
 export const Tone = z.enum(["ok", "warn", "danger", "info", "accent"]);
 export type Tone = z.infer<typeof Tone>;
 
-export const EnvId = z.enum(["alpha", "beta", "release"]);
+// dev/staging/prod are the current defaults; alpha/beta/release are kept for
+// backward-compat with projects created before the rename — they map to the
+// same tone/promotion order in the UI so old projects keep rendering correctly.
+export const EnvId = z.enum(["dev", "staging", "prod", "alpha", "beta", "release"]);
 export type EnvId = z.infer<typeof EnvId>;
 
 export const Money = z.object({

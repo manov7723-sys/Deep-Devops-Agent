@@ -61,11 +61,16 @@ export async function GET(req: Request) {
   const verifier = jar.get("az_oauth_verifier")?.value;
   const popup = jar.get("az_oauth_popup")?.value === "1";
   const projSlug = jar.get("az_oauth_proj")?.value ?? "";
+  // Tenant override set by the start route from the UI's optional Tenant ID
+  // field. Must match what was used to build the authorize URL — the token
+  // exchange fails otherwise.
+  const tenantOverride = jar.get("az_oauth_tenant")?.value ?? "";
   // Clear the one-time cookies regardless of outcome.
   jar.set("az_oauth_state", "", CLEAR);
   jar.set("az_oauth_verifier", "", CLEAR);
   jar.set("az_oauth_popup", "", CLEAR);
   jar.set("az_oauth_proj", "", CLEAR);
+  jar.set("az_oauth_tenant", "", CLEAR);
 
   if (oauthErr) return done(popup, false, `Microsoft: ${oauthErr}`);
   if (!code || !state || !expectState || state !== expectState || !verifier) {
@@ -75,8 +80,9 @@ export async function GET(req: Request) {
   const sess = await getActiveSession();
   if (!sess) return done(popup, false, "Your app session expired — sign in and retry.");
 
-  // 1 — exchange the code for tokens.
-  const ex = await exchangeAzureCode(code, verifier);
+  // 1 — exchange the code for tokens. Tenant override must match the one used
+  // in the authorize URL (see start route + start-cookie above).
+  const ex = await exchangeAzureCode(code, verifier, tenantOverride || undefined);
   if (!ex.ok) return done(popup, false, ex.error);
   if (!ex.tokens.refreshToken)
     return done(popup, false, "Microsoft returned no refresh token (offline_access not granted).");
@@ -149,13 +155,42 @@ export async function GET(req: Request) {
       });
       providerId = created.id;
     }
-    // Bind to the project's environments that have no provider yet, so the
-    // connection shows on the project's Cloud providers page.
+    // Rebind envs to this freshly-connected provider:
+    //   1. Envs with no provider yet — first-time connect
+    //   2. Envs bound to any OTHER Azure provider in this project — reconnect
+    //      with a different account/subscription. Without this step the envs
+    //      stay pointed at stale creds and Terraform hits the OLD subscription.
+    // Also nulls out ManagedResource/TfRun/CloudSecurityScope refs and deletes
+    // the stale Azure providers so the Cloud page stays clean.
     if (projectId) {
+      const staleAzure = await prisma.cloudProvider.findMany({
+        where: { projectId, kind: "azure", id: { not: providerId } },
+        select: { id: true },
+      });
+      const staleIds = staleAzure.map((p) => p.id);
       await prisma.env.updateMany({
-        where: { projectId, cloudProviderId: null },
+        where: {
+          projectId,
+          OR: [
+            { cloudProviderId: null },
+            ...(staleIds.length > 0 ? [{ cloudProviderId: { in: staleIds } }] : []),
+          ],
+        },
         data: { cloudProviderId: providerId },
       });
+      if (staleIds.length > 0) {
+        // TfRun/ManagedResource don't cascade — null them out so the
+        // CloudProvider delete below doesn't hit a FK restrict.
+        await prisma.tfRun.updateMany({
+          where: { cloudProviderId: { in: staleIds } },
+          data: { cloudProviderId: null },
+        });
+        await prisma.managedResource.updateMany({
+          where: { cloudProviderId: { in: staleIds } },
+          data: { cloudProviderId: null },
+        });
+        await prisma.cloudProvider.deleteMany({ where: { id: { in: staleIds } } });
+      }
     }
     await audit({
       userId: sess.userId,

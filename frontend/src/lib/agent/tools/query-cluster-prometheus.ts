@@ -5,7 +5,7 @@ import type { Tool } from "./types";
 type Input = {
   /** A PromQL expression to evaluate now. */
   query: string;
-  /** Env key (e.g. "release"). Optional — defaults to the env that has a cluster wired. */
+  /** Env key (e.g. "prod"). Optional — defaults to the env that has a cluster wired. */
   envKey?: string;
 };
 
@@ -73,7 +73,7 @@ export const queryClusterPrometheusTool: Tool<Input, Output> = {
       envKey: {
         type: "string",
         description:
-          'Environment key, e.g. "release". Omit to use the env with a connected cluster.',
+          'Environment key, e.g. "prod". Omit to use the env with a connected cluster.',
       },
     },
     required: ["query"],

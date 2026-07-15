@@ -15,10 +15,15 @@ import { createHash, randomBytes } from "node:crypto";
 
 const LOGIN = "https://login.microsoftonline.com";
 const ARM = "https://management.azure.com";
-/** Delegated ARM scope + offline_access (so we get a refresh token) + identity.
- *  Kept ARM-only — Azure v2 token requests must be single-audience, so the
- *  Graph token used for SP auto-provisioning is acquired SEPARATELY from the
- *  refresh token via `refreshAzureGraphToken` below. */
+/** Scopes shown to the user at CONSENT time. Multi-resource is allowed at
+ *  authorize (one consent screen covers everything the app will ever request),
+ *  so we include BOTH ARM and Graph here — that lets `autoProvisionSpFromOAuth`
+ *  work cross-tenant without a second consent flow (fixes AADSTS65001). */
+const AUTHORIZE_SCOPES = `${ARM}/user_impersonation https://graph.microsoft.com/Application.ReadWrite.OwnedBy offline_access openid profile`;
+/** ARM-only scope for token requests (code exchange, ARM refresh). Azure v2
+ *  token endpoints reject multi-audience requests — a single token cannot
+ *  target both ARM and Graph. Graph tokens are minted separately from the
+ *  same refresh token via `refreshAzureGraphToken`. */
 const OAUTH_SCOPE = `${ARM}/user_impersonation offline_access openid profile`;
 /** Delegated Graph scope for creating AD apps + client secrets. Requested from
  *  the refresh token AFTER sign-in, so it only requires the app registration
@@ -58,14 +63,22 @@ export function newPkce(): { state: string; verifier: string; challenge: string 
   return { state, verifier, challenge };
 }
 
-/** Build the Microsoft authorize URL (account picker forced via prompt=select_account). */
-export function buildAzureAuthorizeUrl(state: string, challenge: string): string {
+/** Build the Microsoft authorize URL (account picker forced via prompt=select_account).
+ *  Pass `tenantOverride` when the user provided a specific tenant ID on the connect
+ *  UI — needed for personal Microsoft accounts whose subscription lives in a
+ *  hidden AAD tenant that /common/ can't disambiguate for the ARM scope. */
+export function buildAzureAuthorizeUrl(
+  state: string,
+  challenge: string,
+  tenantOverride?: string,
+): string {
   const p = new URLSearchParams({
     client_id: process.env.AZURE_OAUTH_CLIENT_ID ?? "",
     response_type: "code",
     redirect_uri: redirectUri(),
     response_mode: "query",
-    scope: OAUTH_SCOPE,
+    // AUTHORIZE_SCOPES = ARM + Graph so ONE consent screen covers everything.
+    scope: AUTHORIZE_SCOPES,
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -73,7 +86,8 @@ export function buildAzureAuthorizeUrl(state: string, challenge: string): string
     // instead of silently reusing the current Microsoft session.
     prompt: "select_account",
   });
-  return `${LOGIN}/${tenant()}/oauth2/v2.0/authorize?${p.toString()}`;
+  const t = (tenantOverride?.trim() || tenant()).trim();
+  return `${LOGIN}/${t}/oauth2/v2.0/authorize?${p.toString()}`;
 }
 
 export type AzureTokenSet = {
@@ -124,8 +138,14 @@ async function tokenRequest(body: URLSearchParams, tenantOverride?: string): Pro
   };
 }
 
-/** Exchange an auth code (+ PKCE verifier) for tokens. */
-export function exchangeAzureCode(code: string, verifier: string): Promise<TokenResult> {
+/** Exchange an auth code (+ PKCE verifier) for tokens. `tenantOverride` must
+ *  match the tenant used to build the authorize URL — Microsoft rejects the
+ *  token exchange otherwise. */
+export function exchangeAzureCode(
+  code: string,
+  verifier: string,
+  tenantOverride?: string,
+): Promise<TokenResult> {
   return tokenRequest(
     new URLSearchParams({
       client_id: process.env.AZURE_OAUTH_CLIENT_ID ?? "",
@@ -136,6 +156,7 @@ export function exchangeAzureCode(code: string, verifier: string): Promise<Token
       code_verifier: verifier,
       scope: OAUTH_SCOPE,
     }),
+    tenantOverride,
   );
 }
 

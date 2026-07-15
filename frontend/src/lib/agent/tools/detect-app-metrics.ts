@@ -32,7 +32,7 @@ export const detectAppMetricsTool: Tool<Input, Output> = {
     properties: {
       envKey: {
         type: "string",
-        description: 'Env key, e.g. "alpha". Omit to use the env with a cluster connected.',
+        description: 'Env key, e.g. "dev". Omit to use the env with a cluster connected.',
       },
       namespace: { type: "string", description: "Namespace to inspect, e.g. 'dev'." },
     },

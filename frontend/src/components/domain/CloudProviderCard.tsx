@@ -9,7 +9,7 @@ import { api } from "@/lib/api/client";
 import type { SeedCloudProvider } from "@/lib/legacy-types";
 import { EditCloudProviderModal } from "@/components/modals/EditCloudProviderModal";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info" } as const;
 
 const PROVIDER_BG: Record<string, string> = {
   aws: "linear-gradient(135deg, #ff9900, #ec7211)",

@@ -30,30 +30,47 @@ function popupClose(status: "connected" | "needs_login"): NextResponse {
 }
 
 /**
- * Smart return after a successful attach. Returns an HTML page that decides
- * CLIENT-SIDE whether it's running in a popup (via window.opener) — the most
- * reliable signal, independent of cookies/state/query params:
- *   - popup  → notify the opener (wizard) + close. The main window never moves.
- *   - normal → redirect to `nextPath`.
- * This is why the GitHub connect can never bounce the main window to the home page.
+ * Return HTML that finishes the OAuth attach in the popup OR full-page tab.
+ *
+ * The old logic relied on `window.opener` to decide popup vs full-page, but
+ * modern browsers sever `window.opener` on cross-origin navigation (COOP),
+ * turning the popup into a "not a popup" from JS's POV. It then fell back to
+ * `window.location.replace(next)` — but if `nextPath` was missing for any
+ * reason it landed on the dashboard, silently breaking the wizard.
+ *
+ * New logic — ALWAYS do all of these:
+ *   1. Broadcast the "connected" signal via BOTH postMessage AND localStorage
+ *      (localStorage 'storage' event fires cross-tab even when opener is
+ *      severed — the wizard listens for both). See CreateProjectWizard.tsx.
+ *   2. Attempt `window.close()`. It's allowed because we (script) opened the
+ *      window; browsers permit close even when opener is null.
+ *   3. If the window is still alive after 300ms, do `window.location.replace`
+ *      back to `nextPath` (or the wizard resume URL — never the dashboard,
+ *      which throws away the user's in-progress work).
  */
-function smartReturn(nextPath: string): NextResponse {
-  const safe = nextPath && nextPath.startsWith("/") ? nextPath : "/u/dashboard";
+function smartReturn(nextPath: string | null): NextResponse {
+  // NEVER default to /u/dashboard on a null next — that discards wizard state.
+  // A generic OAuth attach without a next path (e.g. from the account page)
+  // was originally the caller's responsibility to pass; when absent we send
+  // the user to the projects list, which is the safest continuation.
+  const safe = nextPath && nextPath.startsWith("/") ? nextPath : "/u/projects";
   const html = `<!doctype html><meta charset="utf-8"><title>GitHub</title>
 <body style="font:14px system-ui;padding:24px;color:#444">Finishing GitHub connection…</body>
 <script>
 (function () {
   var next = ${JSON.stringify(safe)};
-  var isPopup = false;
-  try { isPopup = !!(window.opener && window.opener !== window); } catch (e) { isPopup = false; }
-  if (isPopup) {
-    try { window.opener.postMessage({ source: "dda-oauth", status: "connected" }, window.location.origin); } catch (e) {}
-    try { window.close(); } catch (e) {}
-    // If the popup somehow can't close (rare), fall back to a redirect.
-    setTimeout(function () { try { window.location.replace(next); } catch (e) {} }, 400);
-  } else {
-    window.location.replace(next);
-  }
+  var msg = { source: "dda-oauth", status: "connected", ts: Date.now() };
+  // Broadcast on every channel we can — the wizard's listener handles both.
+  try { if (window.opener) window.opener.postMessage(msg, window.location.origin); } catch (e) {}
+  try { localStorage.setItem("dda_github_oauth_result", JSON.stringify(msg)); } catch (e) {}
+  // Try to close unconditionally. Windows opened via script can close even
+  // when their opener has been severed by COOP.
+  try { window.close(); } catch (e) {}
+  // If we're still here after 300ms, we're a full-page tab, not a popup — go
+  // to the wizard resume URL so the user picks up where they were.
+  setTimeout(function () {
+    try { window.location.replace(next); } catch (e) {}
+  }, 300);
 })();
 </script>`;
   return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -219,7 +236,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     // Return an HTML page that closes the popup (if we're in one) or redirects
     // (if a normal tab). Detected client-side via window.opener, so it never
     // bounces the main window to the home page. See smartReturn().
-    return smartReturn(nextPath ?? "/u/dashboard");
+    console.log(
+      `[oauth-callback:attach] provider=${providerId} nextPath=${JSON.stringify(nextPath)} isPopup=${isPopup} user=${activeSess.userId}`,
+    );
+    return smartReturn(nextPath);
   }
 
   const resolved = await resolveIdentity(
@@ -272,6 +292,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userEmail: user.email,
     });
   }
+  console.log(
+    `[oauth-callback:new-user] provider=${providerId} nextPath=${JSON.stringify(nextPath)} isPopup=${isPopup} outcome=${outcome}`,
+  );
   // Popup mode but no active app session (e.g. signed-out user used the popup):
   // we can't attach in place. Close the popup and tell the opener to fall back
   // to the normal full-page sign-in rather than showing 2FA inside the popup.

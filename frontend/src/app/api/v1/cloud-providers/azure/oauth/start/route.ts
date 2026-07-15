@@ -31,6 +31,10 @@ export async function GET(req: Request) {
   const u = new URL(req.url);
   const projectSlug = u.searchParams.get("projectSlug") ?? "";
   const popup = u.searchParams.get("popup") === "1";
+  // Optional per-connect tenant override — used for personal Microsoft accounts
+  // whose Azure subscription lives in a hidden AAD tenant that /common/ can't
+  // route ARM tokens through. Empty string / missing = use env default.
+  const tenantId = (u.searchParams.get("tenantId") ?? "").trim();
 
   const { state, verifier, challenge } = newPkce();
   const jar = await cookies();
@@ -38,6 +42,7 @@ export async function GET(req: Request) {
   jar.set("az_oauth_verifier", verifier, COOKIE_OPTS);
   jar.set("az_oauth_popup", popup ? "1" : "0", COOKIE_OPTS);
   jar.set("az_oauth_proj", projectSlug, COOKIE_OPTS);
+  jar.set("az_oauth_tenant", tenantId, COOKIE_OPTS);
 
-  return NextResponse.redirect(buildAzureAuthorizeUrl(state, challenge));
+  return NextResponse.redirect(buildAzureAuthorizeUrl(state, challenge, tenantId || undefined));
 }

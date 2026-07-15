@@ -34,7 +34,7 @@ export const setupGcpMonitorAlarmsTool: Tool<Input, Output> = {
     properties: {
       envKey: {
         type: "string",
-        description: 'Env key, e.g. "release". Omit to use the env with a GCP cluster.',
+        description: 'Env key, e.g. "prod". Omit to use the env with a GCP cluster.',
       },
       email: {
         type: "string",

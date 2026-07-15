@@ -26,12 +26,15 @@ import {
 } from "@/hooks/queries/projects";
 
 const STEPS = ["Details", "Repository", "Environments", "Cloud"] as const;
-type EnvKey = "alpha" | "beta" | "release";
+type EnvKey = "dev" | "staging" | "prod";
 
+// Env metadata for the wizard. `branch` is only shown as a hint; the actual
+// deploy branch is picked per-deploy on the batch form and defaults to the
+// repo's default branch — the wizard never asks the user to choose a branch.
 const ENV_META: Record<EnvKey, { tone: "info" | "warn" | "ok"; branch: string; label: string }> = {
-  alpha: { tone: "info", branch: "develop", label: "Alpha" },
-  beta: { tone: "warn", branch: "release/*", label: "Beta" },
-  release: { tone: "ok", branch: "main", label: "Release" },
+  dev:     { tone: "info", branch: "main", label: "Dev" },
+  staging: { tone: "warn", branch: "main", label: "Staging" },
+  prod:    { tone: "ok",   branch: "main", label: "Prod" },
 };
 
 const CLOUDS = ["AWS", "GCP", "Azure"] as const;
@@ -86,10 +89,10 @@ const DEFAULT_DRAFT: Draft = {
   ghConnected: false,
   ghAccountId: null,
   repoIds: {},
-  // Only Release is on by default — matches the common "one repo, one branch
-  // (main)" reality of a fresh project. Users opt-in to Alpha/Beta only when
-  // they actually maintain matching long-lived branches.
-  envs: { alpha: false, beta: false, release: true },
+  // Only Prod is on by default — matches the common "one repo, one branch
+  // (main)" reality of a fresh project. Users opt-in to Dev/Staging only when
+  // they need pre-production environments.
+  envs: { dev: false, staging: false, prod: true },
   cloud: "AWS",
   region: "us-east-1",
   mode: null,
@@ -159,10 +162,12 @@ export function CreateProjectWizard({
   }
 
   // Receive the popup's result and refresh connected GitHub accounts in place.
+  // Listen on TWO channels because modern browsers (Chrome COOP) can sever
+  // window.opener, silently swallowing postMessage. The callback also writes
+  // to localStorage, which fires a 'storage' event in every other same-origin
+  // tab — that path survives the COOP break.
   useEffect(() => {
-    function onMsg(e: MessageEvent) {
-      if (e.origin !== window.location.origin) return;
-      const data = e.data as { source?: string; status?: string } | null;
+    function handle(data: { source?: string; status?: string } | null) {
       if (!data || data.source !== "dda-oauth") return;
       if (data.status === "connected") {
         qc.invalidateQueries({ queryKey: ["account", "oauth-accounts"] });
@@ -172,8 +177,35 @@ export function CreateProjectWizard({
         setGhNote("Please sign in to the app first, then connect GitHub.");
       }
     }
+    function onMsg(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return;
+      handle(e.data as Parameters<typeof handle>[0]);
+    }
+    function onStorage(e: StorageEvent) {
+      if (e.key !== "dda_github_oauth_result" || !e.newValue) return;
+      try {
+        handle(JSON.parse(e.newValue));
+      } catch {
+        /* ignore malformed */
+      }
+    }
+    // On mount, also drain any result the popup wrote just before we mounted
+    // (racy case: popup wrote then closed before we subscribed).
+    try {
+      const pending = localStorage.getItem("dda_github_oauth_result");
+      if (pending) {
+        localStorage.removeItem("dda_github_oauth_result");
+        handle(JSON.parse(pending));
+      }
+    } catch {
+      /* ignore */
+    }
     window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("message", onMsg);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [qc]);
 
   // Active account drives which token the repo-list query uses. Defaults to
@@ -283,14 +315,14 @@ export function CreateProjectWizard({
           oauthAccountId: effectiveGhAccountId ?? undefined,
         }));
 
-      const envOrder: EnvKey[] = ["alpha", "beta", "release"];
+      const envOrder: EnvKey[] = ["dev", "staging", "prod"];
       const selectedEnvs: EnvChoiceInput[] = envOrder
         .filter((k) => draft.envs[k])
         .map((k, i) => ({
           key: k,
           name: ENV_META[k].label,
-          isProduction: k === "release",
-          autoDeploy: k !== "release",
+          isProduction: k === "prod",
+          autoDeploy: k !== "prod",
           promotionRank: i,
         }));
 
@@ -608,11 +640,11 @@ export function CreateProjectWizard({
       {draft.mode && stepIdx === 2 && (
         <div className="col gap-4">
           <p className="muted" style={{ fontSize: 13 }}>
-            Each environment listens to a specific branch. Pushes to that branch trigger a deploy.{" "}
-            <b>Release</b> (your <span className="mono">main</span>/production) is on by default;
-            only enable Alpha or Beta if your repo actually maintains long-lived{" "}
-            <span className="mono">develop</span> / <span className="mono">release/*</span>{" "}
-            branches. You can add more envs later.
+            Each environment is a separate cluster + state file. Deploys go to whichever env you
+            pick at deploy time (there's no branch-to-env mapping — every deploy commits to the
+            repo's default branch and the agent picks the target env from the chat form).{" "}
+            <b>Prod</b> is on by default; enable Dev and Staging only if you need pre-production
+            environments. You can add more envs later on the Environments tab.
           </p>
           <div className="col gap-2">
             {(Object.keys(ENV_META) as EnvKey[]).map((e) => {

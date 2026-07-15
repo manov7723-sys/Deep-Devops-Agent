@@ -3,7 +3,7 @@
 import { Badge } from "@/components/ui";
 import type { SeedApproval } from "@/lib/legacy-types";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info" } as const;
 
 function riskDot(risk: SeedApproval["risk"]): "danger" | "warn" | "ok" {
   return risk === "high" ? "danger" : risk === "medium" ? "warn" : "ok";

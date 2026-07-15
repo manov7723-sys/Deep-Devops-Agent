@@ -77,16 +77,24 @@ export type AksDefaults = Omit<AksSpec, "name" | "resourceGroup">;
 export const AKS_DEFAULTS: AksDefaults = {
   location: "eastus",
   kubernetesVersion: "1.33",
-  vmSize: "Standard_D4s_v3",
-  desiredNodes: 2,
-  minNodes: 2,
-  maxNodes: 5,
+  // Standard_B2s (2 vCPU) fits inside Azure's 4-vCPU trial quota — system pool
+  // + app pool together consume 4 vCPU on the minimum config. Bumping this
+  // requires either a quota increase or a Pay-As-You-Go subscription.
+  vmSize: "Standard_B2s",
+  desiredNodes: 1,
+  minNodes: 1,
+  maxNodes: 2,
   createResourceGroup: true,
   environment: "production",
   team: "devops",
   costCenter: "",
   skuTier: "Standard",
-  zones: true,
+  // Availability zones are unsupported on many subscriptions/regions (notably
+  // free/trial subs and some regions where the chosen VM size has no zonal
+  // capacity) — requesting them fails cluster creation with
+  // AvailabilityZoneNotSupported. Default OFF; opt in explicitly when the
+  // target region/SKU is known to support zones.
+  zones: false,
   automaticUpgrade: "patch",
   networkPolicy: "azure",
   serviceCidr: "10.100.0.0/16",
@@ -97,14 +105,18 @@ export const AKS_DEFAULTS: AksDefaults = {
   disableLocalAccounts: false,
   workloadIdentity: true,
   azurePolicy: true,
-  systemDiskSize: 128,
-  systemOsDiskType: "Ephemeral",
+  systemDiskSize: 30,
+  // Managed (not Ephemeral) — Standard_B2s doesn't support ephemeral OS disks,
+  // and B-series is the cheapest option that fits trial quotas.
+  systemOsDiskType: "Managed",
   systemMaxPods: 50,
   appNodePool: true,
-  appVmSize: "Standard_D4s_v3",
-  appSpot: true,
-  appMinNodes: 2,
-  appMaxNodes: 20,
+  appVmSize: "Standard_B2s",
+  // Regular (not Spot) — Spot capacity for small B-series VMs is rarely
+  // available and errors with "SkuNotAvailable" on trial subs.
+  appSpot: false,
+  appMinNodes: 1,
+  appMaxNodes: 2,
   monitoring: true,
   keyVaultSecretsProvider: true,
   kedaVpa: true,

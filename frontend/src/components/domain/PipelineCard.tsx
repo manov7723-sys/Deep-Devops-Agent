@@ -4,7 +4,7 @@ import { Badge, Btn, Progress } from "@/components/ui";
 import { PipeIcon } from "./PipeIcon";
 import type { SeedPipeline } from "@/lib/legacy-types";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info" } as const;
 
 export interface PipelineCardProps {
   pipeline: SeedPipeline;

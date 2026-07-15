@@ -295,7 +295,13 @@ export async function getAzureAccessToken(
     let secret: string;
     try {
       secret = decryptSecret(cp.externalId);
-      const r = await refreshAzureToken(secret, tenantOverride);
+      // Use the tenant STORED on this provider row (set by the OAuth callback
+      // from the token's `tid` claim). Falling back to the env default (usually
+      // /common/ or /organizations/) breaks personal Microsoft accounts whose
+      // subscription lives in a specific tenant — ARM refuses those refresh
+      // requests with AADSTS70011 "scope does not exist".
+      const refreshTenant = tenantOverride || cp.accountId || undefined;
+      const r = await refreshAzureToken(secret, refreshTenant);
       if (r.ok) {
         if (r.tokens.refreshToken && r.tokens.refreshToken !== secret) {
           await prisma.cloudProvider
@@ -332,4 +338,55 @@ export async function getAzureAccessToken(
   }
 
   return { ok: false, error: oauthErr || "Azure provider has no stored credentials." };
+}
+
+/**
+ * Fetch a storage account's access key via ARM (Microsoft.Storage listKeys),
+ * using the provider's stored creds. Contributor on the subscription includes
+ * `Microsoft.Storage/storageAccounts/listkeys/action`, so no extra data-plane
+ * role is needed. The key lets Terraform's azurerm backend authenticate to the
+ * state blob with shared-key auth — sidestepping the separate "Storage Blob
+ * Data Contributor" RBAC that AAD-based blob access would otherwise require.
+ */
+export async function getAzureStorageAccountKey(
+  cloudProviderId: string,
+  resourceGroup: string,
+  storageAccount: string,
+): Promise<{ ok: true; key: string } | { ok: false; error: string }> {
+  const cp = await prisma.cloudProvider.findUnique({
+    where: { id: cloudProviderId },
+    select: { accountRef: true },
+  });
+  if (!cp?.accountRef) return { ok: false, error: "Provider has no subscription id." };
+
+  const tok = await getAzureAccessToken(cloudProviderId);
+  if (!tok.ok) return { ok: false, error: tok.error };
+
+  const url =
+    `https://management.azure.com/subscriptions/${cp.accountRef}` +
+    `/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/` +
+    `${storageAccount}/listKeys?api-version=2023-01-01`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok.accessToken}`, "Content-Length": "0" },
+      cache: "no-store",
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Network error listing storage keys: ${e instanceof Error ? e.message : "unknown"}`,
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: `listKeys returned ${res.status} for ${storageAccount} in ${resourceGroup}.`,
+    };
+  }
+  const j = (await res.json().catch(() => ({}))) as { keys?: Array<{ value?: string }> };
+  const key = j.keys?.[0]?.value;
+  if (!key) return { ok: false, error: "listKeys returned no keys." };
+  return { ok: true, key };
 }

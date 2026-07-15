@@ -19,6 +19,7 @@ import { tmpdir, homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { runStage } from "@/lib/runner/exec";
 import { getDecryptedCloudCreds } from "@/lib/runner/creds";
+import { pickBackendForEnv } from "@/lib/devops/envs";
 import { prisma } from "@/lib/db/prisma";
 import type { Prisma } from "@prisma/client";
 
@@ -275,6 +276,35 @@ export async function rerunTerraformRun(
   const baseName = opts.name ?? original.name.replace(/-rerun-\d+$/, "");
   const rerunCount =
     1 + [...RUNS.values()].filter((r) => r.name.startsWith(`${baseName}-rerun-`)).length;
+
+  // Re-read the env's CURRENT remote-state backend instead of replaying the
+  // snapshot captured when the run was first created. The snapshot can go stale
+  // — e.g. the backend's container/bucket was corrected on the env after the
+  // original run — and replaying it silently sends state to the wrong place.
+  // Fall back to the captured backend only if the env no longer resolves one.
+  let backend = source.backend;
+  try {
+    const envRow = await prisma.env.findUnique({
+      where: { id: original.envId },
+      select: {
+        cloudProvider: { select: { kind: true } },
+        tfBackendBucket: true,
+        tfBackendRegion: true,
+        tfBackendTable: true,
+        tfBackendGcsBucket: true,
+        tfBackendAzureResourceGroup: true,
+        tfBackendAzureStorageAccount: true,
+        tfBackendAzureContainer: true,
+      },
+    });
+    if (envRow) {
+      const fresh = pickBackendForEnv(envRow);
+      if (fresh) backend = fresh;
+    }
+  } catch {
+    /* keep the captured backend on any lookup error */
+  }
+
   return startTerraformRun({
     projectId: original.projectId,
     envId: original.envId,
@@ -283,7 +313,7 @@ export async function rerunTerraformRun(
     name: `${baseName}-rerun-${rerunCount}`,
     action,
     files: source.files,
-    backend: source.backend,
+    backend,
     stack: source.stack,
   });
 }
@@ -366,7 +396,7 @@ async function persistLocalState(dir: string, workdir: string): Promise<void> {
 /** Backend override written as a separate file so it can't collide with any
  *  `terraform {}` block the generator already emitted. Emits the right HCL
  *  block for the backend's kind (s3 / gcs / azurerm). */
-function backendOverride(b: TfBackendCfg, key: string): string {
+function backendOverride(b: TfBackendCfg, key: string, azureAccessKey?: string): string {
   if (b.kind === "gcs") {
     return [
       "terraform {",
@@ -386,6 +416,11 @@ function backendOverride(b: TfBackendCfg, key: string): string {
       `    storage_account_name = "${b.storageAccount}"`,
       `    container_name       = "${b.container}"`,
       `    key                  = "${key}/terraform.tfstate"`,
+      // Embed the storage access key so the backend uses SHARED-KEY auth for the
+      // state blob — sidesteps the "Storage Blob Data Contributor" data-plane
+      // RBAC that AAD auth would otherwise require. Written here (not only via
+      // ARM_ACCESS_KEY env) so it's deterministic regardless of env propagation.
+      ...(azureAccessKey ? [`    access_key           = "${azureAccessKey}"`] : []),
       "  }",
       "}",
       "",
@@ -502,6 +537,24 @@ async function execRun(run: TfRun, args: StartTfRunArgs): Promise<void> {
     credEnv = creds.env;
   }
 
+  // Azure remote state: the SP has Contributor (management plane) but reading/
+  // writing the state BLOB is a data-plane op that AAD auth gates behind a
+  // separate "Storage Blob Data Contributor" role. Rather than force another
+  // role assignment, fetch the storage account KEY (Contributor can listKeys)
+  // and hand it to the azurerm backend via ARM_ACCESS_KEY — shared-key auth
+  // needs no data-plane RBAC. Best-effort: if the lookup fails, the run still
+  // proceeds and surfaces the original backend error.
+  let azureBackendKey: string | undefined;
+  if (args.cloudProviderId && args.backend?.kind === "azurerm") {
+    const { getAzureStorageAccountKey } = await import("@/lib/cloud/azure");
+    const keyRes = await getAzureStorageAccountKey(
+      args.cloudProviderId,
+      args.backend.resourceGroup,
+      args.backend.storageAccount,
+    );
+    if (keyRes.ok) azureBackendKey = keyRes.key;
+  }
+
   const workdir = await mkdtemp(join(tmpdir(), "dda-tf-"));
   const childEnv: Record<string, string> = {
     ...credEnv,
@@ -513,6 +566,8 @@ async function execRun(run: TfRun, args: StartTfRunArgs): Promise<void> {
     // runner can't fail module downloads (e.g. a missing include path).
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
+    // Shared-key auth for the azurerm state backend (see above).
+    ...(azureBackendKey ? { ARM_ACCESS_KEY: azureBackendKey } : {}),
   };
 
   // Stable state identity: keyed by (project, env, stack), NOT the run name, so
@@ -545,7 +600,7 @@ async function execRun(run: TfRun, args: StartTfRunArgs): Promise<void> {
       const stateKey = `${san(args.projectId)}/${san(args.envKey)}/${stack}`;
       await writeFile(
         join(runCwd, "backend_override.tf"),
-        backendOverride(args.backend!, stateKey),
+        backendOverride(args.backend!, stateKey, azureBackendKey),
         "utf8",
       );
     } else if (localStateDir) {
@@ -680,7 +735,14 @@ function detectOrphans(logs: string): OrphanSpec[] | null {
   const seen = new Set<string>();
   const specs: OrphanSpec[] = [];
   for (const block of blocks) {
+    // Azure reports "already exists" with the full ARM resource ID quoted inline
+    // (which is ALSO the terraform import id); AWS uses provider-specific
+    // *AlreadyExists* codes with per-resource id extraction below.
+    const azureAlreadyExists = block.match(
+      /A resource with the ID "([^"]+)" already exists/,
+    )?.[1];
     if (
+      !azureAlreadyExists &&
       !/(AlreadyExists|EntityAlreadyExists|ResourceAlreadyExistsException|BucketAlreadyExists|BucketAlreadyOwnedByYou)/i.test(
         block,
       )
@@ -692,7 +754,11 @@ function detectOrphans(logs: string): OrphanSpec[] | null {
     if (!addr || !type) return null;
 
     let id: string | null = null;
-    if (type === "aws_kms_alias") {
+    if (type.startsWith("azurerm_")) {
+      // Every azurerm resource imports by its full ARM ID — exactly the quoted
+      // value in the error. Covers resource_group, log_analytics_workspace, aks, …
+      id = azureAlreadyExists ?? null;
+    } else if (type === "aws_kms_alias") {
       id = block.match(/\balias\/[A-Za-z0-9/_.-]+/)?.[0] ?? null;
     } else if (type === "aws_cloudwatch_log_group") {
       id = block.match(/Log Group \(([^)]+)\)/)?.[1] ?? null;
@@ -735,68 +801,101 @@ async function maybeAutoImportAndRetry(
 ): Promise<void> {
   const applyStage = run.stages.find((s) => s.name === "apply");
   if (!applyStage) return;
-  const orphans = detectOrphans(applyStage.logs);
-  if (orphans === null) return;
-  if (orphans.length === 0) return;
 
-  applyStage.logs = capLogs(
-    applyStage.logs +
-      `\n\n[auto-heal] Detected ${orphans.length} resource(s) that already exist in AWS but aren't in the Terraform state. Importing and retrying apply:\n` +
-      orphans.map((o) => `  - ${o.type}  ${o.address}  <=  ${o.id}`).join("\n") +
-      "\n",
-  );
+  // Iterate: detect orphans → import → retry → detect again. Each retry may
+  // uncover the NEXT "already exists" resource (RG first, then workspace,
+  // then anything else pre-created), so we chain up to MAX_ROUNDS times.
+  // Break out on: no orphans (done, or a real non-AlreadyExists error).
+  const MAX_ROUNDS = 5;
+  for (let round = 1; round <= MAX_ROUNDS; round++) {
+    const orphans = detectOrphans(applyStage.logs);
+    // null = at least one error we can't auto-fix → stop, keep failed status.
+    if (orphans === null) return;
+    if (orphans.length === 0) {
+      // No more conflicts. If the last apply exited 0, mark success and stop.
+      if (applyStage.exitCode === 0) {
+        applyStage.status = "succeeded";
+        run.status = "succeeded";
+        run.error = undefined;
+        run.finishedAt = nowIso();
+        syncRun(run);
+      }
+      return;
+    }
 
-  for (const o of orphans) {
+    applyStage.logs = capLogs(
+      applyStage.logs +
+        `\n\n[auto-heal round ${round}] Importing ${orphans.length} pre-existing resource(s):\n` +
+        orphans.map((o) => `  - ${o.type}  ${o.address}  <=  ${o.id}`).join("\n") +
+        "\n",
+    );
+
+    for (const o of orphans) {
+      const res = await runStage({
+        command: "terraform",
+        args: ["import", "-input=false", "-no-color", o.address, o.id],
+        cwd,
+        env,
+        timeoutMs: INIT_TIMEOUT_MS,
+        onLog: (chunk) => {
+          applyStage.logs = capLogs(applyStage.logs + chunk);
+        },
+      });
+      if (res.exitCode !== 0) {
+        applyStage.logs = capLogs(
+          applyStage.logs +
+            `\n[auto-heal] terraform import failed for ${o.address} (exit ${res.exitCode}). Stopping.\n`,
+        );
+        run.status = "failed";
+        run.finishedAt = nowIso();
+        syncRun(run);
+        return;
+      }
+    }
+
+    applyStage.logs = capLogs(
+      applyStage.logs + `\n[auto-heal] All ${orphans.length} orphan(s) imported. Retrying apply...\n`,
+    );
+    applyStage.status = "running";
+    applyStage.exitCode = undefined;
+    applyStage.finishedAt = undefined;
+    run.status = "running";
+    run.error = undefined;
+    syncRun(run);
+
     const res = await runStage({
       command: "terraform",
-      args: ["import", "-input=false", "-no-color", o.address, o.id],
+      args: ["apply", "-auto-approve", "-input=false", "-no-color"],
       cwd,
       env,
-      timeoutMs: INIT_TIMEOUT_MS,
+      timeoutMs: APPLY_TIMEOUT_MS,
       onLog: (chunk) => {
         applyStage.logs = capLogs(applyStage.logs + chunk);
       },
     });
-    if (res.exitCode !== 0) {
-      applyStage.logs = capLogs(
-        applyStage.logs +
-          `\n[auto-heal] terraform import failed for ${o.address} (exit ${res.exitCode}). Not retrying apply.\n`,
-      );
+    applyStage.exitCode = res.exitCode;
+    applyStage.finishedAt = nowIso();
+    if (res.exitCode === 0) {
+      applyStage.status = "succeeded";
+      run.status = "succeeded";
+      run.error = undefined;
+      run.finishedAt = nowIso();
+      syncRun(run);
       return;
     }
-  }
-
-  applyStage.logs = capLogs(
-    applyStage.logs + "\n[auto-heal] All orphans imported. Retrying apply...\n",
-  );
-
-  // Reset the apply stage's fail markers so the retry can succeed cleanly.
-  applyStage.status = "running";
-  applyStage.exitCode = undefined;
-  applyStage.finishedAt = undefined;
-  run.status = "running";
-  run.error = undefined;
-
-  const res = await runStage({
-    command: "terraform",
-    args: ["apply", "-auto-approve", "-input=false", "-no-color"],
-    cwd,
-    env,
-    timeoutMs: APPLY_TIMEOUT_MS,
-    onLog: (chunk) => {
-      applyStage.logs = capLogs(applyStage.logs + chunk);
-    },
-  });
-  applyStage.exitCode = res.exitCode;
-  applyStage.finishedAt = nowIso();
-  if (res.exitCode === 0) {
-    applyStage.status = "succeeded";
-  } else {
+    // Non-zero: loop to detectOrphans again — maybe another AlreadyExists
+    // surfaced, or the failure isn't recoverable and detectOrphans returns null.
     applyStage.status = "failed";
     run.status = "failed";
-    run.error = `terraform apply failed after auto-import (exit ${res.exitCode}).`;
+    run.error = `terraform apply failed after ${round} auto-heal round(s) (exit ${res.exitCode}).`;
+    run.finishedAt = nowIso();
     applyStage.logs = capLogs(applyStage.logs + `\n${res.stderr.slice(-2_000)}`);
+    syncRun(run);
   }
+  applyStage.logs = capLogs(
+    applyStage.logs +
+      `\n[auto-heal] Bailed after ${MAX_ROUNDS} rounds — same conflicts keep surfacing.\n`,
+  );
 }
 
 function failStage(run: TfRun, name: string, msg: string): void {

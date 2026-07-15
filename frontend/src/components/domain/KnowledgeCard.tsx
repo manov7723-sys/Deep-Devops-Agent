@@ -3,7 +3,7 @@
 import { Badge, Icon } from "@/components/ui";
 import type { SeedKnowledgeDoc } from "@/lib/legacy-types";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info", shared: "default" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info", shared: "default" } as const;
 
 export interface KnowledgeCardProps {
   doc: SeedKnowledgeDoc;

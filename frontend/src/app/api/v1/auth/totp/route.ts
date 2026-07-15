@@ -13,9 +13,24 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  *     codes, return them ONCE in `backupCodes`.
  *   - Login confirm: forcedTotpSetup=false → verify against confirmed secret.
  */
+/** Accepts an optional `?next=<safe-path>` on the URL so the caller can request
+ *  a specific post-2FA landing (e.g. the OAuth wizard resume path). Same
+ *  same-origin-only guard as the OAuth start route. */
+function safeNextFromUrl(reqUrl: string): string | null {
+  try {
+    const n = new URL(reqUrl).searchParams.get("next");
+    if (!n || !n.startsWith("/") || n.startsWith("//")) return null;
+    if (n.includes("\n") || n.includes("\r")) return null;
+    return n;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { code?: string };
   const code = (body.code ?? "").trim();
+  const redirectTo = safeNextFromUrl(req.url) ?? "/u/dashboard";
 
   const sess = await getPendingSession();
   if (!sess) {
@@ -53,7 +68,7 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({
       ok: true,
-      redirect: "/u/dashboard",
+      redirect: redirectTo,
       backupCodes, // shown ONCE on the success screen
     });
   }
@@ -79,5 +94,5 @@ export async function POST(req: Request) {
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
   });
-  return NextResponse.json({ ok: true, redirect: "/u/dashboard" });
+  return NextResponse.json({ ok: true, redirect: redirectTo });
 }

@@ -4,7 +4,7 @@ import { pickBackendForEnv } from "@/lib/devops/envs";
 import type { Tool } from "./types";
 
 type Input = {
-  /** Env key whose cluster/cloud-provider + state backend to use (e.g. "release"). */
+  /** Env key whose cluster/cloud-provider + state backend to use (e.g. "prod"). */
   envKey: string;
   /** A short run label, e.g. "s3-assets-apply". */
   name: string;
@@ -50,7 +50,7 @@ export const runTerraformTool: Tool<Input, Output> = {
     properties: {
       envKey: {
         type: "string",
-        description: 'Env key, e.g. "release" or "alpha". Must exist in this project.',
+        description: 'Env key, e.g. "prod" or "dev". Must exist in this project.',
       },
       name: { type: "string", description: 'Short run label, e.g. "s3-bucket-apply".' },
       action: {
@@ -111,7 +111,34 @@ export const runTerraformTool: Tool<Input, Output> = {
     // Pick the backend that matches the env's cloud (S3 for AWS, GCS for GCP,
     // azurerm for Azure) — never blindly S3, which used to force AWS creds
     // onto every apply regardless of cloud.
-    const backend = pickBackendForEnv(env);
+    let backend = pickBackendForEnv(env);
+
+    // AGENT ONBOARDING: Azure envs may not have a state backend configured yet
+    // — auto-provision RG + storage + container via ARM using the SP creds so
+    // the user never has to click Provision. Only when the env is Azure AND
+    // we have a provider AND the backend is missing.
+    if (!backend && env.cloudProvider?.kind === "azure" && env.cloudProviderId) {
+      const { ensureAzureStateBackend } = await import("@/lib/cloud/azure-tfstate");
+      const ensured = await ensureAzureStateBackend({
+        projectId: ctx.projectId,
+        envId: env.id,
+        envKey: env.key,
+        cloudProviderId: env.cloudProviderId,
+      });
+      if (ensured.ok) {
+        backend = {
+          kind: "azurerm",
+          resourceGroup: ensured.backend.resourceGroup,
+          storageAccount: ensured.backend.storageAccount,
+          container: ensured.backend.container,
+        };
+      } else {
+        return {
+          ok: false,
+          error: `Couldn't auto-provision Azure state backend: ${ensured.message}`,
+        };
+      }
+    }
 
     const run = startTerraformRun({
       projectId: ctx.projectId,

@@ -3,7 +3,7 @@
 import { Badge, Btn, Icon, type IconName } from "@/components/ui";
 import type { SeedAlert } from "@/lib/legacy-types";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info" } as const;
 
 function sevTone(sev: SeedAlert["sev"]): "danger" | "warn" | "info" {
   return sev === "high" ? "danger" : sev === "medium" ? "warn" : "info";

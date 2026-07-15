@@ -50,7 +50,7 @@ export const setupCloudWatchAlarmsTool: Tool<Input, Output> = {
     properties: {
       envKey: {
         type: "string",
-        description: 'Env key, e.g. "release". Omit to use the env with an AWS cluster connected.',
+        description: 'Env key, e.g. "prod". Omit to use the env with an AWS cluster connected.',
       },
       email: {
         type: "string",

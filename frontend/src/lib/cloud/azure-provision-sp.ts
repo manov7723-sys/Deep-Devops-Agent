@@ -28,6 +28,11 @@ type Res<T> = { ok: true; data: T } | { ok: false; error: string };
  *  assignments), not Reader (can't create). The right least-privilege for
  *  end-to-end deploys. */
 const CONTRIBUTOR_ROLE = "b24988ac-6180-42a0-ab88-20f7382dd24c";
+/** "Storage Blob Data Contributor" role id — read/write blobs via AAD. Needed
+ *  because Terraform's azurerm state backend uses AAD auth on blobs by default,
+ *  and Contributor covers management-plane storage ops but NOT blob data-plane.
+ *  Without this the SP hits 403 InsufficientAccountPermissions on state lock. */
+const STORAGE_BLOB_DATA_CONTRIBUTOR = "ba92f5b4-2d11-453d-a403-e96b0029c9fe";
 
 async function graph<T = Record<string, unknown>>(
   token: string,
@@ -225,6 +230,33 @@ export async function autoProvisionSpFromOAuth(args: {
         `Granting Contributor on the subscription failed: ${ra.error}. ` +
         `The signed-in user must be Owner or User Access Administrator on the subscription.`,
     };
+  }
+
+  // 6 — Grant Storage Blob Data Contributor on the subscription too, so any
+  //     state-storage account provisioned later (in this or any RG) inherits
+  //     data-plane blob access. Without this, Terraform's azurerm backend hits
+  //     403 InsufficientAccountPermissions on the state blob even though
+  //     Contributor covers listKeys and management-plane storage ops.
+  //     Non-fatal: if this write fails (rare), the deploy path can still
+  //     retry via the storage-account-scoped grant.
+  const blobAssignmentName = await deterministicGuid(
+    `${spObjectId}:${args.subscriptionId}:blobdata`,
+  );
+  const blobRoleUrl =
+    `${ARM}/subscriptions/${args.subscriptionId}` +
+    `/providers/Microsoft.Authorization/roleAssignments/${blobAssignmentName}?api-version=2022-04-01`;
+  const blobRa = await arm(args.userArmAccessToken, blobRoleUrl, "PUT", {
+    properties: {
+      roleDefinitionId: `/subscriptions/${args.subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/${STORAGE_BLOB_DATA_CONTRIBUTOR}`,
+      principalId: spObjectId,
+      principalType: "ServicePrincipal",
+    },
+  });
+  if (!blobRa.ok && !/already exists|RoleAssignmentExists/i.test(blobRa.error)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[azure-provision] Granting Storage Blob Data Contributor failed (non-fatal): ${blobRa.error}`,
+    );
   }
 
   return {

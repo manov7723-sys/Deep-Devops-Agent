@@ -13,11 +13,24 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  * Login (where `forcedTotpSetup` is false) cannot skip; that requires the
  * normal verify-or-backup flow.
  */
+function safeNext(reqUrl: string): string | null {
+  try {
+    const n = new URL(reqUrl).searchParams.get("next");
+    if (!n || !n.startsWith("/") || n.startsWith("//")) return null;
+    if (n.includes("\n") || n.includes("\r")) return null;
+    return n;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   const sess = await getPendingSession();
   if (!sess) {
     return NextResponse.json({ ok: false, code: "no_pending_session" }, { status: 401 });
   }
+  // Honour caller-supplied ?next=<path> so the wizard resumes after 2FA-skip.
+  const redirectTo = safeNext(req.url) ?? "/u/dashboard";
   if (!sess.forcedTotpSetup) {
     return NextResponse.json(
       {
@@ -40,5 +53,5 @@ export async function POST(req: Request) {
     metadata: { method: "skip" },
   });
 
-  return NextResponse.json({ ok: true, redirect: "/u/dashboard", skipped: true });
+  return NextResponse.json({ ok: true, redirect: redirectTo, skipped: true });
 }

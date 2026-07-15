@@ -22,7 +22,7 @@ import { getKubeconfigForEnv, kubeExecEnv } from "@/lib/runner/creds";
 import type { Tool } from "./types";
 
 type Input = {
-  /** Env key whose connected cluster to apply to (e.g. "alpha"). */
+  /** Env key whose connected cluster to apply to (e.g. "dev"). */
   envKey: string;
   /** The manifest YAML to apply. Supports multiple docs separated by `---`. */
   manifest: string;

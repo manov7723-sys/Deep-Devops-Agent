@@ -40,7 +40,7 @@ export const setupAzureMonitorAlarmsTool: Tool<Input, Output> = {
     properties: {
       envKey: {
         type: "string",
-        description: 'Env key, e.g. "release". Omit to use the env with an Azure cluster.',
+        description: 'Env key, e.g. "prod". Omit to use the env with an Azure cluster.',
       },
       email: { type: "string", description: "Email to notify on alert (creates an action group)." },
       metrics: {

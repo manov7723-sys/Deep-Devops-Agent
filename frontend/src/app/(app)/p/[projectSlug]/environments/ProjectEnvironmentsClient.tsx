@@ -41,7 +41,7 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
     mutationFn: (envKey: string) => api.put(`/projects/${slug}/active-env`, { envKey }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug, "active-env"] }),
   });
-  const [selected, setSelected] = useState<EnvId>(selectedFromUrl ?? "release");
+  const [selected, setSelected] = useState<EnvId>(selectedFromUrl ?? "prod");
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   // sync URL when changed
@@ -232,7 +232,7 @@ export function ProjectEnvironmentsClient({ slug }: { slug: string }) {
                   label="Cloud target"
                   value={
                     <Badge icon="cloud">
-                      {focused.id === "alpha" ? "GCP · us-central1" : "AWS · us-east-1"}
+                      {focused.id === "dev" || focused.id === "alpha" ? "GCP · us-central1" : "AWS · us-east-1"}
                     </Badge>
                   }
                 />

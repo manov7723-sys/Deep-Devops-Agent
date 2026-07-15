@@ -748,6 +748,46 @@ function TerraformStateSection({
     staleTime: 30_000,
   });
 
+  // Azure cascading pickers: resource groups → storage accounts → blob
+  // containers. Each level scopes the next so the user can't pick a mismatched
+  // triple (which caused most of the "backend not found" errors in early demos).
+  const azContext = useQuery<{
+    resourceGroups?: Array<{ name: string; location: string }>;
+    connected?: boolean;
+  }>({
+    queryKey: ["p", slug, "azure-context"],
+    queryFn: () => api.get(`/projects/${slug}/azure/context`),
+    enabled: !!slug,
+    staleTime: 60_000,
+  });
+  const azResourceGroups = azContext.data?.resourceGroups ?? [];
+
+  const azStorageAccountsQ = useQuery<{
+    storageAccounts?: Array<{ name: string; location: string; resourceGroup: string }>;
+  }>({
+    queryKey: ["p", slug, "azure-storage", azResourceGroup],
+    queryFn: () =>
+      api.get(
+        `/projects/${slug}/azure/storage-accounts${azResourceGroup ? `?rg=${encodeURIComponent(azResourceGroup)}` : ""}`,
+      ),
+    // Only fetch after user picks a resource group — avoids listing every SA
+    // in the sub on page load (can be dozens).
+    enabled: !!slug && !!azResourceGroup,
+    staleTime: 30_000,
+  });
+  const azStorageAccounts = azStorageAccountsQ.data?.storageAccounts ?? [];
+
+  const azContainersQ = useQuery<{ containers?: string[] }>({
+    queryKey: ["p", slug, "azure-containers", azResourceGroup, azStorageAccount],
+    queryFn: () =>
+      api.get(
+        `/projects/${slug}/azure/storage-accounts/${encodeURIComponent(azStorageAccount)}/containers?rg=${encodeURIComponent(azResourceGroup)}`,
+      ),
+    enabled: !!slug && !!azResourceGroup && !!azStorageAccount,
+    staleTime: 30_000,
+  });
+  const azContainers = azContainersQ.data?.containers ?? [];
+
   useEffect(() => {
     setBucket(backend.data?.bucket ?? "");
     setRegion(backend.data?.region ?? "us-east-1");
@@ -853,29 +893,110 @@ function TerraformStateSection({
           </Field>
         ) : isAzure ? (
           <>
-            <Field label="Resource group" hint="The resource group that owns the storage account.">
-              <Input
-                className="mono"
-                value={azResourceGroup}
-                placeholder="tfstate-rg"
-                onChange={(e) => setAzResourceGroup(e.target.value)}
-              />
+            {/* Cascading Azure pickers: RG → Storage Account → Blob Container.
+                Each level auto-loads from the previous — no free-text names to
+                mistype. Free-text fallback appears when the connected Azure
+                account has zero resources of that kind yet. */}
+            <Field
+              label="Resource group"
+              hint={
+                azResourceGroups.length > 0
+                  ? `${azResourceGroups.length} resource group${azResourceGroups.length === 1 ? "" : "s"} in the connected subscription.`
+                  : "No resource groups found — type a name to create one on save."
+              }
+            >
+              {azResourceGroups.length > 0 ? (
+                <Select
+                  value={azResourceGroup}
+                  onValueChange={(v) => {
+                    setAzResourceGroup(v);
+                    // Clear downstream picks so the next dropdown reloads.
+                    setAzStorageAccount("");
+                    setAzContainer("");
+                  }}
+                  ariaLabel="Resource group"
+                  options={azResourceGroups.map((r) => ({
+                    value: r.name,
+                    label: `${r.name} · ${r.location}`,
+                  }))}
+                  placeholder="Pick a resource group"
+                />
+              ) : (
+                <Input
+                  className="mono"
+                  value={azResourceGroup}
+                  placeholder="tfstate-rg"
+                  onChange={(e) => setAzResourceGroup(e.target.value)}
+                />
+              )}
             </Field>
-            <Field label="Storage account" hint="Globally unique, 3-24 lowercase letters/digits.">
-              <Input
-                className="mono"
-                value={azStorageAccount}
-                placeholder="mytfstateacct"
-                onChange={(e) => setAzStorageAccount(e.target.value)}
-              />
+
+            <Field
+              label="Storage account"
+              hint={
+                !azResourceGroup
+                  ? "Pick a resource group first."
+                  : azStorageAccountsQ.isLoading
+                    ? `Loading storage accounts in ${azResourceGroup}…`
+                    : azStorageAccounts.length > 0
+                      ? `${azStorageAccounts.length} storage account${azStorageAccounts.length === 1 ? "" : "s"} in ${azResourceGroup}.`
+                      : "No storage accounts in this RG — type a new name (3-24 lowercase letters/digits, globally unique)."
+              }
+            >
+              {azStorageAccounts.length > 0 ? (
+                <Select
+                  value={azStorageAccount}
+                  onValueChange={(v) => {
+                    setAzStorageAccount(v);
+                    setAzContainer("");
+                  }}
+                  ariaLabel="Storage account"
+                  options={azStorageAccounts.map((s) => ({
+                    value: s.name,
+                    label: `${s.name} · ${s.location}`,
+                  }))}
+                  placeholder="Pick a storage account"
+                />
+              ) : (
+                <Input
+                  className="mono"
+                  value={azStorageAccount}
+                  placeholder="mytfstateacct"
+                  onChange={(e) => setAzStorageAccount(e.target.value)}
+                  readOnly={!azResourceGroup}
+                />
+              )}
             </Field>
-            <Field label="Blob container" hint="Container inside the storage account. Required.">
-              <Input
-                className="mono"
-                value={azContainer}
-                placeholder="tfstate"
-                onChange={(e) => setAzContainer(e.target.value)}
-              />
+
+            <Field
+              label="Blob container"
+              hint={
+                !azStorageAccount
+                  ? "Pick a storage account first."
+                  : azContainersQ.isLoading
+                    ? `Loading containers in ${azStorageAccount}…`
+                    : azContainers.length > 0
+                      ? `${azContainers.length} container${azContainers.length === 1 ? "" : "s"} · reserved system containers ($logs, $blobchangefeed) are hidden.`
+                      : "No containers in this storage account — type a new name to create one on save (e.g. tfstate)."
+              }
+            >
+              {azContainers.length > 0 ? (
+                <Select
+                  value={azContainer}
+                  onValueChange={setAzContainer}
+                  ariaLabel="Blob container"
+                  options={azContainers.map((c) => ({ value: c, label: c }))}
+                  placeholder="Pick a container"
+                />
+              ) : (
+                <Input
+                  className="mono"
+                  value={azContainer}
+                  placeholder="tfstate"
+                  onChange={(e) => setAzContainer(e.target.value)}
+                  readOnly={!azStorageAccount}
+                />
+              )}
             </Field>
           </>
         ) : (

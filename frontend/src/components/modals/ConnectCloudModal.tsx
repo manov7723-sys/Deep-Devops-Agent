@@ -188,6 +188,10 @@ export function ConnectCloudModal({
   const [notice, setNotice] = useState<string | null>(null);
   const [bindEnvs, setBindEnvs] = useState<Set<string>>(new Set());
   const [azureBusy, setAzureBusy] = useState(false);
+  // Optional per-connect Azure Tenant ID — required for personal Microsoft
+  // accounts whose Azure subscription lives in a hidden AAD tenant that
+  // /common/ can't route ARM tokens through. Left blank for work accounts.
+  const [azureTenantId, setAzureTenantId] = useState("");
 
   // Reset everything when the modal opens.
   useEffect(() => {
@@ -197,6 +201,7 @@ export function ConnectCloudModal({
     setRegion(REGION_DEFAULTS.aws);
     setValues({});
     setAwsRoleArn("");
+    setAzureTenantId("");
     setBindEnvs(new Set());
     setServerError(null);
     setNotice(null);
@@ -249,7 +254,11 @@ export function ConnectCloudModal({
       h = 720;
     const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
     const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
-    const url = `/api/v1/cloud-providers/${provider}/oauth/start?popup=1${projectSlug ? `&projectSlug=${encodeURIComponent(projectSlug)}` : ""}`;
+    const tenantParam =
+      provider === "azure" && azureTenantId.trim()
+        ? `&tenantId=${encodeURIComponent(azureTenantId.trim())}`
+        : "";
+    const url = `/api/v1/cloud-providers/${provider}/oauth/start?popup=1${projectSlug ? `&projectSlug=${encodeURIComponent(projectSlug)}` : ""}${tenantParam}`;
     const popup = window.open(
       url,
       `dda_${provider}_oauth`,
@@ -498,7 +507,8 @@ export function ConnectCloudModal({
           </div>
         ) : isAzure ? (
           /* Azure — interactive "Sign in with Microsoft" (OAuth + PKCE). The
-             popup completes the connection; no fields to fill here. */
+             popup completes the connection; no fields to fill here except the
+             optional Tenant ID for personal Microsoft accounts. */
           <div className="col gap-3">
             <div className="row gap-2 dda-wizard-iam-note">
               <Icon name="shield" size={16} style={{ flex: "none" }} />
@@ -507,6 +517,17 @@ export function ConnectCloudModal({
                 Agent stores an encrypted refresh token (no client secret to manage).
               </span>
             </div>
+            <Field
+              label="Tenant ID (only for personal Microsoft accounts)"
+              hint="Leave blank for work/school accounts. Personal accounts (gmail/outlook/hotmail) with an Azure subscription need their directory ID here — find it at portal.azure.com → profile → Switch directory → Directory ID."
+            >
+              <Input
+                className="mono"
+                placeholder="00000000-0000-0000-0000-000000000000 (optional)"
+                value={azureTenantId}
+                onChange={(e) => setAzureTenantId(e.target.value)}
+              />
+            </Field>
             <Btn
               variant="primary"
               icon="cloud"

@@ -4,7 +4,7 @@ import { getKubeconfigForEnv, kubeExecEnv } from "@/lib/runner/creds";
 import type { Tool } from "./types";
 
 type Input = {
-  /** Env key like "alpha" / "release" / a custom slug. Must be wired in this project. */
+  /** Env key like "dev" / "prod" / a custom slug. Must be wired in this project. */
   envKey: string;
   /** Kubernetes resource kind: pods, deployments, services, ingresses, nodes, configmaps, secrets... */
   kind: string;
@@ -95,7 +95,7 @@ export const listKubernetesResourcesTool: Tool<Input, Output> = {
     properties: {
       envKey: {
         type: "string",
-        description: 'Env key, e.g. "alpha" or "release". Must be an env in the current project.',
+        description: 'Env key, e.g. "dev" or "prod". Must be an env in the current project.',
       },
       kind: {
         type: "string",

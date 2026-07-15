@@ -43,7 +43,7 @@ export const getKubernetesLogsTool: Tool<Input, Output> = {
   inputSchema: {
     type: "object",
     properties: {
-      envKey: { type: "string", description: 'Env key, e.g. "alpha".' },
+      envKey: { type: "string", description: 'Env key, e.g. "dev".' },
       podName: {
         type: "string",
         description: "Exact pod name as returned by list_kubernetes_resources.",

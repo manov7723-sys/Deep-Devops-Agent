@@ -83,6 +83,15 @@ type Input = {
   /** "pr" (default — review then merge) or "direct" (commit to the chosen branch). */
   commitMode?: "pr" | "direct";
   overwriteDockerfile?: boolean;
+  /**
+   * How to package the app for Kubernetes:
+   *   - "manifests" (default) — plain Deployment + Service + Ingress YAMLs;
+   *     CD workflow uses `kubectl apply`.
+   *   - "helm" — full chart under charts/<appName>/ (Chart.yaml, values.yaml,
+   *     values-<env>.yaml, templates/*); CD workflow uses `helm upgrade --install`.
+   * Ask the user via the batch options-form; see agent.ts step 3.
+   */
+  manifestType?: "manifests" | "helm";
 };
 
 type DeployedService = {
@@ -206,6 +215,15 @@ export const deployMyAppTool: Tool<Input, Output> = {
       overwriteDockerfile: {
         type: "boolean",
         description: "Replace an existing Dockerfile with the vetted template. Default false.",
+      },
+      manifestType: {
+        type: "string",
+        enum: ["manifests", "helm"],
+        description:
+          "How to package the app for Kubernetes. 'manifests' (default) → raw Deployment/Service/Ingress " +
+          "YAMLs applied with `kubectl apply`. 'helm' → full chart (Chart.yaml + values.yaml + " +
+          "values-<env>.yaml + templates/) under charts/<appName>/; CD workflow runs `helm upgrade --install`. " +
+          "Ask via the deploy batch options-form (agent step 3).",
       },
     },
     required: ["repoFullName", "envKey", "namespace", "branch", "services"],
@@ -727,6 +745,18 @@ export const deployMyAppTool: Tool<Input, Output> = {
       ? `Files committed to ${branch} — CI is starting, and the CD workflow will deploy automatically after CI succeeds. Watch it: ${watchHint}. deploy_app is only the fallback if the CD run fails.`
       : `PR #${pullRequest?.number ?? "?"} opened — after the user merges it, CI builds each image and the CD workflow deploys it automatically. Then watch: ${watchHint}. deploy_app is only the fallback if the CD run fails.`;
 
+    // Echo which packaging style was picked so the deploy report + downstream
+    // steps can see it. `helm` uses the existing scaffold_helm_chart + run_helm_upgrade
+    // tools instead of raw manifests — the agent should route accordingly after
+    // this call returns (see agent.ts step 4 for the branching prompt).
+    const manifestType = input.manifestType ?? "manifests";
+    const manifestNote =
+      manifestType === "helm"
+        ? "Manifest style: Helm chart — after this succeeds, run scaffold_helm_chart(repoFullName, chartPath:'charts/" +
+          (input.appName || input.repoFullName.split("/")[1]) +
+          "', imageRepository:'<registry>', targetPort:<port>) then run_helm_upgrade to install it. The CD workflow will use `helm upgrade --install` on subsequent pushes."
+        : "Manifest style: raw manifests — CD workflow uses `kubectl apply` on the generated Deployment + Service + Ingress files.";
+
     return {
       ok: true,
       output: {
@@ -737,6 +767,8 @@ export const deployMyAppTool: Tool<Input, Output> = {
         namespace,
         pullRequest,
         registrySteps,
+        manifestType,
+        manifestNote,
         next,
       },
     };

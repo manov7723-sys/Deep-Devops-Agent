@@ -6,7 +6,7 @@ import { Badge, Btn, Icon, Meter, StatusDot, type IconName } from "@/components/
 import { api, apiErrorMessage } from "@/lib/api/client";
 import type { CloudCategory, SeedCloudResource } from "@/lib/legacy-types";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info" } as const;
 
 const CAT_ICON: Record<CloudCategory, IconName> = {
   compute: "cpu",

@@ -17,7 +17,7 @@ import {
 } from "@/hooks/queries/project";
 import type { SeedActivity, SeedApproval, SeedEnv, SeedPipeline } from "@/lib/legacy-types";
 
-const ENV_TONE = { release: "ok", beta: "warn", alpha: "info" } as const;
+const ENV_TONE = { prod: "ok", staging: "warn", dev: "info", release: "ok", beta: "warn", alpha: "info" } as const;
 
 function moneyK(v: number) {
   return `$${(v / 1000).toFixed(1)}k`;
@@ -59,7 +59,7 @@ export function ProjectDashboardClient({
     <div className="col gap-5">
       <PageHead
         title={projectName}
-        sub="Production-grade infra across alpha, beta & release — watched by 5 agents."
+        sub="Production-grade infra across dev, staging & prod — watched by 5 agents."
         actions={
           <>
             <Btn variant="outline" icon="refresh">
@@ -143,7 +143,7 @@ export function ProjectDashboardClient({
                   <div className="row between gap-3">
                     <div className="row gap-3" style={{ minWidth: 0 }}>
                       <span
-                        className={`dot ${bad ? "warn" : "ok"} ${e.id === "release" ? "pulse" : ""}`}
+                        className={`dot ${bad ? "warn" : "ok"} ${(e.id === "prod" || e.id === "release") ? "pulse" : ""}`}
                       />
                       <div className="col" style={{ lineHeight: 1.35, minWidth: 0 }}>
                         <span className="row gap-2" style={{ fontWeight: 700, fontSize: 13.5 }}>
