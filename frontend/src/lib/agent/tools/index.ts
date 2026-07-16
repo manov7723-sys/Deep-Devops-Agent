@@ -100,6 +100,14 @@ import {
   deleteEnvironmentTool,
 } from "./env-tools";
 import { triggerPipelineTool } from "./pipeline-tools";
+import {
+  connectJenkinsTool,
+  ensureJenkinsJobTool,
+  generateJenkinsfileTool,
+  setJenkinsCredentialTool,
+  triggerJenkinsBuildTool,
+  waitForJenkinsBuildTool,
+} from "./jenkins-tools";
 import type { Tool, ToolContext, ToolExecuteResult } from "./types";
 
 export type { Tool, ToolContext, ToolExecuteResult } from "./types";
@@ -161,6 +169,13 @@ export const ALL_TOOLS: Tool[] = [
   setupGithubOidcEcrTool,
   generateEcrWorkflowTool,
   savePipelineToProjectTool,
+  // Jenkins alternative CI/CD system — same 4-stage shape, user brings their own Jenkins server.
+  connectJenkinsTool,
+  generateJenkinsfileTool,
+  ensureJenkinsJobTool,
+  setJenkinsCredentialTool,
+  triggerJenkinsBuildTool,
+  waitForJenkinsBuildTool,
   // Security
   trivyScanTool,
   generateTrivyWorkflowTool,
