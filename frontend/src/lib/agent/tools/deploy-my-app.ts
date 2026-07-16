@@ -38,7 +38,9 @@ function encodeRefPath(ref: string): string {
  *      the CI build→scan→push workflow (one per service), and production-style
  *      manifests. Single service uses repo-level GitHub vars; a monorepo bakes
  *      each service's registry values in (repo vars can't differ per workflow).
- *   4. Push it all as ONE PR (or commit directly).
+ *   4. Commit everything directly to the target branch (default = repo's
+ *      default branch). commitMode='pr' is available but almost never used —
+ *      branch protection on the target branch is enforced by GitHub itself.
  *
  * After merge the agent chains per service: wait_for_workflow_run(its workflow
  * file) → deploy_app(its imageRef/containerPort), server-side + approval-gated.
@@ -80,7 +82,11 @@ type Input = {
   /** Base app name (lowercase DNS label). Defaults to the repo name. */
   appName?: string;
   replicas?: number;
-  /** "pr" (default — review then merge) or "direct" (commit to the chosen branch). */
+  /**
+   * "direct" (default — commit straight to the target branch, no PR) or
+   * "pr" (opens one PR for teams that require review). The deploy chat
+   * playbook always uses direct; pr is only for callers that opt in.
+   */
   commitMode?: "pr" | "direct";
   overwriteDockerfile?: boolean;
   /**
@@ -140,7 +146,8 @@ export const deployMyAppTool: Tool<Input, Output> = {
     "deployable service (a single app, OR a monorepo with a separate FRONTEND and BACKEND), ensures a registry repo + " +
     "keyless auth per service (and grants that identity cluster access), generates the Dockerfile(s), the CI " +
     "build→scan→push workflow(s), production-style Kubernetes manifests AND the CD deploy workflow (runs after CI, " +
-    "keyless), and pushes everything as ONE PR (or directly, commitMode='direct'). REQUIRED order: " +
+    "keyless), and commits everything DIRECTLY to the target branch (default = repo's default branch; " +
+    "commitMode='pr' is available but almost never used — the deploy playbook always uses direct). REQUIRED order: " +
     "(1) analyze_app_services, (2) list_kubernetes_resources(envKey, kind:'namespaces') and ask the user which " +
     "namespace to deploy into (```options``` — existing namespaces + 'Create new'), (3) list existing registry repos " +
     "(list_ecr_repos on AWS, list_artifact_registries on GCP, list_acr on Azure), (4) ask the user which repo to use " +
@@ -210,7 +217,10 @@ export const deployMyAppTool: Tool<Input, Output> = {
       commitMode: {
         type: "string",
         enum: ["pr", "direct"],
-        description: "'pr' (default) opens one PR; 'direct' commits to the default branch.",
+        description:
+          "'direct' (default) commits straight to the target branch — the standard path, no PR. " +
+          "'pr' opens a review PR for teams that require it; almost never used since branch protection " +
+          "gates get enforced by GitHub anyway.",
       },
       overwriteDockerfile: {
         type: "boolean",
@@ -680,7 +690,11 @@ export const deployMyAppTool: Tool<Input, Output> = {
     // PR link is stable per run (PR gets closed → source branch may be deleted).
     // Suffix derived from process.hrtime.bigint so ordering is deterministic
     // within a run and unique across runs without needing Date.now().
-    const direct = input.commitMode === "direct";
+    // Default = 'direct'. Deploy playbook always commits straight to the
+    // default branch (main / master); user has to explicitly opt in to 'pr'
+    // for teams that require review — rare, and gated by GitHub's branch
+    // protection anyway.
+    const direct = input.commitMode !== "pr";
     const runId = process.hrtime.bigint().toString(36).slice(-8);
     const pushBranch = direct ? branch : `deploy/${baseApp}-${runId}`;
     const svcList = deployed
