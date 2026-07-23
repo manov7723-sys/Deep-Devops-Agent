@@ -22,6 +22,8 @@
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import tls from "node:tls";
+import { createHash } from "node:crypto";
 import { runStage } from "@/lib/runner/exec";
 
 /** GitHub's OIDC issuer — the `url` of the IAM identity provider. */
@@ -29,14 +31,80 @@ const GITHUB_OIDC_ISSUER = "token.actions.githubusercontent.com";
 /** The audience GitHub mints tokens for when targeting AWS STS. */
 const GITHUB_OIDC_AUDIENCE = "sts.amazonaws.com";
 /**
- * GitHub's well-known certificate thumbprints. AWS no longer validates the
- * thumbprint for this library-backed IdP, but `create-open-id-connect-provider`
- * still requires the argument, so we pass the published values.
+ * FALLBACK thumbprints, only used if we can't fetch GitHub's live cert. When
+ * AWS validates the OIDC token via the "IAMTrustStore" method (which it does
+ * for providers it doesn't recognize as fully managed), it checks the token's
+ * signing cert against these thumbprints. GitHub ROTATES this cert — stale
+ * thumbprints cause "An unknown error occurred" → the workflow sees
+ * "Not authorized to perform sts:AssumeRoleWithWebIdentity". So the real
+ * source of truth is fetchGithubOidcThumbprints() below; these are the
+ * last-known-good values used only when the live fetch fails.
  */
-const GITHUB_OIDC_THUMBPRINTS = [
+const GITHUB_OIDC_THUMBPRINTS_FALLBACK = [
+  "2d74d6dfd96eea55ad7baafa0d3c6552b2dadc37",
   "6938fd4d98bab03faadb97b34396831e3780aea1",
   "1c58a3a8518e8759bf075b76b750d4f2df264fcd",
 ];
+
+/**
+ * Fetch GitHub's CURRENT OIDC signing-cert thumbprints by opening a TLS
+ * connection to the issuer and SHA1-fingerprinting each cert in the presented
+ * chain. AWS wants the fingerprint of an intermediate/root CA in the chain;
+ * we return ALL of them so whichever one AWS validates against is present.
+ * This is what makes the whole flow self-heal across GitHub cert rotations —
+ * no hardcoded thumbprint can go stale because we re-fetch on every setup.
+ */
+async function fetchGithubOidcThumbprints(): Promise<string[]> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v: string[]) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    try {
+      const socket = tls.connect(
+        443,
+        GITHUB_OIDC_ISSUER,
+        { servername: GITHUB_OIDC_ISSUER, rejectUnauthorized: false },
+        () => {
+          try {
+            const leaf = socket.getPeerCertificate(true);
+            const thumbs: string[] = [];
+            const seen = new Set<string>();
+            let c: tls.DetailedPeerCertificate | undefined = leaf;
+            // Walk the chain leaf → root, SHA1 each DER cert. Skip the leaf
+            // itself (AWS matches an intermediate/root), keep the rest.
+            let depth = 0;
+            while (c && c.raw && !seen.has(c.fingerprint)) {
+              seen.add(c.fingerprint);
+              if (depth > 0) {
+                thumbs.push(createHash("sha1").update(c.raw).digest("hex"));
+              }
+              const next: tls.DetailedPeerCertificate | undefined = c.issuerCertificate;
+              if (!next || next.fingerprint === c.fingerprint) break;
+              c = next;
+              depth++;
+            }
+            socket.end();
+            done(thumbs);
+          } catch {
+            socket.destroy();
+            done([]);
+          }
+        },
+      );
+      socket.on("error", () => done([]));
+      socket.setTimeout(8000, () => {
+        socket.destroy();
+        done([]);
+      });
+    } catch {
+      done([]);
+    }
+  });
+}
 
 export type GithubOidcSetupInput = {
   /** Ready-to-use AWS credential env from resolveAwsExecEnv(). */
@@ -203,9 +271,40 @@ export async function setupGithubOidcEcr(
         stderr: tail(listProviders.stderr),
       };
     }
+    // Fetch GitHub's LIVE cert thumbprints. Falls back to last-known-good if
+    // the TLS fetch fails (offline/sandboxed). Merge live + fallback + dedupe
+    // so whichever cert AWS validates against is always present.
+    const liveThumbs = await fetchGithubOidcThumbprints();
+    const thumbprints = Array.from(
+      new Set([...liveThumbs, ...GITHUB_OIDC_THUMBPRINTS_FALLBACK]),
+    ).filter((t) => /^[0-9a-f]{40}$/.test(t));
+
     const providerExists = listProviders.stdout.includes(GITHUB_OIDC_ISSUER);
     if (providerExists) {
-      steps.push(`OIDC provider for ${GITHUB_OIDC_ISSUER} already present — reused.`);
+      // SELF-HEAL: the provider may have STALE thumbprints from when it was
+      // first created (GitHub rotates the cert). AWS then validates via
+      // IAMTrustStore against the old thumbprints and fails with "An unknown
+      // error occurred" → the workflow sees "Not authorized". Refresh the
+      // thumbprint list on every setup so a rotated cert never blocks a
+      // customer. This is the fix for the exact demo-blocker we hit.
+      const refresh = await aws(
+        [
+          "iam",
+          "update-open-id-connect-provider-thumbprint",
+          "--open-id-connect-provider-arn",
+          oidcProviderArn,
+          "--thumbprint-list",
+          ...thumbprints,
+        ],
+        awsEnv,
+        region,
+        workdir,
+      );
+      steps.push(
+        refresh.ok
+          ? `OIDC provider present — refreshed its cert thumbprints (${liveThumbs.length ? "live from GitHub" : "fallback"}) so a rotated GitHub cert can't block token validation.`
+          : `OIDC provider present — could NOT refresh thumbprints (${tail(refresh.stderr)}); if the CI OIDC step fails "Not authorized", the provider's thumbprint is stale.`,
+      );
     } else {
       const create = await aws(
         [
@@ -216,7 +315,7 @@ export async function setupGithubOidcEcr(
           "--client-id-list",
           GITHUB_OIDC_AUDIENCE,
           "--thumbprint-list",
-          ...GITHUB_OIDC_THUMBPRINTS,
+          ...thumbprints,
         ],
         awsEnv,
         region,
@@ -233,7 +332,7 @@ export async function setupGithubOidcEcr(
       }
       steps.push(
         create.ok
-          ? `Created OIDC provider for ${GITHUB_OIDC_ISSUER}.`
+          ? `Created OIDC provider for ${GITHUB_OIDC_ISSUER} (${liveThumbs.length ? "live" : "fallback"} thumbprints).`
           : "OIDC provider already existed.",
       );
     }
