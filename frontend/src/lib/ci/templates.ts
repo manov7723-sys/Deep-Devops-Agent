@@ -374,9 +374,19 @@ export function generateDockerArtifacts(args: {
  * between build and push when `scanGate` is on.
  */
 function trivyGateStep(imageRefWithTag: string): string {
+  // GITHUB_TOKEN env is REQUIRED — without it, setup-trivy makes anonymous
+  // GitHub API calls to resolve + download the Trivy binary and DB, which
+  // rate-limit at 60 req/hr and fail the install with a bare "exit code 1"
+  // (NOT a vulnerability finding). Passing the auto-provided token raises the
+  // limit to 1000/hr and makes the install reliable. TRIVY_SKIP_VERSION_CHECK
+  // avoids an extra self-update API call. db/java-db repos are pinned to the
+  // public mirrors so a GHCR hiccup doesn't block the gate either.
   return `
       - name: Scan image for vulnerabilities (Trivy — stop on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@0.28.0
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          TRIVY_SKIP_VERSION_CHECK: "true"
         with:
           image-ref: "${imageRefWithTag}"
           format: table
@@ -421,10 +431,15 @@ export function generateCombinedEcrCiWorkflow(args: {
     })
     .join("\n");
   // Trivy step referenced by matrix variables — one step, runs per service.
+  // GITHUB_TOKEN env avoids the anonymous-API rate limit that fails the binary
+  // install with a bare "exit code 1" (not a real vuln finding).
   const scanStep = gate
     ? `
       - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy — stop on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@0.28.0
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          TRIVY_SKIP_VERSION_CHECK: "true"
         with:
           image-ref: "\${{ matrix.ecr }}:\${{ github.sha }}"
           format: table
