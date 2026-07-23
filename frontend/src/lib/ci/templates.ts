@@ -244,9 +244,20 @@ function nodeServiceDockerfile(p: Record<string, string>): string {
   // missing script is skipped, but a failing script FAILS the docker build
   // (previous version used `|| echo skipping` which silently masked real
   // build errors — a broken build then only surfaced at container start).
+  //
+  // Also auto-run `prisma generate` if the app uses Prisma. Without it,
+  // @prisma/client has no generated types → any `.ts` file importing them
+  // fails the TS check (e.g. "Module '@prisma/client' has no exported member
+  // 'BillingPeriod'"). Prisma is one of the most common Node/TS deps and
+  // `npm ci` alone doesn't run the generator — this makes the build robust.
   const buildLine = p.buildCommand
     ? `RUN ${p.buildCommand}\n`
-    : `# Auto-build when the app defines a build script (Next.js needs it).
+    : `# Prisma: generate client BEFORE build so TS type checks see the enums.
+# Skipped when the app doesn't use Prisma.
+RUN if [ -f prisma/schema.prisma ] || [ -f schema.prisma ]; then \\
+      npx --yes prisma generate; \\
+    fi
+# Auto-build when the app defines a build script (Next.js needs it).
 # Fails the image build if the script exists and errors — surfaces bugs early.
 RUN if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then \\
       npm run build; \\
