@@ -349,11 +349,28 @@ export async function setupGithubOidcEcr(
     // values does the OR-match we want (matches if sub equals ANY entry).
     // ForAnyValue: is ONLY for multi-valued keys and mis-behaves here — an
     // earlier version used it and broke the match. Keep plain StringLike.
-    // We list both the exact-case and lowercased owner/repo so a case drift
-    // between what GitHub sends and what we stored still authenticates.
-    const subExact = `repo:${parsed.owner}/${parsed.repo}:${subject}`;
-    const subLower = `repo:${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}:${subject}`;
-    const subs = subExact === subLower ? [subExact] : [subExact, subLower];
+    //
+    // We emit FOUR patterns per repo to cover every GitHub OIDC sub format:
+    //   1. standard:            repo:owner/repo:*
+    //   2. immutable (ID-suffixed): repo:owner@<orgId>/repo@<repoId>:*
+    //      — some orgs/enterprises enable the "immutable" subject claim which
+    //      embeds numeric org+repo IDs (e.g. repo:acme@123/app@456:ref:...).
+    //      The literal "owner/" can't match "owner@123/", so a plain pattern
+    //      silently fails with "Not authorized" — the exact demo-blocker we
+    //      hit. The @* wildcard covers the optional @<id> segment.
+    //   ×2 for exact-case AND lowercased owner/repo (StringLike is
+    //      case-sensitive; GitHub sends the repo's canonical casing).
+    const o = parsed.owner;
+    const r = parsed.repo;
+    const oLow = o.toLowerCase();
+    const rLow = r.toLowerCase();
+    const patterns = new Set<string>([
+      `repo:${o}/${r}:${subject}`,
+      `repo:${o}@*/${r}@*:${subject}`,
+      `repo:${oLow}/${rLow}:${subject}`,
+      `repo:${oLow}@*/${rLow}@*:${subject}`,
+    ]);
+    const subs = [...patterns];
     const trustPolicy = {
       Version: "2012-10-17",
       Statement: [
