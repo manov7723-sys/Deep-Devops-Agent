@@ -233,9 +233,14 @@ ${
     .join("\n\n") || "(no recognizable manifest files at the root)"
 }
 
+STACK CLASSIFICATION RULES — follow EXACTLY:
+- A React / Vue / Angular / Svelte / Vite / CRA project whose package.json "build" script emits a static bundle (dist/build/out) and has NO server file calling listen() is "static-spa" (served by nginx). Do NOT call it "node-service" — that runs "node server.js" which doesn't exist and crashes the container.
+- Use "node-service" ONLY for a real long-running server (Express/Fastify/Nest/Koa dep + a start script running a server file, or Next.js SSR). Set params.startCommand to the ACTUAL package.json start command, never assume "node server.js".
+- "python": set params.startCommand to the real command; gunicorn/uvicorn is auto-installed even if missing from requirements.txt.
+
 Respond with ONLY a JSON object, no prose:
 {"stack": "static-spa" | "node-service" | "python" | "go", "params": { ... }, "reasoning": "<one short sentence>"}
-- For static-spa, set params.buildDir to the build output dir (dist | build | out).
+- For static-spa, set params.buildDir to the build output dir (dist | build | out) and NO port (always 8080).
 - For node-service / python / go, set params.port if you can infer the listening port (else omit).`;
 
   const llm = await analysisComplete(prompt);
@@ -387,10 +392,16 @@ ${stacksDesc}
 Repository layout and manifests:
 ${treeDesc}
 
+STACK CLASSIFICATION RULES — follow these EXACTLY, they prevent the two most common deploy-breaking mistakes:
+- A React / Vue / Angular / Svelte / Vite / Create-React-App project is a "static-spa" WHENEVER its package.json "build" script emits a static bundle (to dist/build/out) and there is NO server entry file that calls listen() (no server.js/index.js running Express/Fastify/Nest, not Next.js). Serving is done by nginx over the built files. Do NOT classify these as "node-service" — that would run "node server.js", which does not exist, and the container crashes with "Cannot find module server.js".
+  • Tell-tale static-spa deps: react-scripts, vite, @angular/cli, @vue/cli-service, parcel, webpack (as a build tool). buildDir: CRA→build, Vite/Angular/Vue→dist, Next export→out.
+- Only use "node-service" when the package.json has a real long-running server: an Express/Fastify/Nest/Koa dependency AND a start script that runs a server file (e.g. "node server.js", "nest start", "next start" for SSR). If you pick node-service, set params.startCommand to the ACTUAL command from package.json "scripts.start" (or the file named in "main") — never assume "node server.js" unless that file exists.
+- "python": set params.startCommand to the real server command; gunicorn/uvicorn will be auto-installed even if absent from requirements.txt.
+
 Respond with ONLY a JSON object, no prose:
 {"monorepo": true|false, "services": [{"name": "frontend"|"backend"|"app", "path": "<repo-relative dir, \"\" for root>", "stack": "static-spa"|"node-service"|"python"|"go", "params": { ... }, "port": <number> }]}
 - Use "frontend" for the UI/SPA service, "backend" for the API service, "app" for a single-service repo.
-- For static-spa set params.buildDir (dist|build|out). For others set params.port to the listening port when inferable.
+- For static-spa set params.buildDir (dist|build|out) — do NOT set a port, it always serves on 8080. For others set params.port to the listening port when inferable.
 - If the whole repo is one service, return exactly one service with path "".`;
 
   const llm = await analysisComplete(prompt);

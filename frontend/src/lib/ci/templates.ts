@@ -262,6 +262,29 @@ CMD ${JSON.stringify(p.startCommand.split(" "))}
 }
 
 function pythonDockerfile(p: Record<string, string>): string {
+  const startCommand = p.startCommand || "gunicorn -b 0.0.0.0:8000 app:app";
+  // The CMD's first token is the server binary (gunicorn/uvicorn/…). If the
+  // app's requirements.txt doesn't list it, the container dies at startup with
+  // `exec: "gunicorn": executable file not found in $PATH` (exit 128). So we
+  // detect the server and pip-install it EXPLICITLY — a missing entry in
+  // requirements.txt can no longer break the deploy. Maps to the right pip
+  // package (uvicorn needs the [standard] extras for the CLI + websockets).
+  const serverBin = startCommand.trim().split(/\s+/)[0] ?? "";
+  const SERVER_PKG: Record<string, string> = {
+    gunicorn: "gunicorn",
+    uvicorn: "uvicorn[standard]",
+    hypercorn: "hypercorn",
+    daphne: "daphne",
+    waitress: "waitress",
+  };
+  const serverPkg = SERVER_PKG[serverBin];
+  const ensureServer = serverPkg
+    ? `# Ensure the production server ("${serverBin}") is present even if it's
+# missing from requirements.txt — otherwise the CMD fails with
+# "${serverBin}: not found" at container start.
+RUN pip install --no-cache-dir "${serverPkg}"
+`
+    : "";
   return `# syntax=docker/dockerfile:1
 FROM python:${p.pythonVersion}-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \\
@@ -270,12 +293,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+${ensureServer}COPY . .
 # Non-root runtime user.
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser /app
 USER appuser
 EXPOSE ${p.port}
-CMD ${JSON.stringify(p.startCommand.split(" "))}
+CMD ${JSON.stringify(startCommand.split(" "))}
 `;
 }
 
