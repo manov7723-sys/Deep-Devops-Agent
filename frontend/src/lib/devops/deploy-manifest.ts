@@ -92,16 +92,32 @@ function deployment(spec: DeploySpec, app: string): string {
     `            limits:`,
     `              cpu: 500m`,
     `              memory: 512Mi`,
+    // startupProbe gives the container up to ~150s (30 × 5s) to first accept a
+    // TCP connection before readiness/liveness even begin. Without it, a
+    // container that boots slower than initialDelaySeconds gets killed by
+    // liveness mid-startup → CrashLoopBackOff → rollout times out → rollback.
+    // Once the startupProbe passes ONCE, k8s switches to readiness/liveness.
+    `          startupProbe:`,
+    `            tcpSocket:`,
+    `              port: ${spec.containerPort}`,
+    `            periodSeconds: 5`,
+    `            failureThreshold: 30`,
     `          readinessProbe:`,
     `            tcpSocket:`,
     `              port: ${spec.containerPort}`,
-    `            initialDelaySeconds: 5`,
+    `            initialDelaySeconds: 3`,
     `            periodSeconds: 10`,
+    `            failureThreshold: 3`,
+    // Liveness is deliberately FORGIVING (5 failures × 20s = ~100s) so a
+    // transient stall never kills a serving container. The startupProbe
+    // already covers the slow-boot case; liveness only catches a truly hung
+    // process.
     `          livenessProbe:`,
     `            tcpSocket:`,
     `              port: ${spec.containerPort}`,
-    `            initialDelaySeconds: 15`,
-    `            periodSeconds: 20` + envBlock,
+    `            initialDelaySeconds: 10`,
+    `            periodSeconds: 20`,
+    `            failureThreshold: 5` + envBlock,
     ``,
   ].join("\n");
 }
