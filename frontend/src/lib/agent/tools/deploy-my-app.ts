@@ -920,32 +920,77 @@ export const deployMyAppTool: Tool<Input, Output> = {
 
     // Files land on the default branch immediately (direct commit), but the
     // generated workflows trigger on workflow_dispatch ONLY (never push) — so
-    // register a CI/CD-tab pipeline per service now, giving the user a "Run"
-    // button that starts the build/deploy exactly when they click it.
+    // register CI/CD-tab pipeline(s) now, giving the user a "Run" button that
+    // starts the build/deploy exactly when they click it.
+    //
+    // Combined mode (monorepo → ECR + EKS): register ONE pipeline pointing at
+    // the single ci.yml, carrying ALL committed files (every service's
+    // Dockerfile + manifests + the shared ci.yml + cd.yml). The user sees ONE
+    // pipeline whose Run button matrix-builds every service and then triggers
+    // the single cd.yml — NOT one row per service. Non-combined mode keeps the
+    // per-service registration (each has its own build-and-push-<svc>.yml).
     if (direct && lastCommitSha) {
-      for (let i = 0; i < deployed.length; i++) {
-        const d = deployed[i];
+      if (useCombinedEksMode) {
+        // TWO rows total, regardless of service count: one CI (builds every
+        // service in a matrix), one CD (deploys every service after CI
+        // succeeds). The CI row's Run button matrix-builds all services; the
+        // CD row's Run button re-deploys the latest images without a rebuild
+        // (cd.yml also accepts workflow_dispatch).
         await registerCommittedPipeline({
           projectId: ctx.projectId,
           repoId: repo.id,
-          name: multi ? `${baseApp} — ${d.name}` : baseApp,
-          files: pipelineFilesByService[i] ?? [],
+          name: `${baseApp} — CI (build all services)`,
+          files: allFiles,
           branch: pushBranch,
           commitSha: lastCommitSha,
-          workflowPath: `.github/workflows/${d.workflowFile}`,
+          workflowPath: `.github/workflows/ci.yml`,
         });
+        await registerCommittedPipeline({
+          projectId: ctx.projectId,
+          repoId: repo.id,
+          name: `${baseApp} — CD (deploy all services)`,
+          files: allFiles,
+          branch: pushBranch,
+          commitSha: lastCommitSha,
+          workflowPath: `.github/workflows/cd.yml`,
+        });
+      } else {
+        for (let i = 0; i < deployed.length; i++) {
+          const d = deployed[i];
+          await registerCommittedPipeline({
+            projectId: ctx.projectId,
+            repoId: repo.id,
+            name: multi ? `${baseApp} — ${d.name}` : baseApp,
+            files: pipelineFilesByService[i] ?? [],
+            branch: pushBranch,
+            commitSha: lastCommitSha,
+            workflowPath: `.github/workflows/${d.workflowFile}`,
+          });
+        }
       }
     }
 
-    const watchHint = deployed
-      .map(
-        (d) =>
-          `wait_for_workflow_run("${d.workflowFile}") then wait_for_workflow_run("${d.cdWorkflowFile}") then deployment_status(envKey:"${input.envKey}", appName:"${d.appName}")`,
-      )
-      .join("; and for the next service ");
+    // Combined mode: ONE ci.yml matrix-builds every service, then the single
+    // cd.yml matrix-deploys every service. Watch the two combined workflows,
+    // then check each service's rollout. Non-combined: per-service pairs.
+    const watchHint = useCombinedEksMode
+      ? `wait_for_workflow_run("ci.yml") then wait_for_workflow_run("cd.yml") then ${deployed
+          .map((d) => `deployment_status(envKey:"${input.envKey}", appName:"${d.appName}")`)
+          .join(" then ")}`
+      : deployed
+          .map(
+            (d) =>
+              `wait_for_workflow_run("${d.workflowFile}") then wait_for_workflow_run("${d.cdWorkflowFile}") then deployment_status(envKey:"${input.envKey}", appName:"${d.appName}")`,
+          )
+          .join("; and for the next service ");
+    const runInstruction = useCombinedEksMode
+      ? `click "Run" ONCE on the "${baseApp} — CI (build all services)" pipeline — its matrix builds every service (${deployed
+          .map((d) => d.name)
+          .join(", ")}) in parallel, and the single CD pipeline auto-deploys all of them once CI succeeds`
+      : `click "Run" for each service (${deployed.map((d) => d.name).join(", ")})`;
     const next = direct
-      ? `Files committed to ${branch}. Nothing builds automatically — the generated workflows only run on workflow_dispatch (by design), not on push. Tell the user to open the CI/CD → Pipelines tab and click "Run" for each service (${deployed.map((d) => d.name).join(", ")}) whenever they're ready to build & deploy. Once a run starts, the CD workflow deploys automatically after CI succeeds — watch it: ${watchHint}. deploy_app is only the fallback if the CD run fails.`
-      : `PR #${pullRequest?.number ?? "?"} opened — after the user merges it, the files land on ${branch} but nothing builds automatically (workflow_dispatch only). They can click "Run" on each pipeline in the CI/CD → Pipelines tab to start it. Then watch: ${watchHint}. deploy_app is only the fallback if the CD run fails.`;
+      ? `Files committed to ${branch}. Nothing builds automatically — the generated workflows only run on workflow_dispatch (by design), not on push. Tell the user to open the CI/CD → Pipelines tab and ${runInstruction} whenever they're ready to build & deploy. Once CI starts, the CD workflow deploys automatically after it succeeds — watch it: ${watchHint}. deploy_app is only the fallback if the CD run fails.`
+      : `PR #${pullRequest?.number ?? "?"} opened — after the user merges it, the files land on ${branch} but nothing builds automatically (workflow_dispatch only). They can ${runInstruction} in the CI/CD → Pipelines tab to start it. Then watch: ${watchHint}. deploy_app is only the fallback if the CD run fails.`;
 
     // Echo which packaging style was picked so the deploy report + downstream
     // steps can see it. `helm` uses the existing scaffold_helm_chart + run_helm_upgrade
