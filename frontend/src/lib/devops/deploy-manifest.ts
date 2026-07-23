@@ -82,7 +82,11 @@ function deployment(spec: DeploySpec, app: string): string {
     `      containers:`,
     `        - name: ${q(app)}`,
     `          image: ${q(spec.image)}`,
-    `          imagePullPolicy: IfNotPresent`,
+    // Always pull — the image tag is mutable (":latest", overwritten by every
+    // CI build). IfNotPresent makes a node reuse whatever ":latest" it cached
+    // first, so a fixed image never actually rolls out ("image already present
+    // on machine" in the pod events) and old/broken builds keep running.
+    `          imagePullPolicy: Always`,
     `          ports:`,
     `            - containerPort: ${spec.containerPort}`,
     `          resources:`,
