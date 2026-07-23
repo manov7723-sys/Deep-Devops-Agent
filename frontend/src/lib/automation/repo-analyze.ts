@@ -373,6 +373,7 @@ function classifySpaFromPackageJson(raw: string): { isSpa: boolean; buildDir: st
  * references — the Docker build context is already that dir, so the prefix
  * would point at a non-existent nested path inside the container.
  *   path="backend", "uvicorn backend.main:app"   → "uvicorn main:app"
+ *   path="backend", "uvicorn backend:app"        → "uvicorn main:app" (defaults to main)
  *   path="backend", "node backend/server.js"      → "node server.js"
  *   path="api",     "gunicorn api.wsgi:application" → "gunicorn wsgi:application"
  */
@@ -380,11 +381,19 @@ function stripContextPrefix(startCommand: string, path: string): string {
   const seg = path.split("/").pop() ?? path; // last dir segment
   if (!seg) return startCommand;
   const esc = seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return startCommand
-    // Python dotted module: "backend.main:app" → "main:app"
-    .replace(new RegExp(`(^|\\s)${esc}\\.`, "g"), "$1")
-    // Filesystem path: "backend/server.js" → "server.js"
-    .replace(new RegExp(`(^|\\s)\\.?/?${esc}/`, "g"), "$1");
+  return (
+    startCommand
+      // Bare dir-as-module + attribute: "backend:app" → "main:app". This is a
+      // common ASGI shape ("<dir>:<attr>") that pretends the dir IS a module
+      // (there's usually no backend.py at /app/); rewrite to the conventional
+      // main.py entry file that's actually at /app/main.py after COPY . .
+      // Sits BEFORE the dotted rule so "backend.main:app" isn't touched here.
+      .replace(new RegExp(`(^|\\s)${esc}(:\\S+)`, "g"), `$1main$2`)
+      // Python dotted module: "backend.main:app" → "main:app"
+      .replace(new RegExp(`(^|\\s)${esc}\\.`, "g"), "$1")
+      // Filesystem path: "backend/server.js" → "server.js"
+      .replace(new RegExp(`(^|\\s)\\.?/?${esc}/`, "g"), "$1")
+  );
 }
 
 /** "owner/My_Repo" + "backend" -> "my-repo-backend" (DNS/ECR-safe, ≤200). */

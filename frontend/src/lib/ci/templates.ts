@@ -239,20 +239,32 @@ CMD ["nginx", "-g", "daemon off;"]
 }
 
 function nodeServiceDockerfile(p: Record<string, string>): string {
-  // Build step: run the explicit buildCommand if given, else AUTO-run
-  // `npm run build` whenever package.json defines a build script. Frameworks
-  // like Next.js MUST build before start (`next start` needs .next/), and the
-  // LLM often forgets to set buildCommand — this makes it happen regardless.
+  // Build step: AUTO-run `npm run build` when the app defines it (Next.js /
+  // TS / any framework that needs a build). Uses an sh conditional so a
+  // missing script is skipped, but a failing script FAILS the docker build
+  // (previous version used `|| echo skipping` which silently masked real
+  // build errors — a broken build then only surfaced at container start).
   const buildLine = p.buildCommand
     ? `RUN ${p.buildCommand}\n`
-    : `# Auto-build when the app defines a build script (Next.js, TS, etc.).
-RUN node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.build ? 0 : 1)" \\
-    && npm run build || echo "no build script — skipping"\n`;
-  // Run the start command through sh with node_modules/.bin on PATH, so local
-  // binaries (next, nest, vite preview, …) resolve — a bare exec-form
-  // CMD ["next","start"] fails with "next: not found" / "Cannot find module".
-  // `exec` keeps the process as PID 1 for correct signal handling.
-  const startCmd = (p.startCommand || "npm start").trim();
+    : `# Auto-build when the app defines a build script (Next.js needs it).
+# Fails the image build if the script exists and errors — surfaces bugs early.
+RUN if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then \\
+      npm run build; \\
+    else \\
+      echo "no build script — skipping"; \\
+    fi
+`;
+  // Prefer \`npm start\` — package.json's start script naturally resolves
+  // local binaries (next/nest/vite) via npm's PATH handling. If the LLM
+  // provided a custom startCommand, run it via sh with node_modules/.bin on
+  // PATH so bare-name binaries still resolve. Bare exec-form CMD ["next"…]
+  // fails with "Cannot find module '/app/next'" because exec-form doesn't do
+  // PATH lookup. `exec` keeps the process as PID 1 for correct signal handling.
+  const startCmd = (p.startCommand || "").trim();
+  const cmdLine =
+    !startCmd || /^npm(\s|$)/.test(startCmd)
+      ? `CMD ["npm", "start"]`
+      : `CMD ["sh", "-c", "export PATH=/app/node_modules/.bin:$PATH; exec ${startCmd.replace(/"/g, '\\"')}"]`;
   return `# syntax=docker/dockerfile:1
 # --- Build stage: all deps so the build (if any) can run ---
 FROM node:${p.nodeVersion}-alpine AS builder
@@ -270,7 +282,7 @@ WORKDIR /app
 COPY --from=builder /app ./
 USER node
 EXPOSE ${p.port}
-CMD ["sh", "-c", "export PATH=/app/node_modules/.bin:$PATH; exec ${startCmd.replace(/"/g, '\\"')}"]
+${cmdLine}
 `;
 }
 
