@@ -368,6 +368,25 @@ function classifySpaFromPackageJson(raw: string): { isSpa: boolean; buildDir: st
   return { isSpa: false, buildDir: "dist" };
 }
 
+/**
+ * Strip the service-directory segment from a start command's module/file
+ * references — the Docker build context is already that dir, so the prefix
+ * would point at a non-existent nested path inside the container.
+ *   path="backend", "uvicorn backend.main:app"   → "uvicorn main:app"
+ *   path="backend", "node backend/server.js"      → "node server.js"
+ *   path="api",     "gunicorn api.wsgi:application" → "gunicorn wsgi:application"
+ */
+function stripContextPrefix(startCommand: string, path: string): string {
+  const seg = path.split("/").pop() ?? path; // last dir segment
+  if (!seg) return startCommand;
+  const esc = seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return startCommand
+    // Python dotted module: "backend.main:app" → "main:app"
+    .replace(new RegExp(`(^|\\s)${esc}\\.`, "g"), "$1")
+    // Filesystem path: "backend/server.js" → "server.js"
+    .replace(new RegExp(`(^|\\s)\\.?/?${esc}/`, "g"), "$1");
+}
+
 /** "owner/My_Repo" + "backend" -> "my-repo-backend" (DNS/ECR-safe, ≤200). */
 function imageNameFor(repoFullName: string, role: string): string {
   const short = (repoFullName.split("/").pop() ?? "app").toLowerCase();
@@ -504,6 +523,16 @@ Respond with ONLY a JSON object, no prose:
         stackId = "static-spa" as DockerStackId;
         params = { ...params, buildDir: spa.buildDir };
       }
+    }
+
+    // The Docker BUILD CONTEXT is the service's own dir (e.g. "backend/"), so
+    // inside the container the code sits at /app/main.py — NOT /app/backend/
+    // main.py. But the LLM writes start commands with the repo-relative module
+    // path ("uvicorn backend.main:app", "node backend/server.js"), which then
+    // fails with "No module named 'backend'". Strip the leading service-dir
+    // segment from module references so the command matches the context.
+    if (path && typeof params.startCommand === "string") {
+      params = { ...params, startCommand: stripContextPrefix(params.startCommand as string, path) };
     }
 
     const stack = getStack(stackId);
