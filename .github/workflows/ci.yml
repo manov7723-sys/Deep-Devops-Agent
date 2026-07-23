@@ -48,7 +48,10 @@ jobs:
           fi
 
       - name: Scan ${{ matrix.service }} image for vulnerabilities (Trivy — stop on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@0.28.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRIVY_SKIP_VERSION_CHECK: "true"
         with:
           image-ref: "${{ matrix.ecr }}:${{ github.sha }}"
           format: table
