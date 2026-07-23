@@ -246,6 +246,12 @@ export async function setupGithubOidcEcr(
     // we've seen. Belt-and-braces: match on both the exact case AND the
     // lowercased form via ForAnyValue:StringLike, so a case drift on either
     // side still passes. Also match with and without owner casing.
+    // `sub` is a SINGLE-valued claim, so plain StringLike with an ARRAY of
+    // values does the OR-match we want (matches if sub equals ANY entry).
+    // ForAnyValue: is ONLY for multi-valued keys and mis-behaves here — an
+    // earlier version used it and broke the match. Keep plain StringLike.
+    // We list both the exact-case and lowercased owner/repo so a case drift
+    // between what GitHub sends and what we stored still authenticates.
     const subExact = `repo:${parsed.owner}/${parsed.repo}:${subject}`;
     const subLower = `repo:${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}:${subject}`;
     const subs = subExact === subLower ? [subExact] : [subExact, subLower];
@@ -258,7 +264,7 @@ export async function setupGithubOidcEcr(
           Action: "sts:AssumeRoleWithWebIdentity",
           Condition: {
             StringEquals: { [`${GITHUB_OIDC_ISSUER}:aud`]: GITHUB_OIDC_AUDIENCE },
-            "ForAnyValue:StringLike": {
+            StringLike: {
               [`${GITHUB_OIDC_ISSUER}:sub`]: subs,
             },
           },
