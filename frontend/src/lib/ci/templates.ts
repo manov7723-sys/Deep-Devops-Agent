@@ -420,9 +420,11 @@ export function generateEcrWorkflow(args: {
   const fileName = args.fileName || "build-and-push.yml";
   const content = `name: ${workflowName}
 
+# Manual trigger ONLY — this repo's "Run Pipeline" button (or workflow_dispatch
+# from the CLI/API) is what starts a build. Pushing to ${args.branch} does NOT
+# auto-run this workflow, by design: files can land on the default branch
+# immediately while the actual build/deploy stays gated behind an explicit click.
 on:
-  push:
-    branches: ["${args.branch}"]
   workflow_dispatch:
 
 permissions:
@@ -499,9 +501,11 @@ export function generateGarWorkflow(args: {
   const fileName = args.fileName || "build-and-push-gar.yml";
   const content = `name: ${workflowName}
 
+# Manual trigger ONLY — this repo's "Run Pipeline" button (or workflow_dispatch
+# from the CLI/API) is what starts a build. Pushing to ${args.branch} does NOT
+# auto-run this workflow, by design: files can land on the default branch
+# immediately while the actual build/deploy stays gated behind an explicit click.
 on:
-  push:
-    branches: ["${args.branch}"]
   workflow_dispatch:
 
 permissions:
@@ -631,9 +635,11 @@ export function generateAcrWorkflow(args: {
 
   const content = `name: ${workflowName}
 
+# Manual trigger ONLY — this repo's "Run Pipeline" button (or workflow_dispatch
+# from the CLI/API) is what starts a build. Pushing to ${args.branch} does NOT
+# auto-run this workflow, by design: files can land on the default branch
+# immediately while the actual build/deploy stays gated behind an explicit click.
 on:
-  push:
-    branches: ["${args.branch}"]
   workflow_dispatch:
 
 ${permissions}

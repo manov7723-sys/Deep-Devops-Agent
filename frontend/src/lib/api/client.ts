@@ -18,6 +18,25 @@ export type ApiError = {
   details?: unknown;
 };
 
+/**
+ * Real Error subclass so unhandled rejections show a readable message in
+ * Next.js's dev overlay (a plain `throw {status,message,...}` object
+ * stringifies as "[object Object]"). Still carries `status` + `details` for
+ * every existing consumer that reads them via `apiErrorMessage()` or a
+ * `typeof e === "object"` guard — those checks succeed on Errors too, since
+ * an Error instance IS an object with a message property.
+ */
+class ApiRequestError extends Error implements ApiError {
+  status: number;
+  details?: unknown;
+  constructor(fields: ApiError) {
+    super(fields.message);
+    this.name = "ApiRequestError";
+    this.status = fields.status;
+    this.details = fields.details;
+  }
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit & { params?: Record<string, string | number | undefined> },
@@ -25,11 +44,11 @@ async function request<T>(
   const chaos = getEffectiveChaos();
   if (chaos.latencyMs > 0) await sleep(chaos.latencyMs);
   if (chaos.failureRate > 0 && Math.random() < chaos.failureRate) {
-    throw {
+    throw new ApiRequestError({
       status: 503,
       message: "Mock chaos injection",
       details: { path, chaos },
-    } satisfies ApiError;
+    });
   }
   const url = new URL(
     BASE + path,
@@ -49,11 +68,11 @@ async function request<T>(
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw {
+    throw new ApiRequestError({
       status: res.status,
       message: res.statusText || "Request failed",
       details: body,
-    } satisfies ApiError;
+    });
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;

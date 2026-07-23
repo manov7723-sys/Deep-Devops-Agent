@@ -742,7 +742,6 @@ model Project {
   pipelines         Pipeline[]
   ciPipelines       CiPipeline[]
   cloudProviders    CloudProvider[]
-  vaultConfig       VaultConfig?
   approvals         Approval[]
   activities        Activity[]
   alerts            Alert[]
@@ -750,6 +749,7 @@ model Project {
   chatOps           ChatOpsWebhook?
   uptimeMonitors    UptimeMonitor[]
   appSecrets        AppSecret[]
+  vpnUserCerts      VpnUserCert[]
   scheduledDeploys  ScheduledDeploy[]
   deploymentRecords DeploymentRecord[]
   deployWatches     DeployWatch[]
@@ -1143,12 +1143,20 @@ model Pipeline {
   @@index([projectId, envId])
 }
 
-/// A CI/CD pipeline the agent generated in chat and the user SAVED to the
-/// project (not yet on GitHub). Its `files` (Dockerfile, workflow YAML, …) are
-/// editable in the CI/CD UI. "Run pipeline" commits them to the repo's default
-/// branch and triggers the GitHub Actions workflow; the app mirrors the run's
-/// live status. When `agentReview` is on, a failed run is auto-reviewed, fixed,
-/// and re-run by the agent (bounded by `healAttempts`).
+/// A CI/CD pipeline the agent generated, tracked so the CI/CD UI can trigger
+/// and mirror its GitHub Actions run. Two ways a row gets here:
+///   - "draft": the agent generated it in chat and the user SAVED it WITHOUT
+///     committing to GitHub yet. "Run pipeline" commits `files` to the repo's
+///     default branch AND triggers the workflow, together, on click.
+///   - "committed": deploy_my_app already committed `files` directly (e.g. the
+///     full-pipeline chat flow) — this row just mirrors what's on GitHub so it
+///     shows up with a working "Run" button. Generated workflows trigger on
+///     workflow_dispatch only (never push), so nothing runs until this button
+///     is clicked; clicking re-commits only if `files` were edited since.
+/// `files` (Dockerfile, workflow YAML, …) are editable in the CI/CD UI either
+/// way. The app mirrors the run's live status. When `agentReview` is on, a
+/// failed run is auto-reviewed, fixed, and re-run by the agent (bounded by
+/// `healAttempts`).
 model CiPipeline {
   id           String   @id @default(uuid(7)) @db.Uuid
   projectId    String   @db.Uuid
@@ -1157,7 +1165,7 @@ model CiPipeline {
   files        Json // [{ path, content }] — editable
   workflowPath String? // path of the workflow file within `files`
   branch       String   @default("main")
-  status       String   @default("draft") // draft | committing | running | success | failed | error
+  status       String   @default("draft") // draft | committed | committing | running | success | failed | error
   agentReview  Boolean  @default(false) // auto-heal failed runs with the agent
   healAttempts Int      @default(0) // bounds the auto-heal loop
   commitSha    String?
@@ -1691,10 +1699,12 @@ model CloudProvider {
   accountId  String?
   roleArn    String? // scoped IAM role the agent assumes (no long-lived keys)
   externalId String? // STS AssumeRole ExternalId for cross-account trust
-  // Non-secret pointer to the HashiCorp Vault path holding this provider's AWS
-  // access key + secret (KV v2). The secrets never touch Postgres — the runner
-  // reads them from Vault at execution time. Null = no long-lived keys stored.
-  credVaultPath String?
+  // Long-lived AWS access key + secret, same AES-256-GCM-at-rest pattern as
+  // Azure's spClientSecretEnc — no external secret store required. Null = no
+  // long-lived keys stored (the provider relies on roleArn/externalId AssumeRole
+  // or the server host's own AWS credentials instead).
+  awsAccessKeyIdEnc     String?
+  awsSecretAccessKeyEnc String?
   // Hybrid Azure auth. Populated when the OAuth callback auto-provisions a
   // Service Principal via Microsoft Graph (create AD app + password credential +
   // Contributor role assignment). Every keyless deploy / cluster op (federated
@@ -1725,24 +1735,6 @@ model CloudProvider {
 
   @@index([userId])
   @@index([projectId])
-}
-
-// Per-PROJECT HashiCorp Vault connection (isolation). Each project has its own
-// Vault URL + token; the token is stored ENCRYPTED. AWS access keys are written
-// into this Vault (KV v2). The agent resolves the connection at runtime from the
-// provider's project. Falls back to VAULT_ADDR / VAULT_TOKEN env vars when no
-// row exists.
-model VaultConfig {
-  id         String   @id @default(uuid(7)) @db.Uuid
-  projectId  String   @unique @db.Uuid
-  addr       String // Vault base URL, e.g. https://vault.example.com:8200
-  tokenEnc   String // AES-encrypted Vault token (hvs.…) — never plaintext at rest
-  kvMount    String   @default("secret") // KV v2 mount point
-  pathPrefix String   @default("dda/cloud") // namespace for stored secrets
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 // ⚠ confirm — "attach envs from security service for cloud": modelled as
@@ -2143,6 +2135,54 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([projectId, createdAt])
+}
+
+// =============================================================================
+// AWS Client VPN — per-user client certificates issued on demand against
+// an existing endpoint's CA. Each row = one cert we minted, stored so the
+// user can re-download the same file later without invalidating the cert
+// by re-minting. All PEMs are AES-256-GCM encrypted at rest (via
+// encryptSecret) — never returned in plaintext except through the
+// authenticated download endpoint.
+// =============================================================================
+model VpnUserCert {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  projectId  String   @db.Uuid
+  approvalId String   @db.Uuid // The Client VPN approval (identifies the endpoint + CA)
+  userName   String // The CN on this cert — shows in AWS Connection Log
+  serial     String // Hex serial number of the X.509 cert (for revocation)
+
+  // Encrypted PEMs (AES-256-GCM via encryptSecret / decryptSecret).
+  certPemEnc    String // client X.509 cert
+  privateKeyEnc String // client private key
+  caPemEnc      String // shared CA cert (snapshot at issue time, so re-download is
+                       // consistent even if the VPN's CA is later replaced)
+
+  // Optional embedded .ovpn base config for one-click re-download. When
+  // omitted we can still re-download the raw cert/key/ca — the .ovpn just
+  // won't be self-contained.
+  ovpnBaseEnc String?
+
+  // Endpoint metadata — captured at issue time so re-download can call
+  // `aws ec2 export-client-vpn-client-configuration` LIVE if the stored
+  // ovpnBaseEnc is missing / stale. Never store the region in the encrypted
+  // payload; it's not sensitive.
+  endpointId  String?
+  endpointDns String?
+  region      String?
+
+  issuedAt   DateTime  @default(now())
+  issuedById String?   @db.Uuid
+  revokedAt  DateTime?
+  revokedById String?  @db.Uuid
+  // Days of validity used when signing — informational; the real expiry is
+  // baked into the cert bytes.
+  validityDays Int?
+
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, approvalId, revokedAt])
+  @@index([approvalId, issuedAt])
 }
 
 // =============================================================================

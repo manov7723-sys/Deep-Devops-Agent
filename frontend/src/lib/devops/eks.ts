@@ -115,7 +115,13 @@ function backendBlock(spec: EksSpec): string {
   if (!spec.stateBucket) {
     return `  # No S3 backend configured — state is local. Set a Terraform state\n  # bucket on the Infrastructure page for production use.`;
   }
-  const lock = spec.stateTable ? `\n    dynamodb_table = "${spec.stateTable}"` : "";
+  // Terraform 1.10+ supports S3-native locking via conditional writes — no
+  // DynamoDB table required. Fall back to dynamodb_table only when the
+  // caller explicitly provides a table name (legacy stacks that already
+  // depend on one). `dynamodb_table` is deprecated in newer AWS providers.
+  const lock = spec.stateTable
+    ? `\n    dynamodb_table = "${spec.stateTable}"`
+    : `\n    use_lockfile   = true`;
   return `  backend "s3" {
     bucket = "${spec.stateBucket}"
     key    = "eks/${spec.name}/terraform.tfstate"

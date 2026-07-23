@@ -58,7 +58,7 @@ const STEPS: Step[] = [
     kind: "select",
     key: "envKey",
     label: "Environment",
-    hint: "Provides the AWS keys (Vault) and S3 state backend.",
+    hint: "Provides the AWS credentials and S3 state backend.",
     emptyNote: "Create an environment first, then come back.",
     options: (c) => c.envs.map((e) => ({ value: e.key, label: e.name || e.key })),
   },

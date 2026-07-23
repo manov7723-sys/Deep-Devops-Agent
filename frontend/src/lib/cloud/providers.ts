@@ -1,8 +1,8 @@
 /**
- * CloudProvider — User-owned cloud account hookup. Stores STS role ARN +
- * externalId for cross-account trust (no long-lived keys). Per the schema,
- * `roleArn` and `externalId` are plain columns; treat them as sensitive but
- * not at the AES-encrypted-secret tier.
+ * CloudProvider — User-owned cloud account hookup. Prefers STS role ARN +
+ * externalId for cross-account trust (no long-lived keys); can also hold an
+ * AWS access key + secret, AES-256-GCM encrypted at rest (same tier as
+ * Azure's spClientSecretEnc) — no external secret store required.
  */
 import type { CloudKind, HealthStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
@@ -16,8 +16,8 @@ export type CloudProviderRow = {
   region: string;
   status: HealthStatus;
   hasRoleArn: boolean;
-  /** True when AWS access key + secret are stored in Vault for this provider. */
-  hasVaultCreds: boolean;
+  /** True when an AWS access key + secret are stored (encrypted) for this provider. */
+  hasAwsKeysStored: boolean;
   createdAt: string;
 };
 
@@ -30,7 +30,7 @@ function row(r: {
   region: string;
   status: HealthStatus;
   roleArn: string | null;
-  credVaultPath: string | null;
+  awsAccessKeyIdEnc: string | null;
   createdAt: Date;
 }): CloudProviderRow {
   return {
@@ -42,7 +42,7 @@ function row(r: {
     region: r.region,
     status: r.status,
     hasRoleArn: !!r.roleArn,
-    hasVaultCreds: !!r.credVaultPath,
+    hasAwsKeysStored: !!r.awsAccessKeyIdEnc,
     createdAt: r.createdAt.toISOString(),
   };
 }
@@ -158,19 +158,22 @@ export async function getProviderForUser(userId: string, id: string) {
 }
 
 /**
- * Record (or clear) the Vault path where this provider's AWS keys live.
- * Pass null to mark the provider as having no stored long-lived keys.
+ * Store (or clear) this provider's encrypted AWS access key + secret.
+ * Pass null to remove the stored keys.
  */
-export async function setProviderCredVaultPath(
+export async function setProviderAwsKeys(
   userId: string,
   id: string,
-  vaultPath: string | null,
+  keys: { accessKeyIdEnc: string; secretAccessKeyEnc: string } | null,
 ): Promise<{ ok: true } | { ok: false; code: "not_found" }> {
   const existing = await prisma.cloudProvider.findFirst({ where: { id, userId } });
   if (!existing) return { ok: false, code: "not_found" };
   await prisma.cloudProvider.update({
     where: { id },
-    data: { credVaultPath: vaultPath },
+    data: {
+      awsAccessKeyIdEnc: keys?.accessKeyIdEnc ?? null,
+      awsSecretAccessKeyEnc: keys?.secretAccessKeyEnc ?? null,
+    },
   });
   return { ok: true };
 }

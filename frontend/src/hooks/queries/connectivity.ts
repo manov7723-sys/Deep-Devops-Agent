@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiErrorMessage } from "@/lib/api/client";
-import type { VaultStatusResponse } from "@/lib/api/schemas/connectivity-api";
 
 // ── Terraform pipeline ────────────────────────────────────────────────
 // Client mirror of the server engine's run shape (src/lib/devops/terraform-run.ts).
@@ -28,20 +27,6 @@ export type TfRun = {
   finishedAt?: string;
   error?: string;
 };
-
-/**
- * HashiCorp Vault connectivity for the "Vault config" UI section (shown in the
- * create-project wizard's AWS flow and the Cloud tab). Reads the platform-level
- * VAULT_ADDR / VAULT_TOKEN config — Vault is shared infra, not per-project.
- */
-export function useVaultStatus(slug: string, enabled = true) {
-  return useQuery({
-    queryKey: ["vault", "status", slug],
-    enabled: enabled && !!slug,
-    staleTime: 30_000,
-    queryFn: async () => api.get<VaultStatusResponse>("/vault/status", { slug }),
-  });
-}
 
 // ── AWS account onboarding (cross-account STS AssumeRole) ──────────────
 export type AwsExternalIdResponse = {
@@ -244,66 +229,6 @@ export function useCommitManifest(slug: string) {
   });
 }
 
-// ── Vault connection config (URL + token) ─────────────────────────────
-export type VaultConfigResponse = {
-  ok: boolean;
-  configured: boolean;
-  source: "db" | "env" | "none";
-  addr: string | null;
-  mount: string;
-  hasToken: boolean;
-};
-
-/** The caller's saved Vault connection (non-secret view — never the token). */
-export function useVaultConfig(slug: string, enabled = true) {
-  return useQuery({
-    queryKey: ["vault", "config", slug],
-    enabled: enabled && !!slug,
-    staleTime: 30_000,
-    queryFn: async () => api.get<VaultConfigResponse>("/vault/config", { slug }),
-  });
-}
-
-export type SaveVaultConfigInput = { addr: string; token: string };
-
-/** Save (+ test) the Vault connection. Refreshes status/config on success. */
-export function useSaveVaultConfig(slug: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: SaveVaultConfigInput) => {
-      try {
-        const res = await api.post<{ ok: boolean; message?: string; code?: string }>(
-          `/vault/config?slug=${encodeURIComponent(slug)}`,
-          input,
-        );
-        if (!res.ok) throw new Error(res.message ?? "Could not save Vault connection.");
-        return res;
-      } catch (e) {
-        // api.post throws an ApiError (plain object) on non-2xx — surface the
-        // real reason from the response body, not the bare HTTP status text.
-        throw new Error(apiErrorMessage(e, "Could not save Vault connection."));
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vault", "config", slug] });
-      qc.invalidateQueries({ queryKey: ["vault", "status", slug] });
-    },
-  });
-}
-
-/** Disconnect (delete) the saved Vault connection. */
-export function useDeleteVaultConfig(slug: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () =>
-      api.del<{ ok: boolean }>(`/vault/config?slug=${encodeURIComponent(slug)}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vault", "config", slug] });
-      qc.invalidateQueries({ queryKey: ["vault", "status", slug] });
-    },
-  });
-}
-
 /** List recent Terraform runs for an env. Polls while any run is active. */
 export function useTerraformRuns(slug: string, envKey: string, enabled = true) {
   return useQuery({
@@ -491,6 +416,28 @@ export function useRerunTerraformRun(slug: string, envKey: string) {
         `/projects/${slug}/envs/${envKey}/terraform/${input.runId}/rerun`,
         input.action ? { action: input.action } : {},
       ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+  });
+}
+
+/**
+ * Delete a single Terraform run from the pipeline list. Removes ONLY the
+ * run record (DB + in-memory) — never touches the underlying cloud infra or
+ * remote state, so it's safe to spam. Rejected by the server (409) while the
+ * run is still queued/running; UI should disable the button in that case.
+ */
+export function useDeleteTerraformRun(slug: string, envKey: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { runId: string }) => {
+      try {
+        return await api.del<{ ok: boolean }>(
+          `/projects/${slug}/envs/${envKey}/terraform/${input.runId}`,
+        );
+      } catch (e) {
+        throw new Error(apiErrorMessage(e, "Could not delete the run."));
+      }
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
   });
 }

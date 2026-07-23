@@ -6,6 +6,19 @@ import { ProxmoxVmBox } from "@/components/domain/ProxmoxVmBox";
 import { CicdSetupBox } from "@/components/domain/CicdSetupBox";
 import { OptionsFormBox, type OptionsFormData } from "@/components/domain/OptionsFormBox";
 import { EksChatBox } from "@/components/domain/EksChatBox";
+import { Ec2CreateBox } from "@/components/domain/Ec2CreateBox";
+import { VpcCreateBox } from "@/components/domain/VpcCreateBox";
+import { ClientVpnCreateBox } from "@/components/domain/ClientVpnCreateBox";
+import { VpnCertificatesCreateBox } from "@/components/domain/VpnCertificatesCreateBox";
+import { IssueVpnUserCertBox } from "@/components/domain/IssueVpnUserCertBox";
+import { AzureVnetCreateBox } from "@/components/domain/AzureVnetCreateBox";
+import { AzureVmCreateBox } from "@/components/domain/AzureVmCreateBox";
+import { GcpVpcCreateBox } from "@/components/domain/GcpVpcCreateBox";
+import { GcpVmCreateBox } from "@/components/domain/GcpVmCreateBox";
+import { GcpVpnCreateBox } from "@/components/domain/GcpVpnCreateBox";
+import { AzureVpnCreateBox } from "@/components/domain/AzureVpnCreateBox";
+import { JenkinsProvisionBox } from "@/components/domain/JenkinsProvisionBox";
+import { S3CreateBox } from "@/components/domain/S3CreateBox";
 import { GkeChatBox } from "@/components/domain/GkeChatBox";
 import { AksChatBox } from "@/components/domain/AksChatBox";
 import { ClusterConnectBox } from "@/components/domain/ClusterConnectBox";
@@ -38,6 +51,19 @@ type Segment =
   | { type: "eks-create" }
   | { type: "gke-create" }
   | { type: "aks-create" }
+  | { type: "ec2-create" }
+  | { type: "vpc-create" }
+  | { type: "client-vpn-create" }
+  | { type: "vpn-certificates-create" }
+  | { type: "issue-vpn-user-cert" }
+  | { type: "azure-vnet-create" }
+  | { type: "azure-vm-create" }
+  | { type: "gcp-vpc-create" }
+  | { type: "gcp-vm-create" }
+  | { type: "gcp-vpn-create" }
+  | { type: "azure-vpn-create" }
+  | { type: "jenkins-provision" }
+  | { type: "s3-create" }
   | { type: "cluster-connect" }
   | { type: "cloud-connect" }
   | { type: "secret-entry" }
@@ -50,6 +76,19 @@ const BARE_FENCES = [
   "eks-create",
   "gke-create",
   "aks-create",
+  "ec2-create",
+  "vpc-create",
+  "client-vpn-create",
+  "vpn-certificates-create",
+  "issue-vpn-user-cert",
+  "azure-vnet-create",
+  "azure-vm-create",
+  "gcp-vpc-create",
+  "gcp-vm-create",
+  "gcp-vpn-create",
+  "azure-vpn-create",
+  "jenkins-provision",
+  "s3-create",
   "cluster-connect",
   "cloud-connect",
   "secret-entry",
@@ -70,6 +109,32 @@ function bareSegment(name: BareFence): Segment {
       return { type: "gke-create" };
     case "aks-create":
       return { type: "aks-create" };
+    case "ec2-create":
+      return { type: "ec2-create" };
+    case "vpc-create":
+      return { type: "vpc-create" };
+    case "client-vpn-create":
+      return { type: "client-vpn-create" };
+    case "vpn-certificates-create":
+      return { type: "vpn-certificates-create" };
+    case "issue-vpn-user-cert":
+      return { type: "issue-vpn-user-cert" };
+    case "azure-vnet-create":
+      return { type: "azure-vnet-create" };
+    case "azure-vm-create":
+      return { type: "azure-vm-create" };
+    case "gcp-vpc-create":
+      return { type: "gcp-vpc-create" };
+    case "gcp-vm-create":
+      return { type: "gcp-vm-create" };
+    case "gcp-vpn-create":
+      return { type: "gcp-vpn-create" };
+    case "azure-vpn-create":
+      return { type: "azure-vpn-create" };
+    case "jenkins-provision":
+      return { type: "jenkins-provision" };
+    case "s3-create":
+      return { type: "s3-create" };
     case "cluster-connect":
       return { type: "cluster-connect" };
     case "cloud-connect":
@@ -170,7 +235,7 @@ function dedupeOptions(segs: Segment[]): Segment[] {
 function parseSegments(text: string): Segment[] {
   const segs: Segment[] = [];
   const re =
-    /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
+    /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|ec2-create|vpc-create|client-vpn-create|vpn-certificates-create|issue-vpn-user-cert|azure-vnet-create|azure-vm-create|azure-vpn-create|gcp-vpc-create|gcp-vm-create|gcp-vpn-create|jenkins-provision|s3-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
@@ -193,13 +258,18 @@ function parseSegments(text: string): Segment[] {
           data &&
           Array.isArray(data.questions) &&
           data.questions.length > 0 &&
-          data.questions.every(
-            (q) =>
-              typeof q?.key === "string" &&
-              typeof q?.question === "string" &&
-              Array.isArray(q?.options) &&
-              q.options.length > 0,
-          );
+          data.questions.every((q) => {
+            const raw = q as unknown as { key?: unknown; question?: unknown; options?: unknown; kind?: unknown };
+            return (
+              typeof raw.key === "string" &&
+              typeof raw.question === "string" &&
+              // Either a SELECT question (fixed options) or a FREE-INPUT
+              // question (kind: "text" | "number") — see OptionsFormBox.
+              ((Array.isArray(raw.options) && raw.options.length > 0) ||
+                raw.kind === "text" ||
+                raw.kind === "number")
+            );
+          });
         if (questionsOk) segs.push({ type: "options-form", data });
         else segs.push({ type: "text", value: m[0] });
       } catch {
@@ -315,6 +385,58 @@ export function ChatMsg({
             ) : seg.type === "aks-create" ? (
               slug ? (
                 <AksChatBox key={`aks-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "ec2-create" ? (
+              slug ? (
+                <Ec2CreateBox key={`ec2-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "vpc-create" ? (
+              slug ? (
+                <VpcCreateBox key={`vpc-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "client-vpn-create" ? (
+              slug ? (
+                <ClientVpnCreateBox key={`cvpn-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "vpn-certificates-create" ? (
+              slug ? (
+                <VpnCertificatesCreateBox key={`vpncerts-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "issue-vpn-user-cert" ? (
+              slug ? (
+                <IssueVpnUserCertBox key={`issue-vpn-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "azure-vnet-create" ? (
+              slug ? (
+                <AzureVnetCreateBox key={`avnet-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "azure-vm-create" ? (
+              slug ? (
+                <AzureVmCreateBox key={`avm-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "gcp-vpc-create" ? (
+              slug ? (
+                <GcpVpcCreateBox key={`gvpc-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "gcp-vm-create" ? (
+              slug ? (
+                <GcpVmCreateBox key={`gvm-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "gcp-vpn-create" ? (
+              slug ? (
+                <GcpVpnCreateBox key={`gvpn-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "azure-vpn-create" ? (
+              slug ? (
+                <AzureVpnCreateBox key={`azvpn-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "jenkins-provision" ? (
+              slug ? (
+                <JenkinsProvisionBox key={`jk-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "s3-create" ? (
+              slug ? (
+                <S3CreateBox key={`s3-${i}`} slug={slug} />
               ) : null
             ) : seg.type === "cluster-connect" ? (
               slug ? (

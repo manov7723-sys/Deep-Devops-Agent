@@ -4,7 +4,7 @@
  * Connect a cloud provider (AWS / GCP / Azure / Proxmox) — ported from the
  * deleted Cloud tab's "Connect" flow (ConnectCloudModal). Connect-only MVP:
  * viewing/editing/disconnecting an already-connected provider and managing
- * Vault-stored AWS access keys are not covered here — that's a known gap.
+ * stored AWS access keys are not covered here — that's a known gap.
  * No LLM in the loop. Rendered inline in chat via the ```cloud-connect``` fence.
  */
 import { useEffect, useMemo, useState } from "react";

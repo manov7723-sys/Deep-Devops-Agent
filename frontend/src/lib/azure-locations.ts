@@ -1,0 +1,42 @@
+/**
+ * Azure region list — shared across every Azure picker (VNet, VM, etc.)
+ * so location dropdowns stay consistent. Same idea as lib/aws-regions.ts.
+ */
+export const AZURE_LOCATIONS = [
+  "eastus",
+  "eastus2",
+  "westus",
+  "westus2",
+  "westus3",
+  "centralus",
+  "northcentralus",
+  "southcentralus",
+  "canadacentral",
+  "canadaeast",
+  "brazilsouth",
+  "northeurope",
+  "westeurope",
+  "uksouth",
+  "ukwest",
+  "francecentral",
+  "germanywestcentral",
+  "swedencentral",
+  "switzerlandnorth",
+  "norwayeast",
+  "italynorth",
+  "polandcentral",
+  "spaincentral",
+  "uaenorth",
+  "southafricanorth",
+  "eastasia",
+  "southeastasia",
+  "japaneast",
+  "japanwest",
+  "australiaeast",
+  "australiasoutheast",
+  "koreacentral",
+  "centralindia",
+  "southindia",
+  "westindia",
+] as const;
+export type AzureLocation = (typeof AZURE_LOCATIONS)[number];

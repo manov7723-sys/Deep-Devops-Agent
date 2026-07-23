@@ -59,10 +59,6 @@ const CloudChoice = z.object({
   region: z.string().trim().min(1).max(40),
   roleArn: z.string().trim().max(280).optional(),
   externalId: z.string().trim().max(120).optional(),
-  // AWS long-lived keys — stored in Vault (never Postgres), like the original
-  // backend. Optional: the wizard only sends them when the user fills them in.
-  awsAccessKeyId: z.string().trim().min(16).max(128).optional(),
-  awsSecretAccessKey: z.string().trim().min(1).max(256).optional(),
   // Terraform remote-state backend (S3 + optional DynamoDB lock). Applied to
   // every env created in this wizard so `terraform` runs share one state store.
   tfBackend: z
@@ -86,7 +82,7 @@ const Body = z.object({
 });
 
 type StepReport = {
-  step: "repo" | "env" | "cloud" | "vault" | "tfstate";
+  step: "repo" | "env" | "cloud" | "tfstate";
   ok: boolean;
   label: string;
   code?: string;
@@ -168,7 +164,7 @@ export async function POST(req: Request) {
         icon: "cloud",
       }).catch(() => {});
       // AWS keys are no longer collected in the wizard — the user connects the
-      // account and stores keys later on the Cloud providers tab (Vault section).
+      // account and stores keys later on the Cloud providers tab, if needed.
     } catch (err) {
       steps.push({
         step: "cloud",

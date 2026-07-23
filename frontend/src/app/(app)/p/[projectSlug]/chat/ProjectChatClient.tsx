@@ -93,8 +93,25 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
 
   async function handleClear() {
     if (busy) return;
-    await clearChat.mutateAsync();
-    setActiveThreadId(null);
+    // Scope to the currently-viewed thread only — other threads stay put.
+    // No active thread yet (empty state) is a no-op.
+    if (!activeThreadId) return;
+    // Pre-compute the next active thread from the CURRENT list so the UI
+    // switches to another conversation instead of the empty state; the
+    // refetch triggered by onSuccess will confirm it exists.
+    const remaining = (threads ?? []).filter((t) => t.id !== activeThreadId);
+    const nextActive = remaining[0]?.id ?? null;
+    try {
+      await clearChat.mutateAsync(activeThreadId);
+      setActiveThreadId(nextActive);
+    } catch {
+      // api.* throws a plain {status, message, details} object, not an Error
+      // — swallow it so it doesn't surface as "[object Object]" on the Next
+      // error overlay. The mutation's own error state carries the message
+      // for anywhere that wants to display it. A 404 here just means the
+      // thread was already deleted (another tab or a stale server view);
+      // either way there's nothing more to do.
+    }
   }
 
   return (

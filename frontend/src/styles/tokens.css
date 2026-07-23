@@ -44,21 +44,28 @@
   --ring: 0 0 0 3px var(--accent-soft);
 }
 
-/* ---------- DARK (default) ---------- */
+/* ---------- DARK (default) — VS Code "Dark Modern" style ---------- */
+/* Neutral near-black grays, zero chroma. Previously this had a blue-purple
+ * cast (hue 274 with small chroma + a purple radial gradient); users read
+ * the whole app as "dark blue". VS Code Dark Modern references:
+ *   editor bg  ~#1F1F1F  ≈ oklch(0.20 0 0)
+ *   panel bg   ~#181818  ≈ oklch(0.17 0 0)
+ *   sidebar    ~#181818
+ *   border     ~#2B2B2B  ≈ oklch(0.245 0 0)
+ * The radial-gradient tint is removed for the same reason. */
 :root,
 [data-theme="dark"] {
-  --bg: oklch(0.17 0.012 274);
-  --bg-grad:
-    radial-gradient(1200px 700px at 80% -10%, oklch(0.62 0.1 285 / 0.1), transparent 60%), var(--bg);
-  --surface: oklch(0.205 0.013 274);
-  --surface-2: oklch(0.245 0.014 274);
-  --surface-3: oklch(0.285 0.015 274);
-  --border: oklch(0.32 0.013 274);
-  --border-soft: oklch(0.27 0.012 274);
-  --text: oklch(0.96 0.005 274);
-  --text-muted: oklch(0.72 0.012 274);
-  --text-faint: oklch(0.56 0.012 274);
-  --overlay: oklch(0.1 0.01 274 / 0.62);
+  --bg: oklch(0.17 0 0);
+  --bg-grad: var(--bg);
+  --surface: oklch(0.205 0 0);
+  --surface-2: oklch(0.245 0 0);
+  --surface-3: oklch(0.285 0 0);
+  --border: oklch(0.32 0 0);
+  --border-soft: oklch(0.27 0 0);
+  --text: oklch(0.96 0 0);
+  --text-muted: oklch(0.72 0 0);
+  --text-faint: oklch(0.56 0 0);
+  --overlay: oklch(0.1 0 0 / 0.62);
 }
 
 /* ---------- LIGHT ---------- */

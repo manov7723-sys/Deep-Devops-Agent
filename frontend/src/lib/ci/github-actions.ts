@@ -7,7 +7,7 @@
  * Committing `.github/workflows/*` requires the `workflow` OAuth scope.
  */
 
-type GH = { token: string; repoFullName: string };
+export type GH = { token: string; repoFullName: string };
 type FileEntry = { path: string; content: string };
 
 const API = "https://api.github.com";
@@ -81,6 +81,10 @@ export async function commitFiles(
     if (!treeRes.ok) return { ok: false, error: `Tree create failed: ${treeRes.status}` };
     const newTreeSha = ((await treeRes.json()) as { sha: string }).sha;
 
+    // Nothing changed since the base commit (e.g. "Run" clicked again with no
+    // edits) — skip creating an empty, no-diff commit and reuse the base sha.
+    if (newTreeSha === baseTreeSha) return { ok: true, sha: baseSha };
+
     const newCommitRes = await fetch(`${base}/git/commits`, {
       method: "POST",
       headers: h,
@@ -133,6 +137,52 @@ export async function dispatchWorkflow(
     );
   } catch {
     /* best-effort — the push trigger usually starts the run anyway */
+  }
+}
+
+export type WorkflowInfo = { id: number; name: string; path: string; state: string };
+
+/** List every workflow file GitHub has registered for the repo (`.github/workflows/*`). */
+export async function listWorkflows(gh: GH): Promise<WorkflowInfo[]> {
+  const res = await fetch(`${API}/repos/${gh.repoFullName}/actions/workflows?per_page=100`, {
+    headers: headers(gh.token),
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const json = (await res.json().catch(() => ({}))) as {
+    workflows?: Array<{ id: number; name: string; path: string; state: string }>;
+  };
+  return (json.workflows ?? []).map((w) => ({ id: w.id, name: w.name, path: w.path, state: w.state }));
+}
+
+/**
+ * Dispatch a workflow and report whether GitHub actually accepted it — unlike
+ * `dispatchWorkflow` above (deliberately best-effort/fire-and-forget for its
+ * push-trigger-is-the-real-mechanism callers), this is used where the
+ * dispatch IS the only trigger and the caller needs to show a real result.
+ */
+export async function dispatchWorkflowChecked(
+  gh: GH,
+  workflowIdOrFileName: string | number,
+  ref: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(
+      `${API}/repos/${gh.repoFullName}/actions/workflows/${encodeURIComponent(String(workflowIdOrFileName))}/dispatches`,
+      { method: "POST", headers: headers(gh.token), body: JSON.stringify({ ref }) },
+    );
+    if (res.status === 204) return { ok: true };
+    const body = await res.text().catch(() => "");
+    if (res.status === 422 && body.includes("workflow_dispatch")) {
+      return {
+        ok: false,
+        error:
+          "This workflow has no workflow_dispatch trigger, so it can't be run on demand — add `workflow_dispatch:` to its `on:` block.",
+      };
+    }
+    return { ok: false, error: `GitHub rejected the dispatch (${res.status}): ${body.slice(0, 200)}` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error contacting GitHub." };
   }
 }
 

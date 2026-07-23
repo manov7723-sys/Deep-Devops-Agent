@@ -35,6 +35,7 @@ import { generateDockerfileTool } from "./generate-dockerfile";
 import { generateEcrWorkflowTool } from "./generate-ecr-workflow";
 import { verifyDockerBuildTool } from "./verify-docker-build";
 import { savePipelineToProjectTool } from "./save-pipeline-to-project";
+import { runCiPipelineTool } from "./run-ci-pipeline";
 import { runTerraformTool } from "./run-terraform";
 import { provisionEksTool } from "./provision-eks";
 import { provisionAksTool } from "./provision-aks";
@@ -108,6 +109,27 @@ import {
   triggerJenkinsBuildTool,
   waitForJenkinsBuildTool,
 } from "./jenkins-tools";
+import {
+  generateRdsTerraformTool,
+  createRdsK8sSecretTool,
+  connectExistingRdsTool,
+} from "./rds-tools";
+import { generateS3TerraformTool } from "./s3-tools";
+// NOTE: the old combined generateVpcEc2TerraformTool is retired in favor of
+// the split generate_vpc_terraform + generate_ec2_terraform pair below. This
+// matches how AWS console models these as separate resources and lets the
+// Network > VPCs / Network > EC2 UI pages target them independently.
+import { generateVpcTerraformTool } from "./vpc-tools";
+import { generateEc2TerraformTool } from "./ec2-tools";
+import { generateVpcPeeringTerraformTool } from "./vpc-peering-tools";
+import { generateClientVpnTerraformTool } from "./client-vpn-tools";
+import { generateVpnCertificatesTerraformTool } from "./vpn-certificates-tools";
+import { generateAzureVnetTerraformTool } from "./azure-vnet-tools";
+import { generateAzureVmTerraformTool } from "./azure-vm-tools";
+import { generateGcpVpcTerraformTool } from "./gcp-vpc-tools";
+import { generateGcpVmTerraformTool } from "./gcp-vm-tools";
+import { provisionJenkinsTool } from "./provision-jenkins-tools";
+import { listAwsVpcsTool, listAwsSubnetsTool } from "./list-aws-network";
 import type { Tool, ToolContext, ToolExecuteResult } from "./types";
 
 export type { Tool, ToolContext, ToolExecuteResult } from "./types";
@@ -169,6 +191,7 @@ export const ALL_TOOLS: Tool[] = [
   setupGithubOidcEcrTool,
   generateEcrWorkflowTool,
   savePipelineToProjectTool,
+  runCiPipelineTool,
   // Jenkins alternative CI/CD system — same 4-stage shape, user brings their own Jenkins server.
   connectJenkinsTool,
   generateJenkinsfileTool,
@@ -248,6 +271,36 @@ export const ALL_TOOLS: Tool[] = [
   repairCdKubeconfigTool,
   // The single from-scratch flow: analyze repo → Dockerfile + CI + manifests → registry → (build → deploy)
   deployMyAppTool,
+  // Managed database (AWS RDS) — provision new, or connect an existing one
+  generateRdsTerraformTool,
+  createRdsK8sSecretTool,
+  connectExistingRdsTool,
+  // AWS S3 bucket generator (secure-by-default: public blocked, SSE on, versioning on)
+  generateS3TerraformTool,
+  // AWS VPC (+ IGW + one public subnet + route table). No EC2 attached.
+  generateVpcTerraformTool,
+  // Single EC2 into an EXISTING VPC/subnet (SG + IAM SSM role + EC2 + EIP).
+  generateEc2TerraformTool,
+  // Cross-region VPC peering — same account, two regions
+  generateVpcPeeringTerraformTool,
+  // AWS Client VPN — laptop-to-VPC OpenVPN tunnel (needs ACM certs)
+  generateClientVpnTerraformTool,
+  // Standalone VPN certificate set — CA + server + N client certs; reusable across VPNs
+  generateVpnCertificatesTerraformTool,
+  // Azure VNet — Azure's equivalent of AWS VPC (RG + VNet + subnets + optional NAT)
+  generateAzureVnetTerraformTool,
+  // Azure VM — single VM in an EXISTING VNet/subnet
+  generateAzureVmTerraformTool,
+  // GCP VPC — network + subnets + firewalls + optional Cloud NAT
+  generateGcpVpcTerraformTool,
+  // GCP Compute Engine VM — single VM in an EXISTING VPC/subnet
+  generateGcpVmTerraformTool,
+  // One-click Jenkins on EC2 — VM + user-data self-configures Jenkins + admin user
+  provisionJenkinsTool,
+  // Read-only AWS network discovery (chat EC2/peering flows use these to
+  // offer VPC + subnet pill options instead of asking the user to paste ids)
+  listAwsVpcsTool,
+  listAwsSubnetsTool,
 ] as Tool[];
 
 const TOOLS_BY_NAME = new Map(ALL_TOOLS.map((t) => [t.name, t]));
@@ -276,6 +329,15 @@ const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp" | "proxmox"> = {
   generate_ecr_workflow: "aws",
   grant_eks_access: "aws",
   list_ecr_repos: "aws",
+  // RDS provisioner — AWS-only. create_rds_k8s_secret + connect_existing_rds
+  // stay cloud-agnostic (they only write a K8s Secret into the app namespace).
+  generate_rds_terraform: "aws",
+  generate_s3_terraform: "aws",
+  generate_vpc_terraform: "aws",
+  generate_ec2_terraform: "aws",
+  generate_vpc_peering_terraform: "aws",
+  list_aws_vpcs: "aws",
+  list_aws_subnets: "aws",
   // analyze_app_services + deploy_my_app are cloud-agnostic at the gating level:
   // deploy_my_app supports AWS (EKS/ECR), GCP (GKE/Artifact Registry) AND Azure
   // (AKS/ACR), picking the path from the env's cloud — so it must stay visible
@@ -320,6 +382,7 @@ const TOOL_GIT_PROVIDER: Record<string, "github"> = {
   generate_trivy_workflow: "github",
   set_github_actions_secret: "github",
   deploy_my_app: "github",
+  run_ci_pipeline: "github",
   // Proxmox deploy orchestrator writes .github/workflows/*.yml + sets repo
   // secrets; only meaningful with a GitHub repo attached.
   deploy_to_proxmox_vm: "github",
@@ -381,11 +444,12 @@ export async function executeTool(
     return { ok: false, error: `Unknown tool "${name}".` };
   }
   try {
-    return await tool.execute(input, ctx);
+    const result = await tool.execute(input, ctx);
+    if (!result.ok) console.error(`[tool:${name}] ${result.error}`);
+    return result;
   } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : "Tool execution failed.",
-    };
+    const message = err instanceof Error ? err.message : "Tool execution failed.";
+    console.error(`[tool:${name}] threw:`, err instanceof Error ? err.stack ?? message : err);
+    return { ok: false, error: message };
   }
 }

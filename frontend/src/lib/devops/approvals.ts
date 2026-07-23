@@ -23,6 +23,9 @@ export type ApprovalRow = {
   decidedByName: string | null;
   requestedAt: string;
   decidedAt: string | null;
+  /** Set once the approved change actually finished applying. Approved-but-null
+   *  means the apply step failed or hasn't run yet — see retryApply(). */
+  appliedAt: string | null;
   diff: Array<{ kind: DiffKind; text: string; order: number }>;
 };
 
@@ -44,11 +47,34 @@ function row(
     decidedByName: a.decidedBy?.name ?? null,
     requestedAt: a.requestedAt.toISOString(),
     decidedAt: a.decidedAt?.toISOString() ?? null,
+    appliedAt: a.appliedAt?.toISOString() ?? null,
     diff: a.diff
       .slice()
       .sort((x, y) => x.order - y.order)
       .map((d) => ({ kind: d.kind, text: d.text, order: d.order })),
   };
+}
+
+/**
+ * Retry the EXECUTION of an already-approved change whose apply failed (e.g.
+ * a transient error, or a since-fixed gap in credential resolution). The
+ * DECISION itself stays immutable — this never touches status/decidedAt —
+ * it only re-invokes the same apply step applyApprovedChange runs right
+ * after a fresh approval, so a stuck "approved but never applied" row isn't
+ * a permanent dead end.
+ */
+export type RetryApplyResult =
+  | { ok: true; alreadyApplied: boolean }
+  | { ok: false; code: "not_found" | "not_approved" };
+
+export async function canRetryApply(projectId: string, id: string): Promise<RetryApplyResult> {
+  const existing = await prisma.approval.findFirst({
+    where: { id, projectId },
+    select: { status: true, appliedAt: true },
+  });
+  if (!existing) return { ok: false, code: "not_found" };
+  if (existing.status !== "approved") return { ok: false, code: "not_approved" };
+  return { ok: true, alreadyApplied: !!existing.appliedAt };
 }
 
 export async function listApprovals(

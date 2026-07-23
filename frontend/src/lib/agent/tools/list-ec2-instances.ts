@@ -58,8 +58,8 @@ async function resolveAwsProviderId(projectId: string, userId: string): Promise<
 
 /**
  * Read-only EC2 inventory tool. Lists EC2 instances in the project's connected
- * AWS account using the cross-account role (assumed via STS) or stored Vault
- * keys. Never mutates anything. Output is normalized so the agent can reason
+ * AWS account using the cross-account role (assumed via STS) or stored
+ * (encrypted) access keys. Never mutates anything. Output is normalized so the agent can reason
  * about it without raw AWS JSON.
  */
 export const listEc2InstancesTool: Tool<Input, Output> = {

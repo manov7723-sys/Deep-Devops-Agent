@@ -44,8 +44,10 @@ const MAX_CONTENT_BYTES = 256 * 1024;
  *   - Repo must be attached to the current project.
  *   - File content ≤ 256KB.
  *   - Branch name is normalised (slashes allowed, no leading slash).
- *   - Default branch protection is honored — if `branch` equals the default,
- *     we refuse to commit directly (must open a PR).
+ *   - openPullRequest=true refuses branch === targetBranch (a PR needs head
+ *     != base). Plain direct commits (openPullRequest falsy) to the default
+ *     branch are allowed and expected — deploy_my_app and the Jenkins flow
+ *     both commit straight to the default branch by design, no PR.
  */
 export const writeRepoFileTool: Tool<Input, Output> = {
   name: "write_repo_file",
@@ -53,9 +55,11 @@ export const writeRepoFileTool: Tool<Input, Output> = {
     "Commit a file to a branch in a GitHub or GitLab repo attached to the " +
     "current project, optionally opening a pull request (GitHub) / merge " +
     "request (GitLab). Use this to author Helm charts, env configs, terraform " +
-    "HCL, manifests — anything that should land via review. Direct commits to " +
-    "the default branch are refused; use a feature branch and set " +
-    "openPullRequest=true.",
+    "HCL, manifests — anything that should land via review, or to commit " +
+    "straight to the default branch (openPullRequest omitted/false) when the " +
+    "flow's design is direct-commit-no-PR (e.g. deploy_my_app, the Jenkins " +
+    "path). openPullRequest=true refuses branch === targetBranch (a PR needs " +
+    "head != base) — pass a distinct feature branch when opening a PR.",
   inputSchema: {
     type: "object",
     properties: {
@@ -105,10 +109,14 @@ export const writeRepoFileTool: Tool<Input, Output> = {
 
     const branch = input.branch.replace(/^\/+/, "");
     const targetBranch = (input.targetBranch || repo.defaultBranch).replace(/^\/+/, "");
-    if (branch === targetBranch) {
+    // Only nonsensical (and refused) when actually opening a PR — a PR needs
+    // head != base. Plain direct commits (openPullRequest falsy) to the
+    // default branch are the INTENDED path for deploy_my_app and the Jenkins
+    // flow's "always commit straight to default, never open a PR" design.
+    if (input.openPullRequest && branch === targetBranch) {
       return {
         ok: false,
-        error: `Refusing to commit directly to the target branch (${targetBranch}). Use a feature branch for the commit and open a PR into ${targetBranch}.`,
+        error: `Refusing to open a PR from "${branch}" into itself. Use a feature branch for the commit, distinct from ${targetBranch}.`,
       };
     }
 

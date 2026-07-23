@@ -293,13 +293,24 @@ export function useCreateChatThread(slug: string) {
   });
 }
 
-/** Clear the project's chat (deletes threads + messages) and reset the view. */
+/**
+ * Clear chat. Pass a threadId to delete ONLY that conversation; pass null/
+ * omit to clear every thread on the project (legacy behavior). The UI now
+ * always scopes to the active thread — "Clear" means "clear this conversation."
+ */
 export function useClearChat(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => api.del<{ ok: boolean }>(`/projects/${slug}/chat`),
+    mutationFn: async (threadId?: string | null) => {
+      const q = threadId ? `?threadId=${encodeURIComponent(threadId)}` : "";
+      return api.del<{ ok: boolean; clearedThreadIds?: string[] }>(
+        `/projects/${slug}/chat${q}`,
+      );
+    },
     onSuccess: () => {
       qc.setQueryData(pk(slug, "chat"), []);
+      // Invalidate everything chat-related (thread list, per-thread messages,
+      // the default/flat chat) — cheaper than surgical keys and always right.
       qc.invalidateQueries({ queryKey: pk(slug, "chat") });
     },
   });
@@ -443,6 +454,26 @@ export function useApprovalDecision(slug: string) {
         { decision: input.decision },
       );
       if (!res.ok) throw new Error("Could not record decision.");
+      return res;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: pk(slug, "approvals") });
+    },
+  });
+}
+
+/**
+ * Retry the apply step for an approval that's already approved but never
+ * successfully applied (the decision itself is never touched/re-made).
+ */
+export function useRetryApprovalApply(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post<{ ok: boolean; applied?: boolean; message?: string; code?: string }>(
+        `/projects/${slug}/approvals/${id}/retry-apply`,
+      );
+      if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not retry the apply.");
       return res;
     },
     onSuccess: () => {

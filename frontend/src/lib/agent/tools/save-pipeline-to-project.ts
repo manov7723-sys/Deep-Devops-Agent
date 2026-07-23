@@ -35,6 +35,43 @@ function findWorkflowPath(files: FileEntry[]): string | null {
 }
 
 /**
+ * Register a pipeline whose files are ALREADY committed to GitHub (e.g. by
+ * deploy_my_app's direct-commit flow) so it shows up in the CI/CD → Pipelines
+ * tab with a working "Run" button — unlike save_pipeline_to_project's "draft"
+ * pipelines, clicking Run here does NOT need to commit anything new (the
+ * no-op check in commitFiles skips creating an empty commit when nothing
+ * changed); it just fires workflow_dispatch. Status "committed" signals to the
+ * UI that the files are live on the branch but the workflow hasn't run yet —
+ * by design, generated workflows only trigger on workflow_dispatch, never push.
+ */
+export async function registerCommittedPipeline(params: {
+  projectId: string;
+  repoId: string;
+  name: string;
+  files: FileEntry[];
+  branch: string;
+  commitSha: string;
+  workflowPath?: string | null;
+}): Promise<{ id: string; workflowPath: string | null }> {
+  const files = params.files.map((f) => ({ path: f.path.replace(/^\/+/, ""), content: f.content }));
+  const workflowPath = params.workflowPath !== undefined ? params.workflowPath : findWorkflowPath(files);
+  const row = await prisma.ciPipeline.create({
+    data: {
+      projectId: params.projectId,
+      repoId: params.repoId,
+      name: params.name,
+      files,
+      workflowPath,
+      branch: params.branch,
+      status: "committed",
+      commitSha: params.commitSha,
+    },
+    select: { id: true },
+  });
+  return { id: row.id, workflowPath };
+}
+
+/**
  * Save a generated CI/CD pipeline to the project's CI/CD section WITHOUT
  * pushing anything to GitHub. The user reviews/edits the script in the CI/CD
  * tab, then clicks "Run pipeline" — which is when the workflow is committed to

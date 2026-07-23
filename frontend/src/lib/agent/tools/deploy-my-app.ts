@@ -15,6 +15,7 @@ import { grantEksAccessTool } from "./grant-eks-access";
 import { setupGithubOidcEcrTool } from "./setup-github-oidc-ecr";
 import { setKubeconfigSecretTool } from "./deploy-tools";
 import { writeRepoFileTool } from "./write-repo-file";
+import { registerCommittedPipeline } from "./save-pipeline-to-project";
 import type { Tool } from "./types";
 
 /**
@@ -351,14 +352,26 @@ export const deployMyAppTool: Tool<Input, Output> = {
         cloudProvider: { select: { id: true, kind: true, region: true, accountRef: true } },
       },
     });
-    const cloud = envRow?.cloudProvider?.kind;
+    // Prefer the env's own linked provider; fall back to the project's own
+    // cloud provider directly (CloudProvider.projectId) when the env was never
+    // back-linked — e.g. a cluster connected via connect-cluster's fallback
+    // resolver, which authenticates fine but doesn't persist cloudProviderId
+    // onto the env row. Same fallback pattern connect-cluster itself uses.
+    const provider =
+      envRow?.cloudProvider ??
+      (await prisma.cloudProvider.findFirst({
+        where: { projectId: ctx.projectId, kind: { in: ["aws", "gcp", "azure"] } },
+        select: { id: true, kind: true, region: true, accountRef: true },
+        orderBy: { createdAt: "desc" },
+      }));
+    const cloud = provider?.kind;
     if (cloud !== "aws" && cloud !== "gcp" && cloud !== "azure") {
       return {
         ok: false,
         error: `deploy_my_app supports AWS (EKS + ECR), GCP (GKE + Artifact Registry), and Azure (AKS + ACR). The env "${input.envKey}" is on "${cloud ?? "no connected cloud"}".`,
       };
     }
-    const cloudProviderId = envRow!.cloudProvider!.id;
+    const cloudProviderId = provider!.id;
 
     // Cluster ref for the keyless CD, parsed from the env's stored kubeconfig.
     let eksRef: { region: string; accountId: string; clusterName: string } | null = null;
@@ -403,7 +416,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
             if (!rg) {
               // Kubeconfig didn't carry the resource group — resolve it via ARM.
               const tok = await getAzureAccessToken(cloudProviderId);
-              const subscription = envRow.cloudProvider!.accountRef?.trim();
+              const subscription = provider!.accountRef?.trim();
               if (tok.ok && subscription) {
                 const found = await findAksClusterByName(
                   tok.accessToken,
@@ -442,6 +455,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
     // 2+3 — per service: ensure the registry + keyless auth, then generate files.
     const allFiles: { path: string; content: string }[] = [];
     const deployed: DeployedService[] = [];
+    const pipelineFilesByService: { path: string; content: string }[][] = [];
     const registrySteps: string[] = [];
     for (const { svc, imageName, expose, host } of plans) {
       const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
@@ -488,7 +502,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
       let workflowFile: string;
 
       if (cloud === "gcp") {
-        const location = envRow!.cloudProvider!.region || "us-central1";
+        const location = provider!.region || "us-central1";
         const gcp = await setupGcpDeployRegistry(
           cloudProviderId,
           input.repoFullName,
@@ -678,6 +692,11 @@ export const deployMyAppTool: Tool<Input, Output> = {
         expose,
         keptExistingDockerfile: keepDockerfile,
       });
+      // Kept alongside `deployed` (same index) so we can register a CI/CD-tab
+      // pipeline (Run button) per service once every file is committed below —
+      // not part of DeployedService/Output so we don't dump file contents back
+      // into the model's context.
+      pipelineFilesByService.push(built.files);
     }
     registrySteps.push(...cdNotes);
 
@@ -717,6 +736,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
     // as an explicit error the agent can retry.
     const committed: string[] = [];
     let pullRequest: { number: number; url: string } | undefined;
+    let lastCommitSha: string | undefined;
     for (let i = 0; i < allFiles.length; i++) {
       const f = allFiles[i];
       const isLast = i === allFiles.length - 1;
@@ -738,6 +758,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
       );
       if (!res.ok) return { ok: false, error: `Failed writing ${f.path}: ${res.error}` };
       committed.push(f.path);
+      lastCommitSha = res.output.commitSha;
       if (res.output.pullRequest) pullRequest = res.output.pullRequest;
     }
     if (!direct && !pullRequest) {
@@ -749,6 +770,25 @@ export const deployMyAppTool: Tool<Input, Output> = {
       };
     }
 
+    // Files land on the default branch immediately (direct commit), but the
+    // generated workflows trigger on workflow_dispatch ONLY (never push) — so
+    // register a CI/CD-tab pipeline per service now, giving the user a "Run"
+    // button that starts the build/deploy exactly when they click it.
+    if (direct && lastCommitSha) {
+      for (let i = 0; i < deployed.length; i++) {
+        const d = deployed[i];
+        await registerCommittedPipeline({
+          projectId: ctx.projectId,
+          repoId: repo.id,
+          name: multi ? `${baseApp} — ${d.name}` : baseApp,
+          files: pipelineFilesByService[i] ?? [],
+          branch: pushBranch,
+          commitSha: lastCommitSha,
+          workflowPath: `.github/workflows/${d.workflowFile}`,
+        });
+      }
+    }
+
     const watchHint = deployed
       .map(
         (d) =>
@@ -756,8 +796,8 @@ export const deployMyAppTool: Tool<Input, Output> = {
       )
       .join("; and for the next service ");
     const next = direct
-      ? `Files committed to ${branch} — CI is starting, and the CD workflow will deploy automatically after CI succeeds. Watch it: ${watchHint}. deploy_app is only the fallback if the CD run fails.`
-      : `PR #${pullRequest?.number ?? "?"} opened — after the user merges it, CI builds each image and the CD workflow deploys it automatically. Then watch: ${watchHint}. deploy_app is only the fallback if the CD run fails.`;
+      ? `Files committed to ${branch}. Nothing builds automatically — the generated workflows only run on workflow_dispatch (by design), not on push. Tell the user to open the CI/CD → Pipelines tab and click "Run" for each service (${deployed.map((d) => d.name).join(", ")}) whenever they're ready to build & deploy. Once a run starts, the CD workflow deploys automatically after CI succeeds — watch it: ${watchHint}. deploy_app is only the fallback if the CD run fails.`
+      : `PR #${pullRequest?.number ?? "?"} opened — after the user merges it, the files land on ${branch} but nothing builds automatically (workflow_dispatch only). They can click "Run" on each pipeline in the CI/CD → Pipelines tab to start it. Then watch: ${watchHint}. deploy_app is only the fallback if the CD run fails.`;
 
     // Echo which packaging style was picked so the deploy report + downstream
     // steps can see it. `helm` uses the existing scaffold_helm_chart + run_helm_upgrade
