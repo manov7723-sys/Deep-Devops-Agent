@@ -473,6 +473,52 @@ export const deployMyAppTool: Tool<Input, Output> = {
     const combinedCdServices: Array<{ name: string; appName: string; manifestDir: string }> = [];
     let combinedCiRoleArn = "";
     let combinedCiRegion = "";
+    // Combined-mode: call setup_github_oidc_ecr ONCE upfront with the primary
+    // service's ECR + additionalEcrRepos=[rest] so ONE role is created with a
+    // policy that lists every service's ECR ARN. Without this, each per-service
+    // OIDC call would silently overwrite the previous role's trust policy AND
+    // create a role whose inline policy only allows push to that one service's
+    // ECR — the matrix job for the other service fails with AccessDenied on
+    // ecr:PutImage. This is the exact demo-blocker bug the audit surfaced.
+    let combinedOidc: { roleArn: string; region: string; accountId: string } | null = null;
+    if (useCombinedEksMode) {
+      const primaryImage = plans[0]?.imageName?.trim().toLowerCase();
+      const extraImages = plans
+        .slice(1)
+        .map((p) => p.imageName?.trim().toLowerCase())
+        .filter((n): n is string => !!n && n !== primaryImage);
+      if (primaryImage) {
+        const oidcOnce = await setupGithubOidcEcrTool.execute(
+          {
+            repoFullName: input.repoFullName,
+            ecrRepoName: primaryImage,
+            additionalEcrRepos: extraImages,
+          },
+          ctx,
+        );
+        if (!oidcOnce.ok) {
+          return { ok: false, error: `Combined-mode OIDC setup failed: ${oidcOnce.error}` };
+        }
+        combinedOidc = {
+          roleArn: oidcOnce.output.roleArn,
+          region: oidcOnce.output.region,
+          accountId: oidcOnce.output.accountId,
+        };
+        registrySteps.push(...oidcOnce.output.steps.map((s) => `[combined] ${s}`));
+        // Grant this SINGLE role EKS cluster access for the keyless CD.
+        if (eksRef) {
+          const grant = await grantEksAccessTool.execute(
+            { envKey: input.envKey, roleArn: combinedOidc.roleArn, accessLevel: "admin" },
+            ctx,
+          );
+          cdNotes.push(
+            grant.ok
+              ? `[combined] Granted ${combinedOidc.roleArn} access to cluster ${eksRef.clusterName} (keyless CD ready).`
+              : `[combined] Could not grant cluster access (${grant.error}) — if the CD run fails "Unauthorized", call grant_eks_access(envKey, roleArn).`,
+          );
+        }
+      }
+    }
     for (const { svc, imageName, expose, host } of plans) {
       const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
       // Combined mode uses one shared cd.yml across all services; per-service
@@ -640,10 +686,28 @@ export const deployMyAppTool: Tool<Input, Output> = {
               : undefined,
         });
       } else {
-        const oidc = await setupGithubOidcEcrTool.execute(
-          { repoFullName: input.repoFullName, ecrRepoName: imageName },
-          ctx,
-        );
+        // Combined mode: reuse the SINGLE role + policy provisioned upfront
+        // (see combinedOidc above). Per-service OIDC calls would silently
+        // overwrite the shared role's trust policy — the whole point of
+        // combined mode is one role covering every service.
+        const oidc =
+          useCombinedEksMode && combinedOidc
+            ? {
+                ok: true as const,
+                output: {
+                  roleArn: combinedOidc.roleArn,
+                  region: combinedOidc.region,
+                  accountId: combinedOidc.accountId,
+                  ecrRepositoryUri: `${combinedOidc.accountId}.dkr.ecr.${combinedOidc.region}.amazonaws.com/${imageName}`,
+                  ecrRepositoryName: imageName,
+                  oidcProviderArn: `arn:aws:iam::${combinedOidc.accountId}:oidc-provider/token.actions.githubusercontent.com`,
+                  steps: [],
+                },
+              }
+            : await setupGithubOidcEcrTool.execute(
+                { repoFullName: input.repoFullName, ecrRepoName: imageName },
+                ctx,
+              );
         if (!oidc.ok)
           return { ok: false, error: `Registry setup for "${svc.name}" failed: ${oidc.error}` };
         registrySteps.push(...oidc.output.steps.map((s) => `${label}${s}`));
@@ -668,8 +732,11 @@ export const deployMyAppTool: Tool<Input, Output> = {
             oidc.output.ecrRepositoryUri,
           );
         }
-        // Keyless CD needs the CI role to have cluster RBAC (idempotent Access Entries).
-        if (eksRef) {
+        // Keyless CD needs the CI role to have cluster RBAC (idempotent Access
+        // Entries). Skip in combined mode — we already granted the SHARED role
+        // access upfront when combinedOidc was set up; per-service grants
+        // would just repeat the same idempotent call.
+        if (eksRef && !useCombinedEksMode) {
           const grant = await grantEksAccessTool.execute(
             { envKey: input.envKey, roleArn: oidc.output.roleArn, accessLevel: "admin" },
             ctx,

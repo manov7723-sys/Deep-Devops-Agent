@@ -45,8 +45,16 @@ export type GithubOidcSetupInput = {
   region: string;
   /** GitHub repo "owner/repo" — scopes the role's trust policy. */
   repoFullName: string;
-  /** ECR repository name to create/use (e.g. "my-api"). */
+  /** Primary ECR repository name to create/use (e.g. "my-api"). */
   ecrRepoName: string;
+  /**
+   * Additional ECR repositories to also grant push access on the SAME role.
+   * Used by the combined-workflow monorepo path — one role, one matrix, N
+   * services, N distinct ECR repos. Also each is created (idempotent) as
+   * part of this call. Without this, monorepo matrix jobs push to their own
+   * ECR using a role scoped to a DIFFERENT ECR → AccessDenied.
+   */
+  additionalEcrRepos?: string[];
   /** IAM role name to create/use (e.g. "gha-ecr-my-api"). */
   roleName: string;
   /**
@@ -123,6 +131,16 @@ export async function setupGithubOidcEcr(
       code: "bad_input",
       message: `Invalid ECR repository name "${input.ecrRepoName}".`,
     };
+  }
+  const additionalEcrRepos = (input.additionalEcrRepos ?? []).filter((n) => n && n !== input.ecrRepoName);
+  for (const extra of additionalEcrRepos) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_./-]{1,255}$/.test(extra)) {
+      return {
+        ok: false,
+        code: "bad_input",
+        message: `Invalid ECR repository name "${extra}" (in additionalEcrRepos).`,
+      };
+    }
   }
   if (!/^[A-Za-z0-9_+=,.@-]{1,64}$/.test(input.roleName)) {
     return { ok: false, code: "bad_input", message: `Invalid IAM role name "${input.roleName}".` };
@@ -221,6 +239,16 @@ export async function setupGithubOidcEcr(
     }
 
     // 2 — Trust policy: only this repo's Actions runs may assume the role.
+    // AWS StringLike is CASE-SENSITIVE; GitHub's OIDC `sub` uses GitHub's
+    // stored casing. If the repo was renamed (or attached with different
+    // casing than what's stored in Prisma), the trust check fails with
+    // exactly the "sts:AssumeRoleWithWebIdentity Not authorized" error
+    // we've seen. Belt-and-braces: match on both the exact case AND the
+    // lowercased form via ForAnyValue:StringLike, so a case drift on either
+    // side still passes. Also match with and without owner casing.
+    const subExact = `repo:${parsed.owner}/${parsed.repo}:${subject}`;
+    const subLower = `repo:${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}:${subject}`;
+    const subs = subExact === subLower ? [subExact] : [subExact, subLower];
     const trustPolicy = {
       Version: "2012-10-17",
       Statement: [
@@ -230,8 +258,8 @@ export async function setupGithubOidcEcr(
           Action: "sts:AssumeRoleWithWebIdentity",
           Condition: {
             StringEquals: { [`${GITHUB_OIDC_ISSUER}:aud`]: GITHUB_OIDC_AUDIENCE },
-            StringLike: {
-              [`${GITHUB_OIDC_ISSUER}:sub`]: `repo:${parsed.owner}/${parsed.repo}:${subject}`,
+            "ForAnyValue:StringLike": {
+              [`${GITHUB_OIDC_ISSUER}:sub`]: subs,
             },
           },
         },
@@ -314,6 +342,14 @@ export async function setupGithubOidcEcr(
     //     before it ever reaches cluster RBAC. EKS describe is read-only and
     //     account-scoped; cluster-side RBAC (Access Entries) is still required
     //     and gated separately by grant_eks_access.
+    // Push policy covers the primary ECR + every additional ECR (monorepo).
+    // AWS accepts an ARN array in Resource for cross-repo push — one Sid,
+    // one policy, one role. Also idempotent: re-runs re-write the policy
+    // with whatever set of ECRs the caller passes this time.
+    const allEcrRepos = [input.ecrRepoName, ...additionalEcrRepos];
+    const ecrArns = allEcrRepos.map(
+      (name) => `arn:aws:ecr:${region}:${accountId}:repository/${name}`,
+    );
     const permPolicy = {
       Version: "2012-10-17",
       Statement: [
@@ -335,7 +371,7 @@ export async function setupGithubOidcEcr(
             "ecr:BatchGetImage",
             "ecr:GetDownloadUrlForLayer",
           ],
-          Resource: `arn:aws:ecr:${region}:${accountId}:repository/${input.ecrRepoName}`,
+          Resource: ecrArns.length === 1 ? ecrArns[0] : ecrArns,
         },
         {
           Sid: "EksReadForKubeconfig",
@@ -372,22 +408,32 @@ export async function setupGithubOidcEcr(
     }
     steps.push(`Attached ECR push policy to ${input.roleName}.`);
 
-    // 4 — Ensure the ECR repository exists.
-    const describe = await aws(
-      ["ecr", "describe-repositories", "--repository-names", input.ecrRepoName],
-      awsEnv,
-      region,
-      workdir,
-    );
-    if (describe.ok) {
-      steps.push(`ECR repository ${input.ecrRepoName} already existed — reused.`);
-    } else if (describe.stderr.includes("RepositoryNotFoundException")) {
+    // 4 — Ensure each ECR repository (primary + additional) exists.
+    for (const repoName of allEcrRepos) {
+      const describe = await aws(
+        ["ecr", "describe-repositories", "--repository-names", repoName],
+        awsEnv,
+        region,
+        workdir,
+      );
+      if (describe.ok) {
+        steps.push(`ECR repository ${repoName} already existed — reused.`);
+        continue;
+      }
+      if (!describe.stderr.includes("RepositoryNotFoundException")) {
+        return {
+          ok: false,
+          code: "aws_error",
+          message: `ecr describe-repositories failed for ${repoName}.`,
+          stderr: tail(describe.stderr),
+        };
+      }
       const createRepo = await aws(
         [
           "ecr",
           "create-repository",
           "--repository-name",
-          input.ecrRepoName,
+          repoName,
           "--image-scanning-configuration",
           "scanOnPush=true",
           "--image-tag-mutability",
@@ -398,21 +444,39 @@ export async function setupGithubOidcEcr(
         workdir,
       );
       if (!createRepo.ok) {
-        return {
-          ok: false,
-          code: "aws_error",
-          message: "Could not create the ECR repository.",
-          stderr: tail(createRepo.stderr),
-        };
+        // Concurrent create race is benign — treat "already exists" as success.
+        if (!createRepo.stderr.includes("RepositoryAlreadyExistsException")) {
+          return {
+            ok: false,
+            code: "aws_error",
+            message: `Could not create ECR repository ${repoName}.`,
+            stderr: tail(createRepo.stderr),
+          };
+        }
       }
-      steps.push(`Created ECR repository ${input.ecrRepoName} (scan-on-push enabled).`);
-    } else {
-      return {
-        ok: false,
-        code: "aws_error",
-        message: "ecr describe-repositories failed.",
-        stderr: tail(describe.stderr),
-      };
+      steps.push(`Created ECR repository ${repoName} (scan-on-push enabled).`);
+    }
+
+    // 5 — Wait for the role to propagate before returning ok. AWS IAM/STS
+    // has a real 5-15s eventual-consistency window after create-role — if
+    // the user clicks "Run" on the GitHub workflow immediately, the very
+    // first AssumeRoleWithWebIdentity call gets "Not authorized" purely
+    // because the role isn't visible in STS yet. Poll get-role a few times.
+    // Skip when the role already existed pre-call (no propagation lag).
+    if (steps.some((s) => s.startsWith("Created IAM role"))) {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const check = await aws(
+          ["iam", "get-role", "--role-name", input.roleName],
+          awsEnv,
+          region,
+          workdir,
+        );
+        if (check.ok) {
+          steps.push(`IAM role visible after ~${(attempt + 1) * 3}s — safe to assume.`);
+          break;
+        }
+      }
     }
 
     return {
