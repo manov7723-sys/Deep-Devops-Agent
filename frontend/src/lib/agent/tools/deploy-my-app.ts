@@ -7,6 +7,10 @@ import { findAksClusterByName } from "@/lib/cloud/azure-arm";
 import { parseEksClusterRef } from "@/lib/cloud/eks-access";
 import { parseGkeClusterRef, setupGcpDeployRegistry } from "@/lib/cloud/gcp-artifact-registry";
 import { buildCicdArtifacts } from "@/lib/devops/cicd-pipeline";
+import {
+  generateCombinedEcrCiWorkflow,
+  generateCombinedEksCdWorkflow,
+} from "@/lib/ci/templates";
 import { listDeployTargets } from "@/lib/devops/deploy";
 import { sanitizeAppName } from "@/lib/devops/deploy-manifest";
 import { setRepoActionsVariable } from "@/lib/github/secrets";
@@ -457,9 +461,28 @@ export const deployMyAppTool: Tool<Input, Output> = {
     const deployed: DeployedService[] = [];
     const pipelineFilesByService: { path: string; content: string }[][] = [];
     const registrySteps: string[] = [];
+
+    // Combined-mode collector — when a monorepo targets ECR + EKS, we emit ONE
+    // ci.yml (matrix over services) + ONE cd.yml (workflow_run, matrix deploy)
+    // instead of 2N per-service workflows. Collected during the per-service
+    // loop below; the combined files get generated + prepended AFTER the loop.
+    // GCP/Azure keep the per-service pattern for now — same combined shape can
+    // be added later with matching generators.
+    const useCombinedEksMode = multi && cloud === "aws" && !!eksRef;
+    const combinedCiServices: Array<{ name: string; ecrRepositoryUri: string; context?: string }> = [];
+    const combinedCdServices: Array<{ name: string; appName: string; manifestDir: string }> = [];
+    let combinedCiRoleArn = "";
+    let combinedCiRegion = "";
     for (const { svc, imageName, expose, host } of plans) {
       const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
-      const cdWorkflowFile = multi ? `deploy-${svc.name}.yml` : "deploy.yml";
+      // Combined mode uses one shared cd.yml across all services; per-service
+      // mode uses deploy-<name>.yml per service.
+      const useCombinedForThisSvc = multi && cloud === "aws" && !!eksRef;
+      const cdWorkflowFile = useCombinedForThisSvc
+        ? "cd.yml"
+        : multi
+        ? `deploy-${svc.name}.yml`
+        : "deploy.yml";
       const cdWorkflowName = multi
         ? `Deploy ${svc.name} to Kubernetes (CD)`
         : "Deploy to Kubernetes (CD)";
@@ -657,26 +680,57 @@ export const deployMyAppTool: Tool<Input, Output> = {
               : `${label}Could not grant cluster access (${grant.error}) — if the CD run fails "Unauthorized", call grant_eks_access(envKey, roleArn).`,
           );
         }
-        workflowFile = multi ? `build-and-push-${svc.name}.yml` : "build-and-push.yml";
-        const ciWorkflowName = multi
-          ? `Build and push ${svc.name} to ECR`
-          : "Build and push to ECR";
-        registryUri = oidc.output.ecrRepositoryUri;
-        built = buildCicdArtifacts({
-          ...commonSpec,
-          ciWorkflowName,
-          ciFileName: workflowFile,
-          eksCluster: eksRef
-            ? { clusterName: eksRef.clusterName, region: eksRef.region }
-            : undefined,
-          registryUseVars: !multi,
-          registry: {
-            cloud: "aws",
-            roleArn: oidc.output.roleArn,
-            region: oidc.output.region,
+        // Combined-mode: one ci.yml + one cd.yml for the whole monorepo.
+        // Skip per-service CI/CD workflow generation here; the combined files
+        // get generated ONCE after the loop below.
+        if (useCombinedEksMode) {
+          workflowFile = "ci.yml";
+          combinedCiRoleArn = oidc.output.roleArn;
+          combinedCiRegion = oidc.output.region;
+          combinedCiServices.push({
+            name: svc.name,
             ecrRepositoryUri: oidc.output.ecrRepositoryUri,
-          },
-        });
+            context: svc.path,
+          });
+          combinedCdServices.push({
+            name: svc.name,
+            appName,
+            manifestDir,
+          });
+          registryUri = oidc.output.ecrRepositoryUri;
+          built = buildCicdArtifacts({
+            ...commonSpec,
+            include: { ...commonSpec.include, ciWorkflow: false, cdWorkflow: false },
+            registryUseVars: false,
+            registry: {
+              cloud: "aws",
+              roleArn: oidc.output.roleArn,
+              region: oidc.output.region,
+              ecrRepositoryUri: oidc.output.ecrRepositoryUri,
+            },
+          });
+        } else {
+          workflowFile = multi ? `build-and-push-${svc.name}.yml` : "build-and-push.yml";
+          const ciWorkflowName = multi
+            ? `Build and push ${svc.name} to ECR`
+            : "Build and push to ECR";
+          registryUri = oidc.output.ecrRepositoryUri;
+          built = buildCicdArtifacts({
+            ...commonSpec,
+            ciWorkflowName,
+            ciFileName: workflowFile,
+            eksCluster: eksRef
+              ? { clusterName: eksRef.clusterName, region: eksRef.region }
+              : undefined,
+            registryUseVars: !multi,
+            registry: {
+              cloud: "aws",
+              roleArn: oidc.output.roleArn,
+              region: oidc.output.region,
+              ecrRepositoryUri: oidc.output.ecrRepositoryUri,
+            },
+          });
+        }
       }
 
       for (const f of built.files) allFiles.push(f);
@@ -698,6 +752,33 @@ export const deployMyAppTool: Tool<Input, Output> = {
       // into the model's context.
       pipelineFilesByService.push(built.files);
     }
+
+    // Combined-mode: emit ONE ci.yml + ONE cd.yml for the whole monorepo,
+    // now that we've collected every service. Matrix over services so both
+    // frontend + backend build in parallel, and CD only fires once CI succeeds
+    // for all of them.
+    if (useCombinedEksMode && combinedCiServices.length > 0 && eksRef) {
+      const combinedCi = generateCombinedEcrCiWorkflow({
+        roleArn: combinedCiRoleArn,
+        region: combinedCiRegion,
+        branch,
+        scanGate: true,
+        services: combinedCiServices,
+      });
+      const combinedCd = generateCombinedEksCdWorkflow({
+        roleArn: combinedCiRoleArn,
+        region: combinedCiRegion,
+        clusterName: eksRef.clusterName,
+        namespace,
+        services: combinedCdServices,
+      });
+      allFiles.push(combinedCi);
+      allFiles.push(combinedCd);
+      registrySteps.push(
+        `Emitted ONE combined CI workflow (ci.yml — matrix over ${combinedCiServices.length} services, parallel builds) + ONE combined CD workflow (cd.yml — workflow_run gated on CI success, parallel deploys) instead of ${combinedCiServices.length * 2} per-service files.`,
+      );
+    }
+
     registrySteps.push(...cdNotes);
 
     // 4 — Push everything as ONE PR (or straight to the chosen branch).

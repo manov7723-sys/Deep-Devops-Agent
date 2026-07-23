@@ -387,6 +387,203 @@ function trivyGateStep(imageRefWithTag: string): string {
 `;
 }
 
+/**
+ * Combined CI workflow for a monorepo — ONE file, N parallel matrix jobs, one per
+ * service. Each service pushes to its own ECR repo. When the whole matrix
+ * completes successfully, the combined CD workflow (below) fires via workflow_run.
+ *
+ * Way cleaner than 4 separate files for frontend+backend. Also faster — matrix
+ * parallelism means both images build simultaneously on separate runners.
+ */
+export function generateCombinedEcrCiWorkflow(args: {
+  /** Shared OIDC role — all services push using the same AWS identity. */
+  roleArn: string;
+  region: string;
+  branch: string;
+  /** Insert Trivy gate per service before push. Default true. */
+  scanGate?: boolean;
+  services: Array<{
+    /** Service name — matrix key, also used in job logs. e.g. "frontend", "backend". */
+    name: string;
+    /** ECR repo URI for this service. */
+    ecrRepositoryUri: string;
+    /** Build context subdir. "" = repo root; else "frontend", "apps/api", etc. */
+    context?: string;
+  }>;
+}): GeneratedFile {
+  const gate = args.scanGate !== false;
+  const matrix = args.services
+    .map((s) => {
+      const ctx = (s.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "") || ".";
+      return `          - service: ${s.name}
+            ecr: ${s.ecrRepositoryUri}
+            context: ${ctx}`;
+    })
+    .join("\n");
+  // Trivy step referenced by matrix variables — one step, runs per service.
+  const scanStep = gate
+    ? `
+      - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy — stop on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@v0.33.1
+        with:
+          image-ref: "\${{ matrix.ecr }}:\${{ github.sha }}"
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+`
+    : "";
+  const content = `name: CI (build all services)
+
+# Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
+# When this workflow succeeds, the CD workflow fires automatically via workflow_run.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  build:
+    name: build \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${args.roleArn}
+          aws-region: ${args.region}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and tag \${{ matrix.service }} image
+        env:
+          ECR: \${{ matrix.ecr }}
+          TAG: \${{ github.sha }}
+        run: |
+          if [ "\${{ matrix.context }}" = "." ]; then
+            docker build -t "$ECR:$TAG" -t "$ECR:latest" .
+          else
+            docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "\${{ matrix.context }}/Dockerfile" "\${{ matrix.context }}"
+          fi
+${scanStep}
+      - name: Push \${{ matrix.service }} image
+        env:
+          ECR: \${{ matrix.ecr }}
+          TAG: \${{ github.sha }}
+        run: |
+          docker push "$ECR:$TAG"
+          docker push "$ECR:latest"
+`;
+  return { path: `.github/workflows/ci.yml`, content };
+}
+
+/**
+ * Combined CD workflow for a monorepo — ONE file, N parallel matrix jobs, one per
+ * service. Fires automatically when the combined CI workflow (above) finishes
+ * successfully. Currently EKS-only; GKE/AKS will need matching combined variants.
+ */
+export function generateCombinedEksCdWorkflow(args: {
+  /** Must match the CI workflow's name: exactly — that's how workflow_run keys off it. */
+  ciWorkflowName?: string;
+  roleArn: string;
+  region: string;
+  clusterName: string;
+  namespace: string;
+  services: Array<{
+    name: string;
+    /** k8s Deployment name — kubectl rollout restart/status will target this. */
+    appName: string;
+    /** Manifest dir this service's YAMLs live in — e.g. "k8s/prod/frontend". */
+    manifestDir: string;
+  }>;
+}): GeneratedFile {
+  const ciName = args.ciWorkflowName || "CI (build all services)";
+  const ns = args.namespace || "default";
+  const matrix = args.services
+    .map(
+      (s) => `          - service: ${s.name}
+            app: ${s.appName}
+            manifestDir: ${s.manifestDir}`,
+    )
+    .join("\n");
+  const nsStep =
+    ns !== "default"
+      ? `
+      - name: Ensure namespace exists
+        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+`
+      : "";
+  const content = `name: CD (deploy all services)
+
+# Runs automatically after the CI workflow ("${ciName}") completes successfully.
+# Also supports manual dispatch for redeploying without a fresh build.
+on:
+  workflow_run:
+    workflows: ["${ciName}"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${args.roleArn}
+          aws-region: ${args.region}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure cluster access (keyless)
+        run: aws eks update-kubeconfig --name "${args.clusterName}" --region ${args.region}
+${nsStep}
+      - name: Apply \${{ matrix.service }} manifests
+        run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/
+
+      - name: Restart \${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
+        run: kubectl rollout restart deployment/\${{ matrix.app }} -n ${ns}
+
+      - name: Wait for \${{ matrix.service }} rollout
+        run: kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=180s
+
+      - name: Rollback \${{ matrix.service }} on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of \${{ matrix.app }} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/\${{ matrix.app }} -n ${ns}
+          kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=120s
+`;
+  return { path: `.github/workflows/cd.yml`, content };
+}
+
 export function generateEcrWorkflow(args: {
   roleArn: string;
   region: string;
