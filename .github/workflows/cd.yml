@@ -1,0 +1,63 @@
+name: CD (deploy all services)
+
+# Runs automatically after the CI workflow ("CI (build all services)") completes successfully.
+# Also supports manual dispatch for redeploying without a fresh build.
+on:
+  workflow_run:
+    workflows: ["CI (build all services)"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            app: ai-agentic-app-backend
+            manifestDir: k8s/dev/backend
+          - service: frontend
+            app: ai-agentic-app-frontend
+            manifestDir: k8s/dev/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::985465459771:role/gha-ecr-dynamic-react-app
+          aws-region: us-east-1
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure cluster access (keyless)
+        run: aws eks update-kubeconfig --name "dev-cluster-1" --region us-east-1
+
+      - name: Ensure namespace exists
+        run: kubectl get namespace external-dns || kubectl create namespace external-dns
+
+      - name: Apply ${{ matrix.service }} manifests
+        run: kubectl apply -n external-dns -f ${{ matrix.manifestDir }}/
+
+      - name: Restart ${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
+        run: kubectl rollout restart deployment/${{ matrix.app }} -n external-dns
+
+      - name: Wait for ${{ matrix.service }} rollout
+        run: kubectl rollout status deployment/${{ matrix.app }} -n external-dns --timeout=180s
+
+      - name: Rollback ${{ matrix.service }} on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of ${{ matrix.app }} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/${{ matrix.app }} -n external-dns
+          kubectl rollout status deployment/${{ matrix.app }} -n external-dns --timeout=120s
