@@ -314,6 +314,60 @@ const DEFAULT_PORT: Record<string, number> = {
   go: 8080,
 };
 
+/**
+ * Deterministic SPA classifier from a package.json — used to override the LLM
+ * when it mislabels a static frontend as a node-service. Returns isSpa=true
+ * only when the deps show a client-side build tool (CRA/Vite/Angular/Vue/…),
+ * there's a `build` script, AND there's NO long-running server framework
+ * (Express/Fastify/Nest/Koa/Next) — because those genuinely need node-service.
+ */
+function classifySpaFromPackageJson(raw: string): { isSpa: boolean; buildDir: string } {
+  try {
+    const pkg = JSON.parse(raw) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    const names = Object.keys(deps);
+    const has = (n: string) => names.some((d) => d === n || d.startsWith(n + "/") || d.startsWith(n));
+    const scripts = pkg.scripts ?? {};
+    const hasBuild = typeof scripts.build === "string" && scripts.build.trim().length > 0;
+
+    // A real long-running Node server → NOT a static SPA (keep node-service).
+    // "next" is here because Next.js SSR needs a node runtime; a pure static
+    // Next export is rare enough that defaulting it to node-service is safer.
+    const isServer =
+      has("express") ||
+      has("fastify") ||
+      has("@nestjs") ||
+      has("koa") ||
+      has("next") ||
+      has("@hapi") ||
+      has("hapi") ||
+      has("restify");
+    if (isServer) return { isSpa: false, buildDir: "dist" };
+
+    const isCra = has("react-scripts");
+    const isVite = has("vite");
+    const isAngular = has("@angular/cli") || has("@angular/core");
+    const isVueCli = has("@vue/cli-service");
+    const isParcel = has("parcel");
+    const isReactOrVue = has("react") || has("vue") || has("svelte") || has("solid-js");
+
+    const looksSpa =
+      isCra || isVite || isAngular || isVueCli || isParcel || (isReactOrVue && hasBuild);
+    if (looksSpa && hasBuild) {
+      // CRA builds to build/, most others to dist/.
+      const buildDir = isCra ? "build" : "dist";
+      return { isSpa: true, buildDir };
+    }
+  } catch {
+    /* not JSON / unreadable → let the LLM's choice stand */
+  }
+  return { isSpa: false, buildDir: "dist" };
+}
+
 /** "owner/My_Repo" + "backend" -> "my-repo-backend" (DNS/ECR-safe, ≤200). */
 function imageNameFor(repoFullName: string, role: string): string {
   const short = (repoFullName.split("/").pop() ?? "app").toLowerCase();
@@ -431,14 +485,37 @@ Respond with ONLY a JSON object, no prose:
       : [{ name: "app", path: "", stack: parsed.services?.[0]?.stack }];
   const services: AppService[] = [];
   for (const s of rawServices) {
-    const stackId = (s.stack ?? "") as DockerStackId;
-    const stack = getStack(stackId);
-    if (!stack) continue;
+    let stackId = (s.stack ?? "") as DockerStackId;
+    let params = (s.params ?? {}) as Record<string, unknown>;
     const path = (s.path ?? "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
     const role = (s.name ?? "app").toLowerCase();
-    const port = Number(s.port) > 0 ? Number(s.port) : (DEFAULT_PORT[stackId] ?? 8080);
-    // Does this service dir already ship a Dockerfile?
     const dirKey = path || ".";
+
+    // DETERMINISTIC override — the LLM intermittently tags a static SPA as a
+    // "node-service", which then runs "node server.js" and crashes the pod
+    // with "Cannot find module server.js". Correct it straight from the
+    // service's real package.json: SPA build tooling + a build script + NO
+    // server framework ⇒ static-spa (served by nginx). This removes the LLM
+    // from the decision for the single most common deploy-breaking mistake.
+    if (stackId === "node-service" || stackId === "static-spa") {
+      const pkgRaw = dirContents[dirKey]?.["package.json"];
+      const spa = pkgRaw ? classifySpaFromPackageJson(pkgRaw) : null;
+      if (spa?.isSpa && stackId !== "static-spa") {
+        stackId = "static-spa" as DockerStackId;
+        params = { ...params, buildDir: spa.buildDir };
+      }
+    }
+
+    const stack = getStack(stackId);
+    if (!stack) continue;
+    // static-spa always serves on 8080 (nginx); ignore any port the LLM set.
+    const port =
+      stackId === "static-spa"
+        ? 8080
+        : Number(s.port) > 0
+          ? Number(s.port)
+          : (DEFAULT_PORT[stackId] ?? 8080);
+    // Does this service dir already ship a Dockerfile?
     const hasDockerfile = (dirManifests[dirKey] ?? []).some(
       (m) => m.toLowerCase() === "dockerfile",
     );
@@ -447,7 +524,7 @@ Respond with ONLY a JSON object, no prose:
       path,
       stack: stackId,
       stackTitle: stack.title,
-      params: s.params ?? {},
+      params,
       port,
       suggestedImageName: imageNameFor(repoFullName, role),
       existingDockerfile: hasDockerfile,
