@@ -50,8 +50,6 @@ export type AuditAction =
   | "cloud_provider.credentials_set"
   | "cloud_provider.credentials_cleared"
   | "cloud_provider.sp_provisioned"
-  | "vault.configured"
-  | "vault.disconnected"
   | "chat.cleared"
   | "integration.connected"
   | "integration.updated"

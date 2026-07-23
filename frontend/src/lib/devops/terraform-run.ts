@@ -4,7 +4,7 @@
  * Mirrors the original DevOps-Agent backend's `tf_async`:
  *   1. Write a generated Terraform tree to a temp workdir.
  *   2. Inject an S3 remote-state backend (from the env's tfBackend* config).
- *   3. Resolve the env's AWS creds from Vault.
+ *   3. Resolve the env's cloud creds (stored keys or STS AssumeRole).
  *   4. Run `terraform init → plan → apply` via the runner, capturing per-stage
  *      logs + exit codes.
  *
@@ -115,6 +115,27 @@ const INIT_TIMEOUT_MS = 5 * 60_000;
 
 export function getTerraformRun(id: string): TfRun | null {
   return RUNS.get(id) ?? null;
+}
+
+/**
+ * Delete a run from the DB + in-memory rings. Idempotent — returns whether
+ * anything was actually removed. Refuses to delete a run that's still
+ * queued/running (caller should cancel it first, though we don't have that
+ * primitive yet). Used by the Pipelines UI's per-row Delete button and by
+ * automatic pruning that keeps only the most recent N runs per env.
+ */
+export async function deleteTerraformRun(
+  runId: string,
+): Promise<{ deleted: boolean; reason?: string }> {
+  const mem = RUNS.get(runId);
+  const status = mem?.status ?? (await prisma.tfRun.findUnique({ where: { id: runId }, select: { status: true } }).catch(() => null))?.status;
+  if (status === "queued" || status === "running") {
+    return { deleted: false, reason: "Run is still active — wait for it to finish before deleting." };
+  }
+  RUNS.delete(runId);
+  RUN_SOURCES.delete(runId);
+  const dbRes = await prisma.tfRun.delete({ where: { id: runId } }).catch(() => null);
+  return { deleted: !!mem || !!dbRes };
 }
 
 /**
@@ -319,7 +340,9 @@ export async function rerunTerraformRun(
 }
 
 /** Filesystem-safe token. */
-function san(s: string): string {
+/** Filename/state-key-safe sanitiser. Exported so tools that need to compute
+ *  the same state key layout the runner uses can reuse it. */
+export function san(s: string): string {
   return (
     s
       .replace(/[^A-Za-z0-9_-]/g, "-")
@@ -363,7 +386,10 @@ function resolveStack(explicit: string | undefined, files: Record<string, string
  * ENGINE fully owns where state lives (deterministic). S3/local backend blocks
  * are flat (no nested braces), so a single-level match is sufficient.
  */
-function stripBackendBlocks(content: string): string {
+/** Remove any inline `backend "…" { }` block from generated Terraform so the
+ *  runner (and tools that piggyback on it, like the Client VPN cert download)
+ *  fully own where state lives via the injected backend_override.tf. */
+export function stripBackendBlocks(content: string): string {
   return content.replace(/\bbackend\s+"[^"]+"\s*\{[^{}]*\}/g, "");
 }
 
@@ -395,8 +421,10 @@ async function persistLocalState(dir: string, workdir: string): Promise<void> {
 
 /** Backend override written as a separate file so it can't collide with any
  *  `terraform {}` block the generator already emitted. Emits the right HCL
- *  block for the backend's kind (s3 / gcs / azurerm). */
-function backendOverride(b: TfBackendCfg, key: string, azureAccessKey?: string): string {
+ *  block for the backend's kind (s3 / gcs / azurerm). Exported so tools that
+ *  need to point terraform at the same remote state (e.g. the Client VPN
+ *  cert download endpoint) can reuse it. */
+export function backendOverride(b: TfBackendCfg, key: string, azureAccessKey?: string): string {
   if (b.kind === "gcs") {
     return [
       "terraform {",
@@ -432,7 +460,15 @@ function backendOverride(b: TfBackendCfg, key: string, azureAccessKey?: string):
     `    bucket = "${b.bucket}"`,
     `    key    = "${key}/terraform.tfstate"`,
     `    region = "${b.region}"`,
-    ...(b.table ? [`    dynamodb_table = "${b.table}"`] : []),
+    // Terraform 1.10+ supports S3-native locking via conditional writes.
+    // Prefer that over DynamoDB — no separate table to provision, no
+    // "ResourceNotFoundException: dev-cluster" when the table wasn't
+    // pre-created. `dynamodb_table` is deprecated in newer AWS provider
+    // releases; keep emitting it only when the caller explicitly opts in
+    // (legacy compat), otherwise use_lockfile is the modern default.
+    ...(b.table
+      ? [`    dynamodb_table = "${b.table}"`]
+      : ["    use_lockfile = true"]),
     "    encrypt = true",
     "  }",
     "}",
@@ -523,7 +559,7 @@ async function execRun(run: TfRun, args: StartTfRunArgs): Promise<void> {
   run.status = "running";
   syncRun(run);
 
-  // Resolve AWS creds from Vault (when a provider is linked).
+  // Resolve cloud creds (when a provider is linked).
   let credEnv: Record<string, string> = {};
   if (args.cloudProviderId) {
     const creds = await getDecryptedCloudCreds(args.cloudProviderId);

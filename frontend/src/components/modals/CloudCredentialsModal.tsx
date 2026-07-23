@@ -15,19 +15,12 @@ export interface CloudCredentialsModalProps {
   slug: string;
 }
 
-type CredStatus = { vaultConfigured: boolean; hasVaultCreds: boolean };
-type VaultStatus = {
-  configured: boolean;
-  reachable: boolean;
-  addr: string | null;
-  mount: string;
-  error?: string;
-};
+type CredStatus = { hasAwsKeysStored: boolean };
 
 /**
- * Store / clear a provider's AWS access key + secret in HashiCorp Vault.
- * The keys are written straight to Vault by the API route — only a status
- * flag (`hasVaultCreds`) ever comes back to the client.
+ * Store / clear a provider's AWS access key + secret, AES-256-GCM encrypted
+ * directly on the CloudProvider row — the same tier as Azure's stored
+ * Service-Principal secret. No external service to connect first.
  */
 export function CloudCredentialsModal({
   open,
@@ -49,13 +42,6 @@ export function CloudCredentialsModal({
     setRegion("");
     setServerError(null);
   }, [open, providerId]);
-
-  const vault = useQuery<VaultStatus>({
-    queryKey: ["vault", "status", slug],
-    queryFn: () => api.get<VaultStatus>(`/vault/status`, { slug }),
-    enabled: open && !!slug,
-    staleTime: 30_000,
-  });
 
   const cred = useQuery<CredStatus>({
     queryKey: ["cloud-provider", providerId, "credentials"],
@@ -93,16 +79,14 @@ export function CloudCredentialsModal({
     onError: (e: unknown) => setServerError(errMsg(e)),
   });
 
-  const vaultReady = !!vault.data?.configured && !!vault.data?.reachable;
-  const canSave =
-    vaultReady && accessKeyId.trim().length >= 16 && secretAccessKey.trim().length > 0;
+  const canSave = accessKeyId.trim().length >= 16 && secretAccessKey.trim().length > 0;
 
   return (
     <Modal
       open={open}
       onOpenChange={onOpenChange}
       title={`AWS credentials — ${providerName}`}
-      description="Access key + secret are stored in HashiCorp Vault, never in the database."
+      description="Access key + secret are encrypted (AES-256-GCM) and stored directly — no external service required."
       footer={
         <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
           <Btn variant="ghost" onClick={() => onOpenChange(false)}>
@@ -118,33 +102,13 @@ export function CloudCredentialsModal({
               save.mutate();
             }}
           >
-            Save to Vault
+            Save
           </Btn>
         </div>
       }
     >
       <div className="col gap-4">
-        {/* Vault connection status */}
-        <div className="row gap-2" style={{ alignItems: "center" }}>
-          <span className="text-sm muted">Vault</span>
-          {vault.isLoading ? (
-            <Badge tone="default">checking…</Badge>
-          ) : vaultReady ? (
-            <Badge tone="ok" withDot>
-              connected{vault.data?.addr ? ` · ${vault.data.addr}` : ""}
-            </Badge>
-          ) : vault.data?.configured ? (
-            <Badge tone="danger" withDot>
-              unreachable{vault.data?.error ? ` · ${vault.data.error}` : ""}
-            </Badge>
-          ) : (
-            <Badge tone="warn" withDot>
-              not configured (set VAULT_ADDR / VAULT_TOKEN)
-            </Badge>
-          )}
-        </div>
-
-        {cred.data?.hasVaultCreds && (
+        {cred.data?.hasAwsKeysStored && (
           <div className="row gap-2" style={{ alignItems: "center" }}>
             <Badge tone="ok">keys stored</Badge>
             <Btn
@@ -171,7 +135,7 @@ export function CloudCredentialsModal({
         <Field
           label="AWS Secret Access Key"
           required
-          hint="Stored encrypted in Vault; never shown again."
+          hint="Stored encrypted; never shown again."
         >
           <Input
             type="password"

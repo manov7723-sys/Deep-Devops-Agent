@@ -78,9 +78,6 @@ export type CloudChoiceInput = {
   region: string;
   roleArn?: string;
   externalId?: string;
-  /** AWS long-lived keys — stored in Vault server-side, never echoed back. */
-  awsAccessKeyId?: string;
-  awsSecretAccessKey?: string;
   /** Terraform remote-state backend applied to every env created here. */
   tfBackend?: { bucket: string; region: string; table?: string };
 };
@@ -97,7 +94,7 @@ export type CreateProjectWithSetupInput = {
 };
 
 export type CreateProjectWithSetupStep = {
-  step: "repo" | "env" | "cloud" | "vault" | "tfstate";
+  step: "repo" | "env" | "cloud" | "tfstate";
   ok: boolean;
   label: string;
   code?: string;

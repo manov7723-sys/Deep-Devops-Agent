@@ -25,6 +25,7 @@ export type WorkflowRun = {
     | "acr_secrets_missing"
     | "cd_no_aws_creds"
     | "cd_no_gcp_creds"
+    | "cd_role_missing_eks_describe"
     | "ci_wif_binding_missing"
     | "unknown"
     | null;
@@ -163,6 +164,28 @@ async function classifyFailure(
             return {
               kind: "acr_secrets_missing",
               hint: "docker/login-action failed with 'Username and password required' — repo secrets are missing or empty.",
+            };
+          }
+          // Distinct from cd_no_aws_creds below: the runner DID assume its
+          // role, but that role's inline policy doesn't include
+          // eks:DescribeCluster, so `aws eks update-kubeconfig` fails before
+          // kubectl ever runs. The gha-ecr-<repo> role used to only carry ECR
+          // push perms; setup_github_oidc_ecr now also attaches
+          // eks:DescribeCluster/ListClusters, and re-running it (put-role-
+          // policy overwrites) refreshes an existing role's policy. Detect
+          // this signature and route the agent at that fix.
+          if (
+            /AccessDeniedException/i.test(text) &&
+            /eks:DescribeCluster/i.test(text) &&
+            /update-kubeconfig|DescribeCluster/i.test(text)
+          ) {
+            return {
+              kind: "cd_role_missing_eks_describe",
+              hint:
+                "CD workflow's role assumed successfully but lacks eks:DescribeCluster, so " +
+                "`aws eks update-kubeconfig` fails. Call setup_github_oidc_ecr(repoFullName) " +
+                "again — put-role-policy is idempotent and will overwrite the role's inline " +
+                "policy to add eks:DescribeCluster/ListClusters, then rerun the failed CD job.",
             };
           }
           // EKS CD workflow trying to call kubectl without AWS creds in the runner.

@@ -4,18 +4,11 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
 import { useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { TriggerPipelineModal } from "@/components/modals/TriggerPipelineModal";
+import { RunCiPipelineModal } from "@/components/modals/RunCiPipelineModal";
 import { AttachReposModal } from "@/components/modals/AttachReposModal";
 import { Badge, Block, Btn, DataTable, Icon, PageHead, TileGrid } from "@/components/ui";
-import { EnvFilter, type EnvFilterValue } from "@/components/domain/EnvFilter";
-import { PipelineCard } from "@/components/domain/PipelineCard";
 import { CiPipelinesPanel } from "@/components/domain/CiPipelinesPanel";
-import {
-  useProjectIssues,
-  useProjectPipelines,
-  useProjectRepos,
-  useDetachRepo,
-} from "@/hooks/queries/project";
+import { useProjectIssues, useProjectRepos, useDetachRepo } from "@/hooks/queries/project";
 import type { SeedIssue } from "@/lib/legacy-types";
 
 type TabId = "pipelines" | "repos" | "issues";
@@ -40,14 +33,12 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
   const pathname = usePathname();
   const sp = useSearchParams();
   const tab = (sp.get("tab") as TabId | null) ?? "pipelines";
-  const env = (sp.get("env") as EnvFilterValue | null) ?? "all";
 
-  const { data: pipelines } = useProjectPipelines(slug, env);
   const { data: repos } = useProjectRepos(slug);
   const detach = useDetachRepo(slug);
   const [detachError, setDetachError] = useState<string | null>(null);
   const { data: issues, isLoading: issuesLoading } = useProjectIssues(slug);
-  const [triggerOpen, setTriggerOpen] = useState(false);
+  const [runPipelineOpen, setRunPipelineOpen] = useState(false);
   const [attachReposOpen, setAttachReposOpen] = useState(false);
 
   // "Deploy now" buttons on other pages navigate here with `?trigger=1`. Open
@@ -55,7 +46,7 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
   // on a manual close+reopen of the page.
   useEffect(() => {
     if (sp.get("trigger") !== "1") return;
-    setTriggerOpen(true);
+    setRunPipelineOpen(true);
     const next = new URLSearchParams(sp);
     next.delete("trigger");
     const q = next.toString();
@@ -146,7 +137,6 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
   function setTab(next: TabId) {
     const p = new URLSearchParams(sp);
     p.set("tab", next);
-    if (next !== "pipelines") p.delete("env");
     const q = p.toString();
     router.replace((q ? `${pathname}?${q}` : pathname) as Route);
   }
@@ -161,7 +151,7 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
             <Btn variant="outline" icon="github" onClick={() => setAttachReposOpen(true)}>
               Attach repos
             </Btn>
-            <Btn variant="primary" icon="play" onClick={() => setTriggerOpen(true)}>
+            <Btn variant="primary" icon="play" onClick={() => setRunPipelineOpen(true)}>
               Run pipeline
             </Btn>
           </>
@@ -175,31 +165,7 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
         onTabChange={(v) => setTab(v as TabId)}
       />
 
-      {tab === "pipelines" && (
-        <>
-          <CiPipelinesPanel slug={slug} />
-          <EnvFilter />
-          <div className="col gap-3">
-            {pipelines ? (
-              pipelines.length === 0 ? (
-                <Block>
-                  <Block.Empty
-                    icon="cicd"
-                    title="No pipelines for this filter"
-                    description="Switch to a different environment or run a pipeline."
-                  />
-                </Block>
-              ) : (
-                pipelines.map((p) => <PipelineCard key={p.id} pipeline={p} />)
-              )
-            ) : (
-              <Block>
-                <Block.Loading />
-              </Block>
-            )}
-          </div>
-        </>
-      )}
+      {tab === "pipelines" && <CiPipelinesPanel slug={slug} />}
 
       {tab === "repos" && (
         <>
@@ -327,11 +293,10 @@ export function ProjectCicdClient({ slug }: { slug: string }) {
         </Block>
       )}
 
-      <TriggerPipelineModal
-        open={triggerOpen}
-        onOpenChange={setTriggerOpen}
+      <RunCiPipelineModal
+        open={runPipelineOpen}
+        onOpenChange={setRunPipelineOpen}
         projectSlug={slug}
-        initialEnvKey={env !== "all" ? env : null}
       />
       <AttachReposModal
         open={attachReposOpen}

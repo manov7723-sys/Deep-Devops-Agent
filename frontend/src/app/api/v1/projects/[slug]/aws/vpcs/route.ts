@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db/prisma";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { envBySlugAndKey } from "@/lib/devops/envs";
 import { resolveAwsExecEnv } from "@/lib/cloud/aws-onboard";
@@ -6,13 +7,19 @@ import { runStage } from "@/lib/runner/exec";
 
 /**
  * GET /projects/[slug]/aws/vpcs?env=<envKey>&region=<region>
+ * GET /projects/[slug]/aws/vpcs?region=<region>   (env omitted)
  *
- * Lists the VPCs and subnets in the account behind the chosen env's AWS
- * provider, so the EKS wizard can offer them as dropdowns ("reuse existing
- * VPC") instead of asking the user to paste ids. Read-only — shells the `aws`
- * CLI with the provider's resolved credentials, exactly like the EC2 inventory
- * tool. Returns all subnets in the region; the client filters them by the
- * selected VPC.
+ * Lists the VPCs and subnets under the project's AWS provider so UI can offer
+ * them as dropdowns instead of asking users to paste ids. Two paths:
+ *   - env=<key>  → resolve creds via THAT env's linked provider. Used by the
+ *                  EKS wizard where a specific env owns the account.
+ *   - no env     → fall back to the project's own AWS provider (matches how
+ *                  every other cross-region flow behaves — the Network >
+ *                  Peering page uses this path because it isn't scoped to a
+ *                  particular env).
+ * Read-only — shells the `aws` CLI with the resolved credentials, exactly
+ * like the EC2 inventory tool. Returns all subnets in the region; the client
+ * filters them by the selected VPC.
  */
 type Vpc = { vpcId: string; name: string | null; cidr: string; isDefault: boolean };
 type Subnet = { subnetId: string; vpcId: string; name: string | null; cidr: string; az: string };
@@ -24,28 +31,41 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
 
   const url = new URL(req.url);
   const envKey = url.searchParams.get("env")?.trim();
-  if (!envKey) {
+
+  // Resolve which CloudProvider id to authenticate with.
+  //   1. If env is passed, prefer that env's linked provider (existing EKS-
+  //      wizard behavior — same account/creds the env's cluster lives under).
+  //   2. If env is passed but has no linked provider, fall through to the
+  //      project's own AWS provider so the caller isn't hard-404'd on a soft
+  //      case (env exists but was never back-linked; happens fairly often).
+  //   3. If env is omitted entirely, use the project's AWS provider — this
+  //      is the Network/Peering page's path.
+  let providerId: string | null = null;
+  if (envKey) {
+    const env = await envBySlugAndKey(gate.access.project.id, envKey);
+    providerId = env?.cloudProviderId ?? null;
+  }
+  if (!providerId) {
+    const cp = await prisma.cloudProvider.findFirst({
+      where: { projectId: gate.access.project.id, kind: "aws" },
+      select: { id: true },
+      orderBy: { createdAt: "desc" },
+    });
+    providerId = cp?.id ?? null;
+  }
+  if (!providerId) {
     return NextResponse.json({
       ok: true,
       connected: false,
       vpcs: [],
       subnets: [],
-      note: "Pick an environment first.",
+      note: envKey
+        ? "This environment has no AWS provider, and no AWS account is connected to the project."
+        : "No AWS account connected to this project.",
     });
   }
 
-  const env = await envBySlugAndKey(gate.access.project.id, envKey);
-  if (!env?.cloudProviderId) {
-    return NextResponse.json({
-      ok: true,
-      connected: false,
-      vpcs: [],
-      subnets: [],
-      note: "This environment has no AWS provider.",
-    });
-  }
-
-  const resolved = await resolveAwsExecEnv(env.cloudProviderId);
+  const resolved = await resolveAwsExecEnv(providerId);
   if (!resolved.ok) {
     return NextResponse.json({
       ok: true,

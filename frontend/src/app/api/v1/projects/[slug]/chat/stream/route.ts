@@ -46,18 +46,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
 
   // Resolve target thread. Priority: explicit threadId from the client (must
   // belong to this project) → most-recent thread → create a fresh one.
+  // Stale threadIds (thread was deleted, e.g. by a per-thread Clear, but the
+  // client tab still has it cached) silently FALL BACK to the "no threadId"
+  // path — same behavior as sending without an id in the first place. Hard
+  // 404-ing would lock the tab out of sending until the user refreshed; the
+  // `thread` SSE event already tells the client the real thread id so the
+  // client updates its cache to match on the very next frame.
   let thread: { id: string } | null = null;
   if (parsed.data.threadId) {
     thread = await prisma.chatThread.findFirst({
       where: { id: parsed.data.threadId, projectId: gate.access.project.id },
       select: { id: true },
     });
-    if (!thread) {
-      return new Response(JSON.stringify({ ok: false, code: "thread_not_found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
   }
   if (!thread) {
     thread = await prisma.chatThread.findFirst({

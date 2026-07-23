@@ -26,8 +26,10 @@ type Output = {
 
 /**
  * Find the AWS CloudProvider this project should use. Prefers a provider linked
- * to one of the project's envs (the agent's tool context has no userId, so the
- * env path is the reliable one). Falls back to the most recent AWS provider.
+ * to one of the project's envs, then falls back to the project's own AWS
+ * provider directly (CloudProvider.projectId) — NOT a reverse lookup through
+ * envs, which returns null whenever no env has cloudProviderId set yet (e.g. a
+ * cluster connected via the kubeconfig-paste fallback never back-links it).
  */
 async function resolveAwsProviderId(projectId: string): Promise<string | null> {
   const env = await prisma.env.findFirst({
@@ -38,7 +40,7 @@ async function resolveAwsProviderId(projectId: string): Promise<string | null> {
   if (env?.cloudProviderId) return env.cloudProviderId;
 
   const cp = await prisma.cloudProvider.findFirst({
-    where: { kind: "aws", environments: { some: { projectId } } },
+    where: { kind: "aws", projectId },
     select: { id: true },
     orderBy: { createdAt: "desc" },
   });
@@ -68,11 +70,14 @@ export const setupGithubOidcEcrTool: Tool<Input, Output> = {
   description:
     "Provision the AWS side of a keyless GitHub Actions -> Amazon ECR pipeline using OIDC. " +
     "Creates (idempotently) the GitHub OIDC identity provider, an IAM role whose trust policy " +
-    "is scoped to ONLY this repo's Actions runs, an inline ECR push permission policy, and the " +
-    "ECR repository. Returns the role ARN and ECR repository URI to put into the workflow's " +
-    "configure-aws-credentials step. Call this BEFORE writing the .github/workflows file so you " +
-    "can inject the real values. Requires an AWS account connected on the project's Cloud providers tab. " +
-    "The repo must be attached to the current project.",
+    "is scoped to ONLY this repo's Actions runs, an inline policy granting ECR push + " +
+    "eks:DescribeCluster/ListClusters (read-only, so the SAME role can run " +
+    "'aws eks update-kubeconfig' in the CD workflow), and the ECR repository. Returns the role " +
+    "ARN and ECR repository URI to put into the workflow's configure-aws-credentials step. Call " +
+    "this BEFORE writing the .github/workflows file so you can inject the real values. Re-run " +
+    "safely (put-role-policy overwrites) — use this to REFRESH the role's policy on an existing " +
+    "role that predates the EKS-describe grant. Requires an AWS account connected on the " +
+    "project's Cloud providers tab. The repo must be attached to the current project.",
   inputSchema: {
     type: "object",
     properties: {

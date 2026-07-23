@@ -8,20 +8,20 @@ import { Block, Btn, PageHead, TileGrid } from "@/components/ui";
 import { EnvFilter, type EnvFilterValue } from "@/components/domain/EnvFilter";
 import { CloudProviderCard } from "@/components/domain/CloudProviderCard";
 import { ConnectCloudModal } from "@/components/modals/ConnectCloudModal";
-import { VaultConfigSection } from "@/components/domain/VaultConfigSection";
+import { AwsKeysSection } from "@/components/domain/AwsKeysSection";
 import { AzureContextSection } from "@/components/domain/AzureContextSection";
 import { GcpContextSection } from "@/components/domain/GcpContextSection";
 import { api } from "@/lib/api/client";
 import { useProjectProviders } from "@/hooks/queries/project";
 
 // Superset row from /projects/[slug]/providers (real provider id, kind, and
-// whether AWS access/secret keys are stored in Vault).
+// whether AWS access/secret keys are stored, encrypted, for this provider).
 type AwsProviderItem = {
   providerId: string;
   kind: "aws" | "gcp" | "azure" | "proxmox";
   name: string;
   region: string;
-  hasVaultCreds: boolean;
+  hasAwsKeysStored: boolean;
 };
 
 export function ProjectCloudClient({ slug }: { slug: string }) {
@@ -30,7 +30,7 @@ export function ProjectCloudClient({ slug }: { slug: string }) {
   const { data: providers } = useProjectProviders(slug, env);
   const [connectOpen, setConnectOpen] = useState(false);
 
-  // Same endpoint the cards use, typed as the superset so we can read keys/Vault state.
+  // Same endpoint the cards use, typed as the superset so we can read AWS-key state.
   const { data: credRows } = useQuery<AwsProviderItem[]>({
     queryKey: ["p", slug, "providers", env, "creds"],
     queryFn: () => api.get<AwsProviderItem[]>(`/projects/${slug}/providers`, { env }),
@@ -48,8 +48,8 @@ export function ProjectCloudClient({ slug }: { slug: string }) {
     (projectInfo?.project?.cloud as "aws" | "gcp" | "azure" | "proxmox" | null) ?? null;
 
   return (
-    // Cap page content to 960px so provider tiles, context sections, and vault
-    // form all share the same left column. Without this, each Block stretched
+    // Cap page content to 960px so provider tiles, context sections, and the
+    // AWS-keys form all share the same left column. Without this, each Block stretched
     // to 1280px while its inner form (~520px) floated in the top-left, making
     // the page read as a series of half-empty white banners.
     <div className="col gap-5" style={{ maxWidth: 960, width: "100%" }}>
@@ -96,16 +96,16 @@ export function ProjectCloudClient({ slug }: { slug: string }) {
       <AzureContextSection slug={slug} />
       <GcpContextSection slug={slug} />
 
-      {/* Vault configuration — store AWS access key + secret in Vault; the
-          agent reads them at runtime. Always shown so the Vault status + setup
-          guidance are visible even before an AWS account is connected. */}
-      <VaultConfigSection
+      {/* Optional AWS access key storage — only shown when an AWS account is
+          connected. STS AssumeRole (set up at connect time) is the default,
+          secretless path; this is a fallback for long-lived keys. */}
+      <AwsKeysSection
         slug={slug}
         awsProviders={awsProviders.map((p) => ({
           providerId: p.providerId,
           name: p.name,
           region: p.region,
-          hasVaultCreds: p.hasVaultCreds,
+          hasAwsKeysStored: p.hasAwsKeysStored,
         }))}
       />
 

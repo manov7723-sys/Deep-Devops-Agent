@@ -12,7 +12,7 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  *
  *   GET  — list recent runs for the env (status + per-stage state for polling).
  *   POST — start an init → plan → (apply) run over a generated Terraform tree,
- *          using the env's Vault AWS creds + S3 state backend.
+ *          using the env's stored AWS creds + S3 state backend.
  */
 export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; key: string }> }) {
   const { slug, key } = await ctx.params;

@@ -22,7 +22,7 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  * Produces a kubeconfig, stores it (encrypted) on the env, then smoke-tests it
  * with `kubectl get nodes`. Credentials are APP-MANAGED so the server never
  * depends on a host login (works behind a mobile client):
- *   aws   → aws eks update-kubeconfig (uses the provider's Vault keys)
+ *   aws   → aws eks update-kubeconfig (uses the provider's stored keys)
  *   azure → ARM listClusterAdminCredentials via the stored service principal
  *   gcp   → gcloud container clusters get-credentials
  * Only `kubectl` (for the smoke test) and, for AWS/GCP, their CLI need to be on
@@ -152,23 +152,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   }
   const { cloud, clusterName, region, resourceGroup, project } = parsed.data;
 
-  // AWS creds: Vault long-lived keys, or a proper STS AssumeRole exchange for
+  // AWS creds: stored long-lived keys, or a proper STS AssumeRole exchange for
   // role-based providers (resolveAwsExecEnv — NOT the raw getDecryptedCloudCreds,
   // which returns only role METADATA for role-based providers and leaves the CLI
   // with no usable credentials, causing "security token invalid" from EKS).
   // Prefer the env's own provider; fall back to the project's AWS provider so a
   // freshly-created env without cloudProviderId set still resolves correctly.
   let credEnv: Record<string, string> = {};
+  // Tracked so we can back-link the env below when this connection succeeds —
+  // otherwise every downstream consumer that (correctly) expects
+  // env.cloudProviderId to be accurate (deploy_my_app, list_ecr_repos, etc.)
+  // has to re-derive the same fallback themselves.
+  let fallbackProvider: { id: string; userId: string } | null = null;
   if (cloud === "aws") {
-    const providerId =
-      env.cloudProviderId ??
-      (
-        await prisma.cloudProvider.findFirst({
-          where: { projectId: gate.access.project.id, kind: "aws" },
-          select: { id: true },
-        })
-      )?.id ??
-      null;
+    let providerId = env.cloudProviderId;
+    if (!providerId) {
+      fallbackProvider = await prisma.cloudProvider.findFirst({
+        where: { projectId: gate.access.project.id, kind: "aws" },
+        select: { id: true, userId: true },
+      });
+      providerId = fallbackProvider?.id ?? null;
+    }
     if (providerId) {
       const creds = await resolveAwsExecEnv(providerId);
       if (creds.ok) credEnv = creds.env;
@@ -249,8 +253,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
     }
 
     // Persist the kubeconfig (encrypted) on the env so the runner can reuse it.
+    // Also back-link cloudProviderId when we resolved it via the project-level
+    // fallback above and the current user owns that provider (updateEnv
+    // rejects a cloudProviderId it can't verify against ownerId) — so this env
+    // resolves directly next time instead of every caller re-deriving the
+    // fallback itself.
     const kubeconfig = await readFile(kubeconfigPath, "utf8");
-    await updateEnv(gate.access.project.id, gate.access.session.userId, key, { kubeconfig });
+    const backlinkProviderId =
+      fallbackProvider && fallbackProvider.userId === gate.access.session.userId
+        ? fallbackProvider.id
+        : undefined;
+    await updateEnv(gate.access.project.id, gate.access.session.userId, key, {
+      kubeconfig,
+      ...(backlinkProviderId && { cloudProviderId: backlinkProviderId }),
+    });
 
     // Smoke-test the connection.
     const verify = await runStage({

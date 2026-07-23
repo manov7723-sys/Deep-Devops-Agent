@@ -14,7 +14,13 @@ type Output = {
   count: number;
 };
 
-/** The AWS CloudProvider this project uses — prefer one linked to a project env. */
+/**
+ * The AWS CloudProvider this project uses — prefer one linked to a project
+ * env, then fall back to the project's own AWS provider directly
+ * (CloudProvider.projectId) — NOT a reverse lookup through envs, which
+ * returns null whenever no env has cloudProviderId set yet (e.g. a cluster
+ * connected via the kubeconfig-paste fallback never back-links it).
+ */
 async function resolveAwsProviderId(projectId: string): Promise<string | null> {
   const env = await prisma.env.findFirst({
     where: { projectId, cloudProvider: { kind: "aws" } },
@@ -23,7 +29,7 @@ async function resolveAwsProviderId(projectId: string): Promise<string | null> {
   });
   if (env?.cloudProviderId) return env.cloudProviderId;
   const cp = await prisma.cloudProvider.findFirst({
-    where: { kind: "aws", environments: { some: { projectId } } },
+    where: { kind: "aws", projectId },
     select: { id: true },
     orderBy: { createdAt: "desc" },
   });

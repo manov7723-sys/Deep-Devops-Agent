@@ -59,13 +59,17 @@ export function Select({
           className="card pop-in"
           style={{
             minWidth: "var(--radix-select-trigger-width)",
+            // Cap the popup height so long lists (AWS regions, instance
+            // types, subnets) scroll inside the menu instead of overflowing
+            // the viewport with a wall of options that gets clipped.
+            maxHeight: "min(360px, calc(var(--radix-select-content-available-height) - 8px))",
             padding: 6,
             // Modal sits at zIndex 210 (see Modal.tsx); the popup needs to
             // sit above it so it's visible when used inside a modal.
             zIndex: 250,
           }}
         >
-          <RSelect.Viewport>
+          <RSelect.Viewport style={{ overflowY: "auto" }}>
             {uniqueOptions.map((o) => (
               <RSelect.Item
                 key={o.value}

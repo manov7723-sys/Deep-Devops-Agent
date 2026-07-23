@@ -79,6 +79,10 @@ export const NAV: Record<LayoutArea, NavEntry[]> = {
     },
     { kind: "link", id: "cloud", label: "Cloud providers", icon: "cloud", hrefSegment: "cloud" },
     { kind: "link", id: "infra", label: "Infrastructure", icon: "server", hrefSegment: "infra" },
+    { kind: "link", id: "network", label: "Network", icon: "link", hrefSegment: "network" },
+    { kind: "link", id: "connections", label: "Connections", icon: "link", hrefSegment: "connections" },
+    { kind: "link", id: "client-vpn", label: "Client VPN", icon: "download", hrefSegment: "client-vpn" },
+    { kind: "link", id: "jenkins", label: "Jenkins", icon: "cicd", hrefSegment: "jenkins" },
     { kind: "link", id: "topology", label: "Topology", icon: "link", hrefSegment: "topology" },
     { kind: "section", label: "Deploy" },
     {

@@ -1,28 +1,22 @@
 import { NextResponse } from "next/server";
 import { SetAwsKeysRequest } from "@/lib/api/schemas/connectivity-api";
 import { getActiveSession } from "@/lib/auth/session";
-import { getProviderForUser, setProviderCredVaultPath } from "@/lib/cloud/providers";
-import { deleteAwsKeys, providerVaultPath, saveAwsKeys } from "@/lib/cloud/vault";
-import { getVaultConfigView } from "@/lib/cloud/vault-config";
+import { getProviderForUser, setProviderAwsKeys } from "@/lib/cloud/providers";
+import { encryptSecret } from "@/lib/auth/crypto";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 
-/** Whether Vault is configured (for this user) + whether keys are stored. */
+/** Whether an AWS access key + secret are stored for this provider. */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const sess = await getActiveSession();
   if (!sess) return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
   const { id } = await ctx.params;
   const cp = await getProviderForUser(sess.userId, id);
   if (!cp) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
-  // Vault is per-PROJECT now — read the config of the project this provider belongs to.
-  const view = cp.projectId ? await getVaultConfigView(cp.projectId) : null;
-  return NextResponse.json({
-    vaultConfigured: view?.configured ?? false,
-    hasVaultCreds: !!cp.credVaultPath,
-  });
+  return NextResponse.json({ hasAwsKeysStored: !!cp.awsAccessKeyIdEnc });
 }
 
-/** Store an AWS access key + secret for this provider in Vault. */
+/** Store an AWS access key + secret for this provider, encrypted at rest. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const sess = await getActiveSession();
   if (!sess) return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
@@ -35,20 +29,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       {
         ok: false,
         code: "kind_unsupported",
-        message: "Vault keys are only supported for AWS providers.",
+        message: "Access keys are only supported for AWS providers.",
       },
       { status: 400 },
-    );
-  }
-  const vaultView = cp.projectId ? await getVaultConfigView(cp.projectId) : null;
-  if (!vaultView?.configured) {
-    return NextResponse.json(
-      {
-        ok: false,
-        code: "vault_unconfigured",
-        message: "Configure this project's Vault connection (URL + token) first.",
-      },
-      { status: 409 },
     );
   }
 
@@ -60,19 +43,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     );
   }
 
-  try {
-    await saveAwsKeys(id, {
-      accessKeyId: parsed.data.accessKeyId,
-      secretAccessKey: parsed.data.secretAccessKey,
-      region: parsed.data.region ?? cp.region,
-    });
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, code: "vault_error", message: String(e) },
-      { status: 502 },
-    );
-  }
-  await setProviderCredVaultPath(sess.userId, id, providerVaultPath(id));
+  const result = await setProviderAwsKeys(sess.userId, id, {
+    accessKeyIdEnc: encryptSecret(parsed.data.accessKeyId),
+    secretAccessKeyEnc: encryptSecret(parsed.data.secretAccessKey),
+  });
+  if (!result.ok) return NextResponse.json({ ok: false, code: result.code }, { status: 404 });
 
   const meta = extractRequestMeta(req);
   await audit({
@@ -88,7 +63,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   return NextResponse.json({ ok: true });
 }
 
-/** Remove the provider's stored AWS keys from Vault. */
+/** Remove the provider's stored AWS keys. */
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const sess = await getActiveSession();
   if (!sess) return NextResponse.json({ ok: false, code: "unauthenticated" }, { status: 401 });
@@ -96,15 +71,8 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   const cp = await getProviderForUser(sess.userId, id);
   if (!cp) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
 
-  try {
-    await deleteAwsKeys(id);
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, code: "vault_error", message: String(e) },
-      { status: 502 },
-    );
-  }
-  await setProviderCredVaultPath(sess.userId, id, null);
+  const result = await setProviderAwsKeys(sess.userId, id, null);
+  if (!result.ok) return NextResponse.json({ ok: false, code: result.code }, { status: 404 });
 
   const meta = extractRequestMeta(req);
   await audit({

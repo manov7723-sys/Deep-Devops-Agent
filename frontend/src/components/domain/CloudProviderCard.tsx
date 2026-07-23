@@ -59,7 +59,7 @@ export function CloudProviderCard({ provider, statsHref, projectSlug }: CloudPro
   // route always returns one, but we'd rather hide the gear than crash).
   const canEdit = !!provider.providerId;
 
-  // Disconnect = delete the CloudProvider row (creds + Vault secret go with it).
+  // Disconnect = delete the CloudProvider row (any stored AWS keys go with it).
   // The server returns 409 if an environment still points at it; `force=1` then
   // unlinks those envs (keeping each env's kubeconfig) and deletes.
   const disconnect = useMutation({

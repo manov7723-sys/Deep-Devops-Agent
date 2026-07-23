@@ -13,6 +13,7 @@ import { api } from "@/lib/api/client";
 import {
   useDeleteGkeCluster,
   useRerunTerraformRun,
+  useDeleteTerraformRun,
   useTerraformRuns,
   type TfRun,
   type TfStageStatus,
@@ -23,7 +24,7 @@ type AwsProvider = {
   kind: "aws" | "gcp" | "azure";
   name: string;
   region: string;
-  hasVaultCreds: boolean;
+  hasAwsKeysStored: boolean;
 };
 type EnvRow = { id: string; key: string; name: string };
 type TfBackend = { bucket: string | null; region: string | null; table: string | null };
@@ -33,7 +34,7 @@ export function ProjectInfraClient({ slug }: { slug: string }) {
     <div className="col gap-5">
       <PageHead
         title="Infrastructure"
-        sub="Cloud credentials (Vault), Terraform state, and managed-Kubernetes cluster provisioning (EKS · GKE · AKS)."
+        sub="Cloud credentials, Terraform state, and managed-Kubernetes cluster provisioning (EKS · GKE · AKS)."
       />
       <CredentialsSection slug={slug} />
       <StateSection slug={slug} />
@@ -261,10 +262,19 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
   const runningTone =
     run.status === "succeeded" ? "ok" : run.status === "failed" ? "danger" : "info";
   const rerun = useRerunTerraformRun(slug, run.envKey);
+  const deleteRun = useDeleteTerraformRun(slug, run.envKey);
   const deleteGke = useDeleteGkeCluster(slug, run.envKey);
   const isTerminal = run.status === "succeeded" || run.status === "failed";
   const errText =
-    rerun.error instanceof Error ? rerun.error.message : rerun.error ? "Rerun failed." : null;
+    rerun.error instanceof Error
+      ? rerun.error.message
+      : rerun.error
+        ? "Rerun failed."
+        : deleteRun.error instanceof Error
+          ? deleteRun.error.message
+          : deleteRun.error
+            ? "Delete failed."
+            : null;
   const rerunLabel = `Rerun (${run.action})`;
 
   // If this run failed because a prior apply orphaned a cluster in GCP, offer
@@ -339,7 +349,7 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
               variant="outline"
               icon="refresh"
               loading={rerun.isPending}
-              disabled={!isTerminal || rerun.isPending || deleteGke.isPending}
+              disabled={!isTerminal || rerun.isPending || deleteGke.isPending || deleteRun.isPending}
               title={
                 isTerminal
                   ? `Replay this run with the same files + backend.`
@@ -348,6 +358,27 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
               onClick={() => rerun.mutate({ runId: run.id })}
             >
               {rerunLabel}
+            </Btn>
+            <Btn
+              size="sm"
+              variant="outline"
+              icon="trash"
+              loading={deleteRun.isPending}
+              disabled={!isTerminal || rerun.isPending || deleteGke.isPending || deleteRun.isPending}
+              title={
+                isTerminal
+                  ? "Remove this run from the pipeline list. Does NOT touch cloud resources or terraform state."
+                  : "Wait for the run to finish before deleting."
+              }
+              onClick={() => {
+                // Cheap confirm — deletion is safe (state stays) but the row
+                // vanishes, and users hitting it accidentally is easy to prevent.
+                if (window.confirm(`Delete run "${run.name}" from the pipeline list? Cloud resources + terraform state are untouched.`)) {
+                  deleteRun.mutate({ runId: run.id });
+                }
+              }}
+            >
+              Delete
             </Btn>
           </div>
         </div>
@@ -446,12 +477,18 @@ function TerraformPipelineSection({ slug }: { slug: string }) {
   }, [envs, envKey]);
 
   const runsQuery = useTerraformRuns(slug, envKey, !!envKey);
-  const runs = runsQuery.data?.runs ?? [];
+  const allRuns = runsQuery.data?.runs ?? [];
+  // Keep the pipeline card focused: only the 3 most recent runs get rendered.
+  // Older runs stay in the DB and can be brought back by clicking "Show all"
+  // (which flips the toggle below). Per-run Delete removes them entirely.
+  const [showAllRuns, setShowAllRuns] = useState(false);
+  const runs = showAllRuns ? allRuns : allRuns.slice(0, 3);
+  const hiddenCount = allRuns.length - runs.length;
 
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub="Runs that generated infra (e.g. EKS) executes — init → plan → apply against the env's Vault creds + S3 state.">
+        <Block.Title sub="Runs that generated infra (e.g. EKS) executes — init → plan → apply against the env's stored creds + S3 state.">
           Terraform pipeline
         </Block.Title>
       </Block.Header>
@@ -481,6 +518,20 @@ function TerraformPipelineSection({ slug }: { slug: string }) {
                 {runs.map((r) => (
                   <RunCard key={r.id} slug={slug} run={r} />
                 ))}
+                {hiddenCount > 0 && !showAllRuns && (
+                  <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
+                    <Btn size="sm" variant="ghost" onClick={() => setShowAllRuns(true)}>
+                      Show all ({hiddenCount} older run{hiddenCount === 1 ? "" : "s"})
+                    </Btn>
+                  </div>
+                )}
+                {showAllRuns && allRuns.length > 3 && (
+                  <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
+                    <Btn size="sm" variant="ghost" onClick={() => setShowAllRuns(false)}>
+                      Show only 3 most recent
+                    </Btn>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -490,7 +541,7 @@ function TerraformPipelineSection({ slug }: { slug: string }) {
   );
 }
 
-/* ── 1. AWS credentials (HashiCorp Vault) ──────────────────────────────────── */
+/* ── 1. AWS credentials (optional long-lived keys, encrypted at rest) ─────── */
 function CredentialsSection({ slug }: { slug: string }) {
   const [credFor, setCredFor] = useState<{ id: string; name: string } | null>(null);
   const { data } = useQuery<AwsProvider[]>({
@@ -499,54 +550,49 @@ function CredentialsSection({ slug }: { slug: string }) {
     staleTime: 60_000,
   });
   const aws = (data ?? []).filter((p) => p.kind === "aws");
+  if (aws.length === 0) return null;
 
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub="AWS access key + secret are stored in HashiCorp Vault, never in the database.">
-          Cloud credentials (Vault)
+        <Block.Title sub="Optional — only needed if you want to use a long-lived access key instead of the default AssumeRole connection. Encrypted at rest; no external service required.">
+          AWS access keys
         </Block.Title>
       </Block.Header>
       <Block.Body>
-        {aws.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            No AWS provider yet. Add one on the Cloud providers page, then set its keys here.
-          </span>
-        ) : (
-          <div className="col gap-2">
-            {aws.map((p) => (
-              <div
-                key={p.providerId}
-                className="row gap-3"
-                style={{ alignItems: "center", justifyContent: "space-between" }}
-              >
-                <div className="row gap-2" style={{ alignItems: "center" }}>
-                  <span style={{ fontWeight: 600 }}>{p.name}</span>
-                  <span className="muted" style={{ fontSize: 13 }}>
-                    {p.region}
-                  </span>
-                  {p.hasVaultCreds ? (
-                    <Badge tone="ok" withDot>
-                      keys in Vault
-                    </Badge>
-                  ) : (
-                    <Badge tone="warn" withDot>
-                      no keys
-                    </Badge>
-                  )}
-                </div>
-                <Btn
-                  variant="outline"
-                  size="sm"
-                  icon="lock"
-                  onClick={() => setCredFor({ id: p.providerId, name: p.name })}
-                >
-                  {p.hasVaultCreds ? "Update keys" : "Add keys"}
-                </Btn>
+        <div className="col gap-2">
+          {aws.map((p) => (
+            <div
+              key={p.providerId}
+              className="row gap-3"
+              style={{ alignItems: "center", justifyContent: "space-between" }}
+            >
+              <div className="row gap-2" style={{ alignItems: "center" }}>
+                <span style={{ fontWeight: 600 }}>{p.name}</span>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {p.region}
+                </span>
+                {p.hasAwsKeysStored ? (
+                  <Badge tone="ok" withDot>
+                    keys stored
+                  </Badge>
+                ) : (
+                  <Badge tone="default" withDot>
+                    using AssumeRole
+                  </Badge>
+                )}
               </div>
-            ))}
-          </div>
-        )}
+              <Btn
+                variant="outline"
+                size="sm"
+                icon="lock"
+                onClick={() => setCredFor({ id: p.providerId, name: p.name })}
+              >
+                {p.hasAwsKeysStored ? "Update keys" : "Add keys"}
+              </Btn>
+            </div>
+          ))}
+        </div>
       </Block.Body>
       <CloudCredentialsModal
         open={!!credFor}

@@ -21,6 +21,7 @@ import {
 
 const STATUS_TONE: Record<string, BadgeTone> = {
   draft: "default",
+  committed: "default",
   committing: "info",
   running: "info",
   success: "accent",

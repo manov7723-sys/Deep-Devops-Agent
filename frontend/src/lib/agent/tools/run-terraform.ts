@@ -101,7 +101,25 @@ export const runTerraformTool: Tool<Input, Output> = {
     if (!env) {
       return { ok: false, error: `Env "${input.envKey}" not found in this project.` };
     }
-    if (input.action === "apply" && !env.cloudProviderId) {
+    // Prefer the env's own linked provider; fall back to the project's own
+    // cloud provider directly (CloudProvider.projectId) — NOT a strict
+    // requirement that the env was ever explicitly back-linked. A cluster
+    // connected via the fallback resolver (or one created before that
+    // back-link existed) still has a perfectly usable provider; failing here
+    // just because the join column is null makes an approved change dead-end
+    // with no way to ever apply it.
+    let cloudProviderId = env.cloudProviderId;
+    let cloudProviderKind = env.cloudProvider?.kind;
+    if (!cloudProviderId) {
+      const fallback = await prisma.cloudProvider.findFirst({
+        where: { projectId: ctx.projectId, kind: { in: ["aws", "gcp", "azure"] } },
+        select: { id: true, kind: true },
+        orderBy: { createdAt: "desc" },
+      });
+      cloudProviderId = fallback?.id ?? null;
+      cloudProviderKind = fallback?.kind;
+    }
+    if (input.action === "apply" && !cloudProviderId) {
       return {
         ok: false,
         error: `Env "${input.envKey}" has no cloud provider connected, so apply can't authenticate. Connect a cloud on the Cloud providers tab, or use action='plan'.`,
@@ -110,20 +128,26 @@ export const runTerraformTool: Tool<Input, Output> = {
 
     // Pick the backend that matches the env's cloud (S3 for AWS, GCS for GCP,
     // azurerm for Azure) — never blindly S3, which used to force AWS creds
-    // onto every apply regardless of cloud.
-    let backend = pickBackendForEnv(env);
+    // onto every apply regardless of cloud. Use the RESOLVED kind (env's own
+    // link, or the project-level fallback above) — env.cloudProvider is null
+    // whenever cloudProviderId itself was null, which would otherwise silently
+    // pick no backend at all even though a usable provider was just resolved.
+    let backend = pickBackendForEnv({
+      ...env,
+      cloudProvider: cloudProviderKind ? { kind: cloudProviderKind } : null,
+    });
 
     // AGENT ONBOARDING: Azure envs may not have a state backend configured yet
     // — auto-provision RG + storage + container via ARM using the SP creds so
     // the user never has to click Provision. Only when the env is Azure AND
     // we have a provider AND the backend is missing.
-    if (!backend && env.cloudProvider?.kind === "azure" && env.cloudProviderId) {
+    if (!backend && cloudProviderKind === "azure" && cloudProviderId) {
       const { ensureAzureStateBackend } = await import("@/lib/cloud/azure-tfstate");
       const ensured = await ensureAzureStateBackend({
         projectId: ctx.projectId,
         envId: env.id,
         envKey: env.key,
-        cloudProviderId: env.cloudProviderId,
+        cloudProviderId,
       });
       if (ensured.ok) {
         backend = {
@@ -144,7 +168,7 @@ export const runTerraformTool: Tool<Input, Output> = {
       projectId: ctx.projectId,
       envId: env.id,
       envKey: env.key,
-      cloudProviderId: env.cloudProviderId,
+      cloudProviderId,
       name: input.name,
       action: input.action,
       files: input.files,

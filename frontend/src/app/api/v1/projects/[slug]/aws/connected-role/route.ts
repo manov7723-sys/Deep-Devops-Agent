@@ -24,7 +24,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
     where: env?.cloudProviderId
       ? { id: env.cloudProviderId, kind: "aws" }
       : { projectId: gate.access.project.id, kind: "aws" },
-    select: { name: true, roleArn: true, credVaultPath: true },
+    select: { name: true, roleArn: true, awsAccessKeyIdEnc: true },
     orderBy: env?.cloudProviderId ? undefined : { createdAt: "desc" },
   });
 
@@ -41,6 +41,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
     connected: true,
     roleArn: cp.roleArn ?? null,
     providerName: cp.name,
-    source: cp.roleArn ? "role" : cp.credVaultPath ? "vault_keys" : "unknown",
+    source: cp.roleArn ? "role" : cp.awsAccessKeyIdEnc ? "stored_keys" : "unknown",
   });
 }

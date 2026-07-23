@@ -38,19 +38,38 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
 }
 
 /**
- * DELETE — clear the project's chat: removes all threads + messages so the
- * page returns to its empty state. Used by the "Clear" button.
+ * DELETE — clear chat threads for the "Clear" button.
+ *   ?threadId=<id>  → clear ONLY that thread (its messages + the thread row),
+ *                     leaving every OTHER thread in this project intact.
+ *                     This is what the chat page uses now — "clear" applies to
+ *                     the conversation you're looking at, not the whole project.
+ *   (no threadId)   → back-compat: clear every thread in the project.
+ * threadId must belong to this project (defense in depth against a wrong id
+ * from a stale UI tab).
  */
 export async function DELETE(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
   const gate = await requireProjectAccess(slug, "viewer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
 
-  const threads = await prisma.chatThread.findMany({
-    where: { projectId: gate.access.project.id },
-    select: { id: true },
-  });
-  const ids = threads.map((t) => t.id);
+  const threadId = new URL(req.url).searchParams.get("threadId")?.trim() || null;
+
+  let ids: string[] = [];
+  if (threadId) {
+    const thread = await prisma.chatThread.findFirst({
+      where: { id: threadId, projectId: gate.access.project.id },
+      select: { id: true },
+    });
+    if (!thread) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
+    ids = [thread.id];
+  } else {
+    const threads = await prisma.chatThread.findMany({
+      where: { projectId: gate.access.project.id },
+      select: { id: true },
+    });
+    ids = threads.map((t) => t.id);
+  }
+
   if (ids.length > 0) {
     await prisma.chatMessage.deleteMany({ where: { threadId: { in: ids } } });
     await prisma.chatThread.deleteMany({ where: { id: { in: ids } } });
@@ -62,12 +81,13 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ slug: string
     projectId: gate.access.project.id,
     action: "chat.cleared",
     targetType: "chat_thread",
-    targetId: gate.access.project.id,
+    targetId: threadId ?? gate.access.project.id,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
+    metadata: threadId ? { scope: "thread", threadId } : { scope: "project" },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, clearedThreadIds: ids });
 }
 
 const PostBody = z.object({ text: z.string().trim().min(1).max(8000) });

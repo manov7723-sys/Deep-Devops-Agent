@@ -18,7 +18,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { prisma } from "@/lib/db/prisma";
 import { decryptSecret } from "@/lib/auth/crypto";
-import { getAwsKeys } from "@/lib/cloud/vault";
 import { getDecryptedAzureCreds } from "@/lib/cloud/azure";
 import { getDecryptedProxmoxCreds } from "@/lib/cloud/proxmox";
 import { getGcpAccessToken } from "@/lib/cloud/gcp";
@@ -59,7 +58,7 @@ export async function kubeExecEnv(
     const v = process.env[k];
     if (v) out[k] = v;
   }
-  // The env's provider creds (Vault keys / role) take precedence when present.
+  // The env's provider creds (stored keys / role) take precedence when present.
   // For AWS, resolveAwsExecEnv does the real STS AssumeRole exchange for
   // role-based providers — the raw getDecryptedCloudCreds only returns role
   // METADATA (AWS_ROLE_ARN/AWS_EXTERNAL_ID), which the `aws eks get-token`
@@ -163,12 +162,8 @@ export type CloudCredsResult =
 
 /**
  * Decrypt a CloudProvider's credentials into the shape each provider's CLI
- * expects in env vars. Today CloudProvider stores roleArn + externalId for
- * AWS assume-role; long-lived access keys aren't on the model yet, so this
- * function is a forward-compatible stub. Phase 3 will add the key columns
- * and fill in the actual STS AssumeRole flow.
- *
- * The shape returned here is what the runner merges into `runStage({env})`.
+ * expects in env vars. The shape returned here is what the runner merges into
+ * `runStage({env})`.
  */
 export async function getDecryptedCloudCreds(cloudProviderId: string): Promise<CloudCredsResult> {
   const cp = await prisma.cloudProvider.findUnique({
@@ -180,7 +175,8 @@ export async function getDecryptedCloudCreds(cloudProviderId: string): Promise<C
       roleArn: true,
       externalId: true,
       accountId: true,
-      credVaultPath: true,
+      awsAccessKeyIdEnc: true,
+      awsSecretAccessKeyEnc: true,
     },
   });
   if (!cp) {
@@ -191,22 +187,19 @@ export async function getDecryptedCloudCreds(cloudProviderId: string): Promise<C
   if (cp.region) base.AWS_REGION = cp.region;
 
   if (cp.kind === "aws") {
-    // Long-lived access key + secret live in Vault; the runner reads them at
-    // execution time. Terraform/kubectl pick up AWS_ACCESS_KEY_ID/SECRET from env.
-    if (cp.credVaultPath) {
+    // Long-lived access key + secret, AES-256-GCM encrypted at rest (same tier
+    // as Azure's spClientSecretEnc). Terraform/kubectl pick up
+    // AWS_ACCESS_KEY_ID/SECRET from env.
+    if (cp.awsAccessKeyIdEnc && cp.awsSecretAccessKeyEnc) {
       try {
-        const keys = await getAwsKeys(cp.id);
-        if (keys) {
-          base.AWS_ACCESS_KEY_ID = keys.accessKeyId;
-          base.AWS_SECRET_ACCESS_KEY = keys.secretAccessKey;
-          base.AWS_REGION = keys.region || base.AWS_REGION || cp.region;
-          if (base.AWS_REGION) base.AWS_DEFAULT_REGION = base.AWS_REGION;
-        }
+        base.AWS_ACCESS_KEY_ID = decryptSecret(cp.awsAccessKeyIdEnc);
+        base.AWS_SECRET_ACCESS_KEY = decryptSecret(cp.awsSecretAccessKeyEnc);
+        if (base.AWS_REGION) base.AWS_DEFAULT_REGION = base.AWS_REGION;
       } catch (e) {
         return {
           ok: false,
           code: "decrypt_failed",
-          message: `Could not read AWS keys from Vault: ${String(e)}`,
+          message: `Could not decrypt stored AWS keys: ${String(e)}`,
         };
       }
     }

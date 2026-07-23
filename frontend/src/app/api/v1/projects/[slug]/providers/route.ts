@@ -46,7 +46,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
       accountRef: true,
       region: true,
       status: true,
-      credVaultPath: true,
+      awsAccessKeyIdEnc: true,
     },
   });
   const providers =
@@ -75,8 +75,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
     account: p.accountRef,
     region: p.region,
     status: p.status,
-    // True when AWS access key + secret are stored in Vault for this provider.
-    hasVaultCreds: !!p.credVaultPath,
+    // True when an AWS access key + secret are stored (encrypted) for this provider.
+    hasAwsKeysStored: !!p.awsAccessKeyIdEnc,
     envs: envsByProvider.get(p.id) ?? [],
     services: countByProvider.get(p.id) ?? 0,
     spend: "—", // monthly spend joins CostByService — left as placeholder

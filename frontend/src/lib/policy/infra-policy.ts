@@ -30,13 +30,57 @@ export type PolicyResult = { ok: boolean; violations: Violation[]; checked: stri
 // Allowed regions per cloud. A region outside these is blocked.
 const ALLOWED_REGIONS: Record<Cloud, string[]> = {
   aws: ["us-east-1", "us-east-2", "us-west-2", "eu-west-1", "eu-central-1", "ap-south-1"],
-  azure: ["eastus", "eastus2", "westus2", "westeurope", "centralus", "southeastasia"],
+  azure: [
+    "eastus",
+    "eastus2",
+    "westus2",
+    "westus3",
+    "westeurope",
+    "northeurope",
+    "centralus",
+    "southcentralus",
+    "southeastasia",
+  ],
   gcp: ["us-central1", "us-east1", "us-west1", "europe-west1", "asia-south1"],
   // Proxmox is self-hosted — "region" is a node name, not a cloud region. The
   // region rule only runs when a spec.region is set, so an empty list is a
   // no-op for Proxmox VMs (which carry a node, not a region).
   proxmox: [],
 };
+
+/**
+ * Return true iff a single Terraform `ingress { … }` block in the HCL both:
+ *   (a) opens TCP/22 (SSH) or TCP/3389 (RDP), AND
+ *   (b) allows 0.0.0.0/0.
+ *
+ * Walks each ingress block individually so a stack that has a narrow-CIDR
+ * SSH rule PLUS a wide rule on some other port (Jenkins UI on 8080, RDS on
+ * 5432, an egress-all outbound) doesn't get a false positive. Only the
+ * genuinely-dangerous "22/3389 open to the world" combination fires.
+ */
+function hasWorldOpenAdminPort(hcl: string): boolean {
+  // Terraform ingress blocks don't nest, so `[^}]*` is safe — matches the
+  // block body up to the closing brace on its own line.
+  const ingressRe = /\bingress\s*\{([^}]*)\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = ingressRe.exec(hcl))) {
+    const body = m[1] ?? "";
+    // Port could be a single number (from_port = 22) OR a range that COVERS
+    // 22/3389. Cover the common cases (exact + covering ranges).
+    const fromPort = Number(body.match(/from_port\s*=\s*(\d+)/)?.[1] ?? -1);
+    const toPort = Number(body.match(/to_port\s*=\s*(\d+)/)?.[1] ?? -1);
+    const coversSshOrRdp =
+      fromPort === 22 || fromPort === 3389 ||
+      (fromPort >= 0 && toPort >= 0 &&
+        ((fromPort <= 22 && toPort >= 22) || (fromPort <= 3389 && toPort >= 3389)));
+    if (!coversSshOrRdp) continue;
+    // Any 0.0.0.0/0 in this block's cidr_blocks list = world-open.
+    if (/cidr_blocks\s*=\s*\[[^\]]*"0\.0\.0\.0\/0"[^\]]*\]/.test(body)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /** Instance is "oversized"/GPU → block by default (opt-in for big spend). */
 function isOversized(instanceType: string): boolean {
@@ -120,11 +164,16 @@ export function checkInfraPolicy(spec: PolicySpec): PolicyResult {
           "S3 public-access block is disabled (block_public_acls/restrict_public_buckets = false). Keep public access blocked.",
       });
     }
-    // Admin ports open to the world
-    if (
-      /cidr_blocks\s*=\s*\[?\s*"0\.0\.0\.0\/0"/.test(hcl) &&
-      /from_port\s*=\s*(22|3389)\b/.test(hcl)
-    ) {
+    // Admin ports open to the world.
+    // OLD behavior treated the whole HCL as one soup — any '0.0.0.0/0'
+    // anywhere + any port 22/3389 anywhere fired the rule. That was a false
+    // positive whenever a stack had (a) an SSH rule to a narrow CIDR AND
+    // (b) a separate rule (e.g. Jenkins UI on 8080, or the egress "all
+    // outbound") using 0.0.0.0/0. Now we walk each ingress { … } block
+    // individually and only flag when the SAME block has port 22/3389 AND
+    // 0.0.0.0/0.
+    const adminPortOpen = hasWorldOpenAdminPort(hcl);
+    if (adminPortOpen) {
       violations.push({
         rule: "no-world-open-admin",
         severity: "high",

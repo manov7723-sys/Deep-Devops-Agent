@@ -11,6 +11,7 @@ import {
   useApprovalDecision,
   useApprovalDetail,
   useProjectApprovals,
+  useRetryApprovalApply,
 } from "@/hooks/queries/project";
 
 const ENV_TONE: Record<string, "ok" | "warn" | "info" | "default"> = {
@@ -58,10 +59,26 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
         (a as unknown as { env?: string }).env;
       return key === env;
     }) ?? [];
-  const activeId = sp.get("id") ?? filtered[0]?.id ?? null;
+  const [decisions, setDecisions] = useState<Record<string, "approve" | "reject" | null>>({});
+  // The Queue shows genuinely ACTIONABLE work only — real DB status, not just
+  // "haven't clicked a button on it in this browser tab yet". Without this,
+  // a page refresh brings back every already-approved/rejected approval ever
+  // requested (this project's whole history) looking exactly like new pending
+  // items, since local `decisions` state resets to empty on every load.
+  // "Actionable" = still pending a decision, OR approved but the apply step
+  // never actually ran (needs a retry, not a re-decision).
+  const pendingOnly = filtered.filter((a) => {
+    const row = a as unknown as { status?: string; appliedAt?: string | null };
+    if (decisions[a.id]) return false;
+    if (row.status === "pending") return true;
+    if (row.status === "approved" && !row.appliedAt) return true;
+    return false;
+  });
+  const activeId = sp.get("id") ?? pendingOnly[0]?.id ?? null;
   const { data: detail } = useApprovalDetail(slug, activeId);
   const decide = useApprovalDecision(slug);
-  const [decisions, setDecisions] = useState<Record<string, "approve" | "reject" | null>>({});
+  const retryApply = useRetryApprovalApply(slug);
+  const [retryResult, setRetryResult] = useState<Record<string, string | null>>({});
 
   function selectId(id: string) {
     const p = new URLSearchParams(sp);
@@ -78,7 +95,23 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
     }
   }
 
-  const pending = filtered.filter((a) => !decisions[a.id]).length;
+  async function retry(id: string) {
+    setRetryResult((s) => ({ ...s, [id]: null }));
+    try {
+      const res = await retryApply.mutateAsync(id);
+      setRetryResult((s) => ({
+        ...s,
+        [id]: res.applied ? "Applied successfully." : (res.message ?? "Retried."),
+      }));
+    } catch (e) {
+      setRetryResult((s) => ({
+        ...s,
+        [id]: e instanceof Error ? e.message : "Retry failed.",
+      }));
+    }
+  }
+
+  const pending = pendingOnly.length;
 
   return (
     <div className="col gap-5">
@@ -99,7 +132,7 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
             <Block.Title>Queue</Block.Title>
           </Block.Header>
           {list ? (
-            filtered.length === 0 ? (
+            pendingOnly.length === 0 ? (
               <Block.Empty
                 icon="approve"
                 title="No approvals for this filter"
@@ -107,7 +140,7 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
               />
             ) : (
               <div className="col">
-                {filtered.map((a) => (
+                {pendingOnly.map((a) => (
                   <ApprovalQueueRow
                     key={a.id}
                     approval={a}
@@ -139,7 +172,10 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
               changes?: string;
               changesSummary?: string | null;
               diff?: ReadonlyArray<{ kind: string; text: string }>;
+              status?: "pending" | "approved" | "rejected";
+              appliedAt?: string | null;
             };
+            const needsRetry = d.status === "approved" && !d.appliedAt;
             const requester = d.agent ?? "Deep Agent";
             const requested = d.requestedRelative ?? timeAgo(d.requestedAt);
             const envKey = d.envKey ?? d.env ?? "—";
@@ -216,6 +252,42 @@ export function ProjectApprovalsClient({ slug }: { slug: string }) {
                         {decisions[detail.id] === "approve"
                           ? "Approved — Deep Agent is applying the change."
                           : "Rejected — Deep Agent will revise and resubmit."}
+                      </div>
+                    ) : needsRetry ? (
+                      <div className="col gap-2">
+                        <div
+                          className="row gap-2"
+                          style={{
+                            padding: 14,
+                            borderRadius: 10,
+                            background: "var(--warn-soft)",
+                            color: "var(--warn)",
+                            fontWeight: 700,
+                            fontSize: 13.5,
+                          }}
+                        >
+                          <Icon name="alert" size={18} />
+                          Already approved, but applying it failed — retry below.
+                        </div>
+                        {retryResult[detail.id] && (
+                          <p className="faint" style={{ fontSize: 12.5 }}>
+                            {retryResult[detail.id]}
+                          </p>
+                        )}
+                        <div className="row gap-2 wrap">
+                          <Btn
+                            variant="primary"
+                            icon="refresh"
+                            loading={retryApply.isPending}
+                            onClick={() => retry(detail.id)}
+                          >
+                            Retry apply
+                          </Btn>
+                          <Link href={`/p/${slug}/chat` as Route} className="btn outline">
+                            <Icon name="chat" size={16} />
+                            Ask a question
+                          </Link>
+                        </div>
                       </div>
                     ) : (
                       <div className="row gap-2 wrap">

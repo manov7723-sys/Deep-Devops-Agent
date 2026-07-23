@@ -306,7 +306,14 @@ export async function setupGithubOidcEcr(
       };
     }
 
-    // 3 — Inline permission policy: ECR auth (account-wide) + push to one repo.
+    // 3 — Inline permission policy: ECR auth (account-wide) + push to one repo
+    //     + EKS describe (account-wide, read-only) so the SAME role can run
+    //     `aws eks update-kubeconfig` in the CD workflow (cicd-pipeline.ts's
+    //     keyless EKS auth path reuses this role). Without eks:DescribeCluster
+    //     the CD fails at "aws-cli DescribeCluster: AccessDeniedException"
+    //     before it ever reaches cluster RBAC. EKS describe is read-only and
+    //     account-scoped; cluster-side RBAC (Access Entries) is still required
+    //     and gated separately by grant_eks_access.
     const permPolicy = {
       Version: "2012-10-17",
       Statement: [
@@ -329,6 +336,12 @@ export async function setupGithubOidcEcr(
             "ecr:GetDownloadUrlForLayer",
           ],
           Resource: `arn:aws:ecr:${region}:${accountId}:repository/${input.ecrRepoName}`,
+        },
+        {
+          Sid: "EksReadForKubeconfig",
+          Effect: "Allow",
+          Action: ["eks:DescribeCluster", "eks:ListClusters"],
+          Resource: "*",
         },
       ],
     };

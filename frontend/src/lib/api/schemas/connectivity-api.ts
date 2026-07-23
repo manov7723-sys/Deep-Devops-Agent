@@ -77,8 +77,8 @@ export const CloudProviderSummary = z.object({
   status: z.enum(["ok", "warn", "danger"]),
   // We expose whether a roleArn/externalId is set, but never the values themselves.
   hasRoleArn: z.boolean(),
-  // True when AWS access key + secret are stored in Vault for this provider.
-  hasVaultCreds: z.boolean(),
+  // True when an AWS access key + secret are stored (encrypted) for this provider.
+  hasAwsKeysStored: z.boolean(),
   createdAt: z.string().datetime(),
 });
 export type CloudProviderSummary = z.infer<typeof CloudProviderSummary>;
@@ -125,7 +125,8 @@ export const CreateProxmoxVmRequest = z.object({
 export type CreateProxmoxVmRequest = z.infer<typeof CreateProxmoxVmRequest>;
 
 // ──────────────────────────────────────────────────────────────────
-// AWS access/secret keys (stored in HashiCorp Vault, not Postgres)
+// AWS access/secret keys — AES-256-GCM encrypted directly on CloudProvider,
+// same tier as Azure's stored Service-Principal secret. No external service.
 // ──────────────────────────────────────────────────────────────────
 export const SetAwsKeysRequest = z.object({
   // AKIA…/ASIA… are 20 chars; keep the bound loose but sane.
@@ -137,20 +138,9 @@ export type SetAwsKeysRequest = z.infer<typeof SetAwsKeysRequest>;
 
 /** Per-provider credential status (never returns the secret values). */
 export const ProviderCredentialStatus = z.object({
-  vaultConfigured: z.boolean(),
-  hasVaultCreds: z.boolean(),
+  hasAwsKeysStored: z.boolean(),
 });
 export type ProviderCredentialStatus = z.infer<typeof ProviderCredentialStatus>;
-
-/** Vault connectivity for the "Vault config" section. */
-export const VaultStatusResponse = z.object({
-  configured: z.boolean(),
-  reachable: z.boolean(),
-  addr: z.string().nullable(),
-  mount: z.string(),
-  error: z.string().optional(),
-});
-export type VaultStatusResponse = z.infer<typeof VaultStatusResponse>;
 
 // ──────────────────────────────────────────────────────────────────
 // Terraform remote-state backend per environment. Two shapes:

@@ -262,7 +262,7 @@ export type ResolveExecEnvResult =
       ok: true;
       env: Record<string, string>;
       region: string;
-      source: "vault_keys" | "assumed_role" | "host";
+      source: "stored_keys" | "assumed_role" | "host";
     }
   | { ok: false; message: string };
 
@@ -312,7 +312,7 @@ function hostAwsEnv(region: string): Record<string, string> | null {
 /**
  * Resolve ready-to-use AWS credential env for a connected CloudProvider so the
  * `aws` CLI can be invoked on its behalf. Priority:
- *   1. Per-account long-lived keys stored in Vault.
+ *   1. Per-account long-lived keys, AES-256-GCM encrypted at rest in CloudProvider.
  *   2. Cross-account STS AssumeRole — only when a platform AWS account is
  *      configured (i.e. a hosted SaaS deployment that can BE the trusted
  *      principal). Skipped for local installs since there's no platform identity.
@@ -328,12 +328,12 @@ export async function resolveAwsExecEnv(cloudProviderId: string): Promise<Resolv
   const region = e.AWS_REGION || e.AWS_DEFAULT_REGION || process.env.AWS_REGION || "us-east-1";
   const pathEnv = [process.env.PATH ?? "", ...EXTRA_PATH].filter(Boolean).join(":");
 
-  // 1 — Long-lived keys from Vault — use directly.
+  // 1 — Long-lived stored keys — use directly.
   if (e.AWS_ACCESS_KEY_ID && e.AWS_SECRET_ACCESS_KEY) {
     return {
       ok: true,
       region,
-      source: "vault_keys",
+      source: "stored_keys",
       env: {
         PATH: pathEnv,
         AWS_ACCESS_KEY_ID: e.AWS_ACCESS_KEY_ID,
