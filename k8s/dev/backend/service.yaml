@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: ai-agentic-app-backend
     app.kubernetes.io/managed-by: deepagent
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: ai-agentic-app-backend
   ports:
