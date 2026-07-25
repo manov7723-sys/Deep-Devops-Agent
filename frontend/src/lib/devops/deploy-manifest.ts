@@ -26,6 +26,20 @@ export type DeploySpec = {
   host?: string;
   /** Service port; defaults to 80. */
   servicePort?: number;
+  /**
+   * Kubernetes Service type. Defaults to "LoadBalancer" so a fresh deploy
+   * to any cluster (EKS with private nodes, GKE, AKS) gets an externally-
+   * reachable endpoint without extra ingress-controller setup. "ClusterIP"
+   * keeps the app internal-only (behind another gateway / VPN / mesh).
+   */
+  serviceType?: "ClusterIP" | "LoadBalancer" | "NodePort";
+  /**
+   * Cloud the target cluster runs on — used to add cloud-specific Service
+   * annotations. AWS gets NLB + dualstack (IPv4 + IPv6) so users on IPv6-
+   * preferred networks (Airtel, Jio, most home ISPs) can actually reach it
+   * — Classic ELB is IPv4-only and silently strands v6-first browsers.
+   */
+  cloud?: "aws" | "gcp" | "azure" | "other";
 };
 
 /** RFC-1123 label: lowercase alphanumerics + hyphens, ≤63 chars. */
@@ -128,16 +142,46 @@ function deployment(spec: DeploySpec, app: string): string {
 
 function service(spec: DeploySpec, app: string): string {
   const port = spec.servicePort ?? 80;
-  return [
+  const svcType = spec.serviceType ?? "LoadBalancer";
+  // AWS-specific annotations translate the generic k8s Service into the
+  // MODERN NLB (not the 2009-era Classic ELB the AWS cloud-controller
+  // defaults to). Why:
+  //   - dualstack     → IPv4 + IPv6 endpoints, so IPv6-preferred networks
+  //                     (Airtel, Jio, most home ISPs) can actually connect.
+  //                     Classic ELB is IPv4-only → v6-first browsers hang
+  //                     on "Happy Eyeballs" fallback for ~75s then timeout.
+  //   - nlb-target-type: ip → routes directly to pod IPs, works with any
+  //                     CNI, no host-network dance, no 1:1 SG limits.
+  //   - internet-facing → placed in subnets tagged kubernetes.io/role/elb=1
+  //                     so a cluster with PRIVATE node subnets still gets a
+  //                     publicly-reachable LB (LB lives in the public tier).
+  // Only emitted for AWS + LoadBalancer; ClusterIP or non-AWS pass through.
+  const annotations: Record<string, string> = {};
+  if (svcType === "LoadBalancer" && spec.cloud === "aws") {
+    annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "nlb";
+    annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] = "internet-facing";
+    annotations["service.beta.kubernetes.io/aws-load-balancer-ip-address-type"] = "dualstack";
+    annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "ip";
+  }
+  const annLines = Object.entries(annotations).map(
+    ([k, v]) => `    ${JSON.stringify(k)}: ${q(v)}`,
+  );
+  const lines = [
     `apiVersion: v1`,
     `kind: Service`,
     `metadata:`,
     `  name: ${q(app)}`,
     `  namespace: ${q(spec.namespace)}`,
+  ];
+  if (annLines.length) {
+    lines.push(`  annotations:`);
+    lines.push(...annLines);
+  }
+  lines.push(
     `  labels:`,
     labels(app, 4),
     `spec:`,
-    `  type: ClusterIP`,
+    `  type: ${svcType}`,
     `  selector:`,
     `    app.kubernetes.io/name: ${q(app)}`,
     `  ports:`,
@@ -145,7 +189,8 @@ function service(spec: DeploySpec, app: string): string {
     `      port: ${port}`,
     `      targetPort: ${spec.containerPort}`,
     ``,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function ingress(spec: DeploySpec, app: string): string {

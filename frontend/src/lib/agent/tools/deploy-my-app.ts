@@ -562,6 +562,13 @@ export const deployMyAppTool: Tool<Input, Output> = {
           env: [],
           expose,
           host,
+          // Type LoadBalancer so a fresh cluster (private-node EKS, or any
+          // cluster without an ingress controller pre-installed) gets an
+          // externally-reachable endpoint without extra setup. AWS gets NLB +
+          // dualstack annotations so IPv6-preferred networks can connect —
+          // otherwise Classic ELB (IPv4-only) silently strands v6-first users.
+          serviceType: "LoadBalancer" as const,
+          cloud,
         },
         manifestDir,
       };
