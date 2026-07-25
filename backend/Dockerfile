@@ -15,4 +15,8 @@ COPY . .
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser /app
 USER appuser
 EXPOSE 8000
-CMD ["uvicorn","main:app"]
+# --host 0.0.0.0 is CRITICAL — uvicorn's default 127.0.0.1 accepts only
+# in-container connections, so Kubernetes probes and Services can't reach
+# the pod and the deployment CrashLoopBackOffs while logging the misleading
+# "Uvicorn running on http://127.0.0.1:8000" right before it dies.
+CMD ["uvicorn","main:app","--host","0.0.0.0","--port","8000"]
