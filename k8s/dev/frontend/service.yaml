@@ -6,6 +6,12 @@ metadata:
   labels:
     app.kubernetes.io/name: ai-agentic-app-frontend
     app.kubernetes.io/managed-by: deepagent
+  metadata:
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-ip-address-type: dualstack
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
 spec:
   type: LoadBalancer
   selector:
