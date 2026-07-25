@@ -298,7 +298,27 @@ ${cmdLine}
 }
 
 function pythonDockerfile(p: Record<string, string>): string {
-  const startCommand = p.startCommand || "gunicorn -b 0.0.0.0:8000 app:app";
+  let startCommand = p.startCommand || "gunicorn -b 0.0.0.0:8000 app:app";
+  // Force bind to 0.0.0.0 — every Python ASGI/WSGI server (uvicorn, gunicorn,
+  // hypercorn, daphne) defaults to 127.0.0.1, which accepts ONLY in-container
+  // connections. In Kubernetes that means readiness/liveness probes and
+  // Services can't reach the pod → CrashLoopBackOff, with the pod's own log
+  // helpfully saying "Uvicorn running on http://127.0.0.1:8000" right before
+  // it dies. Inject the correct host flag when it's missing — the LLM's start
+  // command almost never includes it and users don't think to override.
+  const bin = (startCommand.trim().split(/\s+/)[0] ?? "").toLowerCase();
+  const port = String(p.port || 8000);
+  const alreadyBinds =
+    /(--host|-b|--bind|-h\s)/.test(startCommand) || / 0\.0\.0\.0/.test(startCommand);
+  if (!alreadyBinds) {
+    if (bin === "uvicorn" || bin === "hypercorn") {
+      startCommand = `${startCommand} --host 0.0.0.0 --port ${port}`;
+    } else if (bin === "gunicorn") {
+      startCommand = `${startCommand} --bind 0.0.0.0:${port}`;
+    } else if (bin === "daphne") {
+      startCommand = `${startCommand} -b 0.0.0.0 -p ${port}`;
+    }
+  }
   // The CMD's first token is the server binary (gunicorn/uvicorn/…). If the
   // app's requirements.txt doesn't list it, the container dies at startup with
   // `exec: "gunicorn": executable file not found in $PATH` (exit 128). So we
