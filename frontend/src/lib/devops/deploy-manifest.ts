@@ -33,13 +33,16 @@ export type DeploySpec = {
    * keeps the app internal-only (behind another gateway / VPN / mesh).
    */
   serviceType?: "ClusterIP" | "LoadBalancer" | "NodePort";
-  /**
-   * Cloud the target cluster runs on — used to add cloud-specific Service
-   * annotations. AWS gets NLB + dualstack (IPv4 + IPv6) so users on IPv6-
-   * preferred networks (Airtel, Jio, most home ISPs) can actually reach it
-   * — Classic ELB is IPv4-only and silently strands v6-first browsers.
-   */
+  /** Cloud the target cluster runs on — used to gate cloud-specific annotations. */
   cloud?: "aws" | "gcp" | "azure" | "other";
+  /**
+   * Opt into modern AWS NLB + dualstack (IPv4+IPv6) instead of Classic ELB.
+   * OFF by default because many new/trial AWS accounts can't create ELBv2
+   * NLBs ("OperationNotPermitted") even though they CAN create Classic
+   * ELB via ELBv1. Enable when the account has NLB quota + the AWS Load
+   * Balancer Controller (or at least ELBv2 permissions).
+   */
+  useAwsNlb?: boolean;
 };
 
 /** RFC-1123 label: lowercase alphanumerics + hyphens, ≤63 chars. */
@@ -143,21 +146,16 @@ function deployment(spec: DeploySpec, app: string): string {
 function service(spec: DeploySpec, app: string): string {
   const port = spec.servicePort ?? 80;
   const svcType = spec.serviceType ?? "LoadBalancer";
-  // AWS-specific annotations translate the generic k8s Service into the
-  // MODERN NLB (not the 2009-era Classic ELB the AWS cloud-controller
-  // defaults to). Why:
-  //   - dualstack     → IPv4 + IPv6 endpoints, so IPv6-preferred networks
-  //                     (Airtel, Jio, most home ISPs) can actually connect.
-  //                     Classic ELB is IPv4-only → v6-first browsers hang
-  //                     on "Happy Eyeballs" fallback for ~75s then timeout.
-  //   - nlb-target-type: ip → routes directly to pod IPs, works with any
-  //                     CNI, no host-network dance, no 1:1 SG limits.
-  //   - internet-facing → placed in subnets tagged kubernetes.io/role/elb=1
-  //                     so a cluster with PRIVATE node subnets still gets a
-  //                     publicly-reachable LB (LB lives in the public tier).
-  // Only emitted for AWS + LoadBalancer; ClusterIP or non-AWS pass through.
+  // AWS annotations — off by default. Reason: opting into NLB requires
+  // ELBv2 API access, which many new/trial/restricted AWS accounts lack
+  // (they can create Classic ELB via ELBv1 fine, but ELBv2 returns
+  // "OperationNotPermitted: This AWS account currently does not support
+  // creating load balancers"). Emitting these annotations by default
+  // silently broke deploys on those accounts. So Classic ELB is the safe
+  // default; users on modern setups (LB Controller installed OR NLB quota
+  // granted) can opt in via useAwsNlb=true and pick up IPv6/dualstack.
   const annotations: Record<string, string> = {};
-  if (svcType === "LoadBalancer" && spec.cloud === "aws") {
+  if (svcType === "LoadBalancer" && spec.cloud === "aws" && spec.useAwsNlb) {
     annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "nlb";
     annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] = "internet-facing";
     annotations["service.beta.kubernetes.io/aws-load-balancer-ip-address-type"] = "dualstack";
