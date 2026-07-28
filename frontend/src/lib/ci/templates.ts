@@ -306,8 +306,44 @@ function pythonDockerfile(p: Record<string, string>): string {
   // helpfully saying "Uvicorn running on http://127.0.0.1:8000" right before
   // it dies. Inject the correct host flag when it's missing — the LLM's start
   // command almost never includes it and users don't think to override.
-  const bin = (startCommand.trim().split(/\s+/)[0] ?? "").toLowerCase();
+  let bin = (startCommand.trim().split(/\s+/)[0] ?? "").toLowerCase();
   const port = String(p.port || 8000);
+  // Flask's built-in CLI ("flask run") is a DEV server: single-threaded, binds
+  // 127.0.0.1, and — when FLASK_APP isn't set — dies with the Click error
+  // "Missing argument 'APP'" → CrashLoopBackOff in k8s. Rewrite to gunicorn
+  // against the detected entry module so production actually works. The
+  // module name comes from repo-analyze (params.flaskModule); we fall back
+  // to `app` (the canonical Flask default: `app.py` with `app = Flask(...)`).
+  if (bin === "flask") {
+    const modRaw = (p.flaskModule || "app").replace(/\.py$/, "").replace(/^\.?\/*/, "");
+    const attr = p.flaskAppAttr || "app";
+    startCommand = `gunicorn ${modRaw}:${attr}`;
+    bin = "gunicorn";
+  }
+  // Django's built-in `manage.py runserver` has the same problem — dev-only,
+  // binds 127.0.0.1 by default, no worker model. Rewrite to gunicorn against
+  // the detected WSGI module (repo-analyze fills djangoWsgi as
+  // "myproject.wsgi"; fall back to a common shape).
+  if (bin === "python" && /manage\.py\s+runserver/.test(startCommand)) {
+    const wsgi = p.djangoWsgi || "config.wsgi:application";
+    startCommand = `gunicorn ${wsgi}`;
+    bin = "gunicorn";
+  }
+  // Uvicorn / gunicorn / hypercorn / daphne / waitress ALL require an APP
+  // argument (module:variable). When the LLM emits a bare bin ("uvicorn"),
+  // Click errors with 'Missing argument "APP".' → CrashLoopBackOff. Detect
+  // the missing APP token (nothing that contains ":", and no positional arg
+  // besides flags) and inject a safe default. `app:app` is the canonical
+  // FastAPI/Flask convention: `app.py` with `app = FastAPI()` / `Flask()`.
+  const APP_SERVERS = new Set(["uvicorn", "gunicorn", "hypercorn", "daphne", "waitress"]);
+  if (APP_SERVERS.has(bin)) {
+    const tokens = startCommand.trim().split(/\s+/).slice(1); // drop the bin
+    const hasAppArg = tokens.some((t) => t.includes(":") && !t.startsWith("-"));
+    if (!hasAppArg) {
+      const mod = (p.flaskModule || p.djangoWsgi || "app:app").replace(/\.py$/, "");
+      startCommand = `${bin} ${mod}${tokens.length ? " " + tokens.join(" ") : ""}`;
+    }
+  }
   const alreadyBinds =
     /(--host|-b|--bind|-h\s)/.test(startCommand) || / 0\.0\.0\.0/.test(startCommand);
   if (!alreadyBinds) {

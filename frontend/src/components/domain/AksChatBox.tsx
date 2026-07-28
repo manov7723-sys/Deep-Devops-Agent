@@ -123,7 +123,25 @@ const STEPS: Step[] = [
     skip: (a) => a.createResourceGroup === false,
     default: (c) =>
       String(c.answers.name ?? "").trim() ? `${String(c.answers.name).trim()}-rg` : "",
-    validate: (v) => (v.trim() ? null : "A resource group name is required."),
+    // Reject a name that ALREADY EXISTS in the subscription. Terraform's
+    // azurerm_resource_group is a create-only resource: pointed at an existing
+    // group it fails the apply — but only ~11 minutes in, after the AKS
+    // control plane has already started building. Worse, if that group holds
+    // the Terraform state storage account (a very common layout), a later
+    // `destroy` on this stack proposes deleting the state bucket along with
+    // every other stack's resources sharing the group.
+    // Catch it here, in the form, and point at the "Use an existing one"
+    // branch which reads the group via a data source instead.
+    validate: (v, _a, c) => {
+      const name = v.trim();
+      if (!name) return "A resource group name is required.";
+      const src = c.sources?.azureNetworks as AzureNetworksSource | undefined;
+      const existing = (src?.resourceGroups ?? []).map((g) => g.name.toLowerCase());
+      if (existing.includes(name.toLowerCase())) {
+        return `Resource group "${name}" already exists in this subscription. Switch "Resource group" above to "Use an existing one" and pick it from the list — creating over an existing group fails the apply and can put shared resources (including Terraform state) at risk on a later destroy.`;
+      }
+      return null;
+    },
   },
   {
     page: 1,

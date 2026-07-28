@@ -25,10 +25,23 @@ import { AWS_REGIONS as COMMON_REGIONS } from "@/lib/aws-regions";
  * apply`s it against the env's stored kubeconfig — the same code path the
  * chat playbook's `create_rds_k8s_secret` + `apply_k8s_manifest` tools use.
  *
- * Assumes the network layer already works: VPC peering + route tables + RDS
- * security-group ingress are the caller's responsibility. Symptoms if any of
- * those are missing surface as `no such host` / `connection refused` on the
- * app's first pod restart, not here — this endpoint only manages the Secret.
+ * Connect does three things, in order:
+ *   1. NETWORK — verifies the RDS security group admits the cluster's CURRENT
+ *      node security groups on the DB port, and adds the rule if missing.
+ *      Same-VPC and same-region-peered setups get a narrow security-group
+ *      reference; inter-region peering falls back to the cluster VPC's CIDR
+ *      because AWS forbids SG references across regions. VPC PEERING ITSELF is
+ *      still the caller's job — we detect its absence and warn rather than
+ *      build network topology on a button press.
+ *   2. SECRET — builds and applies the Kubernetes Secret.
+ *   3. WIRING — injects it into the namespace's Deployments via
+ *      envFrom.secretRef and lets Kubernetes roll the pods.
+ *
+ * Step 1 exists because a cluster REBUILD gives every node a new security
+ * group while the RDS rule still names the old, deleted one. Every query then
+ * fails with "Can't reach database server", which reads like a database
+ * outage. Step 3 exists because a Secret nothing references is invisible to
+ * the app — and a hand-run `kubectl patch` is wiped by the next CD apply.
  */
 const REGION_OPTIONS: SelectOption[] = COMMON_REGIONS.map((r) => ({ value: r, label: r }));
 const ENGINE_OPTIONS: SelectOption[] = [
@@ -69,6 +82,10 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
   // (common for BYO databases created without a default schema).
   const [dbNameOverride, setDbNameOverride] = useState<string>("");
   const [alsoStoreInAppSecret, setAlsoStoreInAppSecret] = useState<boolean>(true);
+  // OPT-IN bootstrap. Default false: both WRITE to the user's database — one
+  // creates it, the other mutates schema — so neither may happen implicitly.
+  const [createDatabase, setCreateDatabase] = useState<boolean>(false);
+  const [runMigrations, setRunMigrations] = useState<boolean>(false);
 
   const [serverError, setServerError] = useState<string | null>(null);
   const [result, setResult] = useState<
@@ -79,6 +96,22 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
         keysWritten: string[];
         appSecretKey: string | null;
         stdout: string;
+        /** Per-Deployment envFrom wiring outcomes from the server. */
+        wired?: { deployment: string; status: "patched" | "already" | "failed"; message?: string }[];
+        wireError?: string;
+        summary?: string;
+        /** Pre-flight security-group check — see rds-network.ts. */
+        network?: {
+          changed: boolean;
+          message: string;
+          ruleKind: "security-group" | "cidr";
+          crossVpc: boolean;
+          crossRegion: boolean;
+          warnings: string[];
+        };
+        networkError?: string;
+        /** Opt-in create-database / migrate results. */
+        bootstrap?: { step: "create-database" | "migrate"; status: "done" | "skipped" | "failed"; message: string }[];
       }
   >(null);
 
@@ -146,6 +179,13 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
         password,
         engine,
         alsoStoreInAppSecret,
+        // Lets the server verify (and if needed open) the RDS security group
+        // for this cluster's CURRENT node SGs — the thing that silently breaks
+        // every time a cluster is rebuilt.
+        dbInstanceIdentifier: rdsId || undefined,
+        region: region || undefined,
+        createDatabase,
+        runMigrations,
       });
       if (res.ok) {
         setResult({
@@ -154,6 +194,12 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
           keysWritten: res.keysWritten ?? [],
           appSecretKey: res.appSecretKey ?? null,
           stdout: res.kubectl?.stdout ?? "",
+          wired: res.wired ?? [],
+          wireError: res.wireError,
+          summary: res.summary,
+          network: res.network,
+          networkError: res.networkError,
+          bootstrap: res.bootstrap ?? [],
         });
       }
     } catch (e) {
@@ -162,13 +208,28 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
   }
 
   if (result) {
+    // The Secret alone does nothing — what matters is whether it got wired into
+    // the Deployments. Reflect that honestly in the header instead of the old
+    // "now go run kubectl yourself" copy.
+    const wired = result.wired ?? [];
+    const patched = wired.filter((w) => w.status === "patched");
+    const already = wired.filter((w) => w.status === "already");
+    const failed = wired.filter((w) => w.status === "failed");
+    const fullyWired = !result.wireError && failed.length === 0 && wired.length > 0;
     return (
       <Block>
         <Block.Header>
           <Block.Title
-            sub={`Secret ${result.namespace}/${result.secretName} applied. Patch your Deployment with envFrom.secretRef and roll pods to pick up the DB.`}
+            sub={
+              result.summary ??
+              `Secret ${result.namespace}/${result.secretName} applied.`
+            }
           >
-            Connected — Secret written to the cluster
+            {fullyWired
+              ? patched.length > 0
+                ? "Connected — database wired into your app"
+                : "Already connected"
+              : "Secret written — wiring needs attention"}
           </Block.Title>
         </Block.Header>
         <Block.Body>
@@ -183,6 +244,103 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
                 </>
               )}
             </div>
+
+            {/* Network path — catches a stale SG after a rebuild, and handles
+                cross-VPC / cross-region setups where AWS forbids SG references. */}
+            {(result.network || result.networkError) && (
+              <div className="col gap-1" style={{ fontSize: 12.5 }}>
+                <div className="row gap-2 wrap" style={{ alignItems: "center" }}>
+                  <Badge tone={result.networkError ? "warn" : result.network?.changed ? "ok" : "info"}>
+                    {result.networkError
+                      ? "network unchecked"
+                      : result.network?.changed
+                        ? "network opened"
+                        : "network ok"}
+                  </Badge>
+                  {result.network?.crossRegion && <Badge tone="info">cross-region</Badge>}
+                  {result.network?.crossVpc && !result.network.crossRegion && (
+                    <Badge tone="info">cross-VPC</Badge>
+                  )}
+                  {result.network?.ruleKind === "cidr" && <Badge tone="warn">VPC-wide rule</Badge>}
+                  <span className="muted">{result.networkError ?? result.network?.message}</span>
+                </div>
+                {/* Advisories: missing peering routes, broadened rule scope, … */}
+                {(result.network?.warnings ?? []).map((w, i) => (
+                  <div key={i} className="muted" style={{ paddingLeft: 2 }}>
+                    ⚠ {w}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Opt-in bootstrap: database creation + schema migrations. */}
+            {(result.bootstrap ?? []).length > 0 && (
+              <div style={{ fontSize: 12.5 }}>
+                <div className="muted" style={{ marginBottom: 4 }}>
+                  Database bootstrap:
+                </div>
+                <div className="col gap-1">
+                  {(result.bootstrap ?? []).map((b, i) => (
+                    <div key={i} className="row gap-2" style={{ alignItems: "flex-start" }}>
+                      <Badge
+                        tone={b.status === "done" ? "ok" : b.status === "skipped" ? "info" : "warn"}
+                      >
+                        {b.step === "create-database" ? "create db" : "migrate"}
+                      </Badge>
+                      <span className="muted">{b.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Per-Deployment wiring — the step users used to have to do by hand. */}
+            {(wired.length > 0 || result.wireError) && (
+              <div style={{ fontSize: 12.5 }}>
+                <div className="muted" style={{ marginBottom: 4 }}>
+                  Deployments wired (envFrom → secretRef):
+                </div>
+                {result.wireError && (
+                  <div className="row gap-2" style={{ alignItems: "center", marginBottom: 4 }}>
+                    <Badge tone="warn">error</Badge>
+                    <span className="muted">{result.wireError}</span>
+                  </div>
+                )}
+                <div className="col gap-1">
+                  {wired.map((w) => (
+                    <div key={w.deployment} className="row gap-2" style={{ alignItems: "center" }}>
+                      <Badge
+                        tone={
+                          w.status === "patched" ? "ok" : w.status === "already" ? "info" : "warn"
+                        }
+                      >
+                        {w.status === "patched"
+                          ? "wired"
+                          : w.status === "already"
+                            ? "already set"
+                            : "failed"}
+                      </Badge>
+                      <span className="mono">{w.deployment}</span>
+                      {w.message && w.status === "failed" && (
+                        <span className="muted">{w.message}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {patched.length > 0 && (
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    Pods are rolling now — Secret values are read at container start, so a restart
+                    is required for DATABASE_URL to appear. Give it ~30s.
+                  </div>
+                )}
+                {already.length > 0 && patched.length === 0 && !failed.length && (
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    Nothing to change — if the app still can&apos;t reach the database, the
+                    credentials or network path are the more likely cause than the wiring.
+                  </div>
+                )}
+              </div>
+            )}
             <div style={{ fontSize: 12.5 }}>
               <div className="muted" style={{ marginBottom: 4 }}>Keys written:</div>
               <div className="row gap-1 wrap">
@@ -266,6 +424,41 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
                 onChange={(e) => setAlsoStoreInAppSecret(e.target.checked)}
               />
               <span>Also store DATABASE_URL in AppSecret (encrypted; readable by agent tools)</span>
+            </label>
+
+            {/* OPT-IN bootstrap. Off by default because both WRITE to the
+                user's database. Ticking them turns Connect into a single
+                end-to-end action: network → secret → wiring → schema. */}
+            <label className="row gap-2" style={{ fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={createDatabase}
+                onChange={(e) => setCreateDatabase(e.target.checked)}
+              />
+              <span>
+                Create the database if it doesn&apos;t exist
+                <span className="muted">
+                  {" "}
+                  — an RDS <em>instance</em> isn&apos;t a <em>database</em>; a fresh one only has{" "}
+                  <span className="mono">{engine === "mysql" ? "mysql" : "postgres"}</span>
+                </span>
+              </span>
+            </label>
+
+            <label className="row gap-2" style={{ fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={runMigrations}
+                onChange={(e) => setRunMigrations(e.target.checked)}
+              />
+              <span>
+                Run schema migrations after connecting
+                <span className="muted">
+                  {" "}
+                  — auto-detects Prisma / Alembic / Django in the app container.{" "}
+                  <strong>Mutates schema.</strong>
+                </span>
+              </span>
             </label>
           </div>
         </Block>

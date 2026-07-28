@@ -4,6 +4,18 @@ import { analyzeAppServices, type AppService } from "@/lib/automation/repo-analy
 import { getAzureAccessToken } from "@/lib/cloud/azure";
 import { parseAksClusterRef, setupAzureDeployRegistry } from "@/lib/cloud/azure-acr";
 import { findAksClusterByName } from "@/lib/cloud/azure-arm";
+import {
+  detectAlbController,
+  detectClusterSubnetType,
+  detectServiceMonitorCrd,
+} from "@/lib/cloud/aws-onboard";
+import {
+  applyArgoApplications,
+  argoAccessInstructions,
+  buildArgoApplication,
+  ensureArgoCd,
+} from "@/lib/devops/argocd";
+import { kubeExecEnv } from "@/lib/runner/creds";
 import { parseEksClusterRef } from "@/lib/cloud/eks-access";
 import { parseGkeClusterRef, setupGcpDeployRegistry } from "@/lib/cloud/gcp-artifact-registry";
 import { buildCicdArtifacts } from "@/lib/devops/cicd-pipeline";
@@ -57,9 +69,35 @@ type ServiceInput = {
   path?: string;
   /** ECR/image repo name to use for this service (an existing one, or a new name to auto-create). */
   imageName?: string;
-  /** Expose this service publicly via Ingress (needs host). Usually true for a frontend. */
+  /** Expose this service publicly. Set to true for user-facing services. */
   expose?: boolean;
   host?: string;
+  /**
+   * How to expose this service publicly — the USER's choice from the deploy
+   * wizard's "Load balancer type" question (only relevant when expose=true):
+   *
+   *   - "nlb"      → Network Load Balancer (Layer 4). Service
+   *                  type=LoadBalancer + internet-facing NLB annotations.
+   *                  No domain needed. Needs the AWS Load Balancer
+   *                  Controller when nodes are in private subnets.
+   *   - "alb"      → Application Load Balancer (Layer 7). Service
+   *                  type=ClusterIP + an Ingress with alb.ingress.*
+   *                  annotations. Supports path routing / WAF / ACM TLS.
+   *                  REQUIRES the AWS Load Balancer Controller. Host is
+   *                  optional — without one the user gets the ALB DNS name.
+   *   - "nodeport" → Service type=NodePort only. $0/mo, no LB. Reached at
+   *                  <node-public-ip>:<nodePort>. Needs PUBLIC-subnet nodes
+   *                  and an open node security group. Good for dev/demo.
+   *   - "classic"  → Service type=LoadBalancer with NO annotations →
+   *                  legacy Classic ELB from the in-tree controller. Needs
+   *                  no extra controller; works on brand-new AWS accounts.
+   *   - "ingress"  → Service type=ClusterIP + nginx Ingress on `host`.
+   *                  Needs an nginx controller AND a domain.
+   *   - unset      → Auto-detected: host given → "ingress"; else the tool
+   *                  inspects the cluster's NODE GROUP subnets and picks
+   *                  "nlb" (any private) or "classic" (all public).
+   */
+  exposeMode?: "nlb" | "alb" | "nodeport" | "classic" | "ingress";
 };
 
 type Input = {
@@ -103,6 +141,32 @@ type Input = {
    * Ask the user via the batch options-form; see agent.ts step 3.
    */
   manifestType?: "manifests" | "helm";
+  /**
+   * GitOps mode — install ArgoCD (if absent) and let it reconcile the cluster
+   * from git, instead of a push-based CD workflow.
+   *
+   * This is not an additive toggle: it REPLACES the deploy half of the
+   * pipeline.
+   *   • The image tag becomes an immutable `:<git-sha>`. `:latest` cannot work
+   *     under Argo — Argo watches git, so if the manifest text never changes
+   *     the cluster never changes and the new image is never deployed.
+   *   • CI gains a step that rewrites that tag and commits. That commit IS the
+   *     deploy trigger.
+   *   • NO CD workflow is generated. One running `kubectl apply` would fight
+   *     Argo's selfHeal and the two flap against each other.
+   */
+  useArgoCd?: boolean;
+  /**
+   * Build + deploy automatically on every push to the deploy branch.
+   *
+   * Generated CI workflows are `workflow_dispatch`-only by default, so files
+   * land on the branch without building and nothing happens until someone
+   * clicks Run. That is safe but confounds the usual expectation that pushing
+   * code ships it. true adds a `push:` trigger (keeping the Run button) and,
+   * in a monorepo, a `paths:` filter so one service's change doesn't redeploy
+   * the other.
+   */
+  autoDeployOnPush?: boolean;
 };
 
 type DeployedService = {
@@ -206,9 +270,18 @@ export const deployMyAppTool: Tool<Input, Output> = {
             },
             expose: {
               type: "boolean",
-              description: "Expose publicly via Ingress (needs host). Usually true for a frontend.",
+              description: "Expose publicly. Usually true for a frontend. See exposeMode.",
             },
-            host: { type: "string", description: "Public hostname when exposing." },
+            host: {
+              type: "string",
+              description: "Public hostname (e.g. app.acme.com) — REQUIRED only when exposeMode='ingress'.",
+            },
+            exposeMode: {
+              type: "string",
+              enum: ["nlb", "alb", "nodeport", "classic", "ingress"],
+              description:
+                "Load balancer type for this service — the USER's answer to the wizard's `lbType_<serviceName>` question. 'nlb' = Network LB (L4, no domain needed, fast). 'alb' = Application LB (L7, path routing + WAF + ACM TLS, needs the AWS Load Balancer Controller, host optional). 'nodeport' = NodePort only, no LB, $0/mo, reachable at <node-ip>:<nodePort> (public-subnet nodes only). 'classic' = plain Classic ELB, needs no controller. 'ingress' = nginx Ingress (needs a domain + nginx controller). Omit to let the tool auto-detect from the cluster's node-group subnets.",
+            },
           },
           required: ["name", "imageName"],
           additionalProperties: false,
@@ -230,6 +303,16 @@ export const deployMyAppTool: Tool<Input, Output> = {
       overwriteDockerfile: {
         type: "boolean",
         description: "Replace an existing Dockerfile with the vetted template. Default false.",
+      },
+      autoDeployOnPush: {
+        type: "boolean",
+        description:
+          "true = CI runs on every push to the deploy branch (plus the manual Run button), so pushing code builds and deploys automatically; in a monorepo a paths: filter keeps one service's change from rebuilding the other. false (default) = manual trigger only. Comes from the wizard's `autoDeploy` question — never guess it.",
+      },
+      useArgoCd: {
+        type: "boolean",
+        description:
+          "GitOps mode. true = install ArgoCD on the cluster (if absent), commit an Argo Application, and let Argo sync the cluster from git; the image is tagged with the git SHA and CI commits that tag (the commit IS the deploy), and NO CD workflow is generated. false (default) = the normal push-based CD workflow with a :latest tag. Comes from the deploy wizard's `deployMode` question — never guess it.",
       },
       manifestType: {
         type: "string",
@@ -276,6 +359,9 @@ export const deployMyAppTool: Tool<Input, Output> = {
       };
     }
 
+    // GitOps mode flips the pipeline shape — see Input.useArgoCd.
+    const useArgo = input.useArgoCd === true;
+
     // 1 — ANALYZE → every deployable service.
     const det = await analyzeAppServices(ctx.projectId, input.repoFullName);
     if (!det.ok) return { ok: false, error: `Repo analysis failed: ${det.error}` };
@@ -297,8 +383,40 @@ export const deployMyAppTool: Tool<Input, Output> = {
       };
     }
 
+    // GATE: in a MONOREPO (2+ services), the tool refuses to run unless every
+    // service has an EXPLICIT `expose` boolean. Enforcing this at the tool
+    // layer — not just via playbook prose — is deliberate: LLM playbook
+    // instructions get skipped, but a tool-level 'missing' error forces the
+    // agent to ask the user before the deploy can proceed. Without this gate
+    // an agent that forgot the backendExpose question would silently deploy
+    // the backend as ClusterIP (or worse, LoadBalancer) without ever asking
+    // the user what they wanted. See `agent-playbook-tool-calls-need-step2`
+    // memory: "a tool call only mentioned in prose gets skipped".
+    if (input.services.length > 1) {
+      const missing = input.services.find((s) => s.expose === undefined);
+      if (missing) {
+        const isBackend = /back[- ]?end|api|server|service/i.test(missing.name ?? "");
+        return {
+          ok: false,
+          error:
+            `Missing the user's exposure choice for "${missing.name}" — every service in a monorepo MUST have services[i].expose set to true or false explicitly (never omitted). ` +
+            (isBackend
+              ? "This is a BACKEND service — the batch options-form in step 3 MUST include a `backendExpose` question. Re-emit the batch form INCLUDING that question, mapping the user's answer to services[backend].expose (true for 'Yes — expose externally', false for 'No — internal only'). Set services[frontend].expose=true by default (frontends are user-facing)."
+              : "Set expose based on the service type — frontends default to true (user-facing), other services should have been asked about via the batch form. Re-emit the batch form with a Yes/No exposure question for this service.") +
+            " Then call deploy_my_app again with the answer set on services[i].expose. THIS IS A HARD GATE — the deploy cannot proceed with omitted expose fields.",
+        };
+      }
+    }
+
     // Resolve the list of services to deploy + their ECR name / expose choice.
-    type Plan = { svc: AppService; imageName: string; expose: boolean; host?: string };
+    type ExposeMode = "nlb" | "alb" | "nodeport" | "classic" | "ingress";
+    type Plan = {
+      svc: AppService;
+      imageName: string;
+      expose: boolean;
+      host?: string;
+      exposeMode?: ExposeMode;
+    };
     const plans: Plan[] = [];
     for (const t of input.services) {
       const svc = matchService(det.services, t);
@@ -307,16 +425,35 @@ export const deployMyAppTool: Tool<Input, Output> = {
           ok: false,
           error: `Service "${t.name ?? t.path ?? "?"}" not found in the repo analysis (detected: ${det.services.map((s) => s.name).join(", ")}).`,
         };
+      // Provisional exposeMode: the USER's explicit choice always wins. Else
+      // fall back to 'ingress' when they supplied a host (that only makes
+      // sense with an Ingress). Else leave UNDEFINED so the subnet-aware
+      // block below can auto-detect once the cluster ref is resolved.
+      const exposeMode: ExposeMode | undefined =
+        t.exposeMode ?? (t.expose && (t.host || "").trim() ? "ingress" : undefined);
       plans.push({
         svc,
         imageName: (t.imageName || svc.suggestedImageName).toLowerCase(),
         expose: !!t.expose,
         host: t.host,
+        exposeMode,
       });
     }
     for (const p of plans) {
-      if (p.expose && !(p.host || "").trim())
-        return { ok: false, error: `A host is required to expose "${p.svc.name}" publicly.` };
+      // Ingress mode is the only path that fundamentally needs a hostname.
+      // ALB mode gives the user the LB's DNS name; loadbalancer likewise.
+      if (p.expose && p.exposeMode === "ingress" && !(p.host || "").trim()) {
+        return {
+          ok: false,
+          error:
+            `Missing the user's domain for "${p.svc.name}" (exposeMode='ingress' requires a host). ` +
+            "Ask ONE `options` question — 'Enter your domain (e.g. app.acme.com)' — and pass it as `host` on this service, then call deploy_my_app again.",
+        };
+      }
+      // No gate for missing exposeMode: when expose=true is set without
+      // exposeMode, the tool auto-defaults to 'alb' (internet-facing NLB
+      // annotations — safe for both public and private subnet clusters).
+      // Callers who want Ingress explicitly pass host + exposeMode='ingress'.
     }
 
     const multi = plans.length > 1;
@@ -438,6 +575,114 @@ export const deployMyAppTool: Tool<Input, Output> = {
       }
     }
     const cdNotes: string[] = [];
+
+    // ── exposeMode auto-resolution (only for plans the user left unset) ────
+    // ALB is the standing default for HTTP services — see the ADR at the top
+    // of lib/devops/deploy-manifest.ts. NLB is NEVER auto-selected: this AWS
+    // account cannot create NLBs, and the failure surfaces only as
+    // EXTERNAL-IP <pending> with no error, which is near-undiagnosable.
+    //
+    // The only question worth asking is whether ALB is USABLE, i.e. is the
+    // AWS Load Balancer Controller actually running:
+    //   controller present            → "alb"      (Ingress → ALB, L7)
+    //   absent + all-public nodes     → "classic"  (in-tree Classic ELB —
+    //                                   no controller needed; the one path
+    //                                   that still works on a bare cluster)
+    //   absent + any private node     → "alb" anyway, plus a loud note. There
+    //                                   is no working alternative: a Classic
+    //                                   ELB cannot attach to private subnets,
+    //                                   so silently emitting one would produce
+    //                                   the exact <pending> hang we're fixing.
+    //                                   Better to emit the correct manifest
+    //                                   and tell the operator to install the
+    //                                   controller (our EKS Terraform does).
+    // ── Can this cluster hold a ServiceMonitor? ───────────────────────────
+    // Emitted by default so the Observability page's app-metrics cards work
+    // without the user hand-filling a scrape-target form. Skipped when the
+    // Prometheus Operator CRDs are absent, because a ServiceMonitor doc in the
+    // multi-doc manifest would fail the ENTIRE `kubectl apply` with
+    // "no matches for kind ServiceMonitor" and take the deploy down with it.
+    let canScrapeMetrics = false;
+    if (envRow?.kubeconfigRef) {
+      let kc: string | null = null;
+      try {
+        kc = decryptSecret(envRow.kubeconfigRef);
+      } catch {
+        /* unreadable kubeconfig → leave monitoring off */
+      }
+      if (kc) {
+        const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        const { tmpdir } = await import("node:os");
+        const dir = await mkdtemp(join(tmpdir(), "dda-smchk-"));
+        try {
+          const p = join(dir, "config");
+          await writeFile(p, kc, { mode: 0o600 });
+          canScrapeMetrics = await detectServiceMonitorCrd(p);
+        } finally {
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+      }
+    }
+    cdNotes.push(
+      canScrapeMetrics
+        ? "[metrics] Prometheus Operator detected — emitting a ServiceMonitor per service so the app-metrics cards populate automatically (once the app exposes /metrics)."
+        : "[metrics] No Prometheus Operator CRDs on this cluster — skipping ServiceMonitor. Install in-cluster monitoring from the Observability page to enable app metrics.",
+    );
+
+    const anyNeedsAutoExpose = plans.some((p) => p.expose && !p.exposeMode);
+    if (anyNeedsAutoExpose) {
+      let auto: ExposeMode = "alb";
+      if (cloud === "aws" && eksRef) {
+        let hasController = false;
+        if (envRow?.kubeconfigRef) {
+          let kc: string | null = null;
+          try {
+            kc = decryptSecret(envRow.kubeconfigRef);
+          } catch {
+            /* unreadable kubeconfig → treat as "controller unknown" */
+          }
+          if (kc) {
+            const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+            const { join } = await import("node:path");
+            const { tmpdir } = await import("node:os");
+            const dir = await mkdtemp(join(tmpdir(), "dda-albchk-"));
+            try {
+              const p = join(dir, "config");
+              await writeFile(p, kc, { mode: 0o600 });
+              hasController = await detectAlbController(p);
+            } finally {
+              await rm(dir, { recursive: true, force: true }).catch(() => {});
+            }
+          }
+        }
+        const subnets = await detectClusterSubnetType(
+          cloudProviderId,
+          eksRef.region,
+          eksRef.clusterName,
+        );
+        const allPublic = subnets.ok && subnets.kind === "all_public";
+        auto = hasController ? "alb" : allPublic ? "classic" : "alb";
+        cdNotes.push(
+          `[expose] Cluster "${eksRef.clusterName}": AWS Load Balancer Controller ` +
+            `${hasController ? "present" : "NOT FOUND"}; node subnets ` +
+            `${subnets.ok ? `${subnets.totalSubnets} total / ${subnets.privateCount} private` : `undetermined (${subnets.message})`}` +
+            ` → auto exposeMode='${auto}'.`,
+        );
+        if (!hasController && auto === "alb") {
+          cdNotes.push(
+            "[expose] ACTION NEEDED: the Ingress will not produce an ALB until the " +
+              "AWS Load Balancer Controller is installed. Clusters created by DeepAgent's " +
+              "EKS blueprint install it via Terraform (IRSA + helm_release); this cluster " +
+              "predates that or was built by hand.",
+          );
+        }
+      }
+      for (const p of plans) {
+        if (p.expose && !p.exposeMode) p.exposeMode = auto;
+      }
+    }
+
     // Only when the cluster ref couldn't be resolved does the CD fall back to
     // the KUBECONFIG_B64 secret — EKS/GKE/AKS are otherwise all keyless.
     const needsSecretFallback =
@@ -519,7 +764,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
         }
       }
     }
-    for (const { svc, imageName, expose, host } of plans) {
+    for (const { svc, imageName, expose, host, exposeMode } of plans) {
       const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
       // Combined mode uses one shared cd.yml across all services; per-service
       // mode uses deploy-<name>.yml per service.
@@ -548,11 +793,18 @@ export const deployMyAppTool: Tool<Input, Output> = {
         context: svc.path,
         cdWorkflowName,
         cdFileName: cdWorkflowFile,
+        // Flips the image tag to :<git-sha> and adds the bump-and-commit job
+        // that Argo watches for. See CicdPipelineSpec.gitops.
+        gitops: useArgo,
+        autoDeployOnPush: input.autoDeployOnPush === true,
         include: {
           dockerfile: !keepDockerfile,
           nginx: needsNginxConf || !keepDockerfile,
           compose: !keepDockerfile,
-          cdWorkflow: true,
+          // GitOps: NO CD workflow. Argo owns cluster state; a workflow doing
+          // `kubectl apply` would be reverted by Argo's selfHeal, and the two
+          // would flap against each other on every push.
+          cdWorkflow: !useArgo,
         },
         deploy: {
           appName,
@@ -560,14 +812,51 @@ export const deployMyAppTool: Tool<Input, Output> = {
           replicas: Math.max(1, input.replicas ?? 1),
           containerPort: svc.port,
           env: [],
+          // Declare the conventional config secrets in the MANIFEST rather than
+          // patching them onto the live Deployment afterwards.
+          //
+          // WHY (2026-07 incident): the Connections page wrote `app-db`, someone
+          // ran `kubectl patch ... envFrom`, and the next CD run re-applied this
+          // generated manifest — which had no envFrom — silently stripping the
+          // wiring. The app came back up with no DATABASE_URL and the failure
+          // looked like a database outage.
+          //
+          // Both are `optional: true`, so a service deployed before any database
+          // is connected still schedules normally; the moment the Secret exists,
+          // the next roll picks it up.
+          //   app-db  — DATABASE_URL + DB_* (written by the Connections page)
+          //   app-env — application config/secrets (APP_SECRET_KEY, JWT keys, …)
+          envFromSecrets: [
+            { name: "app-db", optional: true },
+            { name: "app-env", optional: true },
+          ],
           expose,
           host,
-          // Type LoadBalancer so a fresh cluster (private-node EKS, or any
-          // cluster without an ingress controller pre-installed) gets an
-          // externally-reachable endpoint without extra setup. AWS gets NLB +
-          // dualstack annotations so IPv6-preferred networks can connect —
-          // otherwise Classic ELB (IPv4-only) silently strands v6-first users.
-          serviceType: "LoadBalancer" as const,
+          exposeMode,
+          // Ship the scrape config WITH the app. The Observability page shows
+          // request-rate / latency / 5xx cards unconditionally; without a
+          // ServiceMonitor they stay "—" forever and the UI lies about what it
+          // can show. Gated on the CRD actually existing (see canScrapeMetrics).
+          scrapeMetrics: canScrapeMetrics,
+          metricsPort: "http",
+          metricsPath: "/metrics",
+          // Service type derived from the user's load-balancer choice:
+          //   expose=false        → ClusterIP  (internal only; the frontend
+          //                         reaches it at svc.<ns>.svc.cluster.local,
+          //                         saving ~$18/mo on a needless LB)
+          //   'alb' | 'ingress'   → ClusterIP  (an Ingress fronts the Service;
+          //                         the ALB/nginx controller targets pod IPs)
+          //   'nodeport'          → NodePort   (no LB at all; reachable at
+          //                         <node-public-ip>:<nodePort>)
+          //   'nlb' | 'classic'   → LoadBalancer (annotations, or lack of
+          //                         them, decide NLB vs Classic ELB)
+          serviceType: !expose
+            ? ("ClusterIP" as const)
+            : exposeMode === "ingress" || exposeMode === "alb"
+              ? ("ClusterIP" as const)
+              : exposeMode === "nodeport"
+                ? ("NodePort" as const)
+                : ("LoadBalancer" as const),
           cloud,
         },
         manifestDir,
@@ -973,6 +1262,70 @@ export const deployMyAppTool: Tool<Input, Output> = {
             commitSha: lastCommitSha,
             workflowPath: `.github/workflows/${d.workflowFile}`,
           });
+        }
+      }
+    }
+
+    // ── GitOps bootstrap ──────────────────────────────────────────────────
+    // Runs AFTER the manifests are committed, because the Argo Application
+    // points at a repo path that must already exist — pointing Argo at an
+    // empty path makes the first sync fail and the app show as Missing.
+    //
+    // Install is per-CLUSTER (reused when already present); the Application is
+    // per-SERVICE. The Application CR is applied server-side rather than only
+    // committed: it is the bootstrap that tells Argo to start watching at all,
+    // so a committed-but-unapplied file would do nothing.
+    if (useArgo) {
+      if (!envRow?.kubeconfigRef) {
+        cdNotes.push(
+          "[argocd] SKIPPED — this env has no connected cluster, so ArgoCD could not be installed. Connect a cluster, then redeploy.",
+        );
+      } else {
+        const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        const { tmpdir } = await import("node:os");
+        const dir = await mkdtemp(join(tmpdir(), "dda-argo-boot-"));
+        try {
+          const kcPath = join(dir, "config");
+          await writeFile(kcPath, decryptSecret(envRow.kubeconfigRef), { mode: 0o600 });
+          const execEnv = await kubeExecEnv(kcPath, envRow.cloudProvider?.id ?? null);
+
+          const install = await ensureArgoCd({ kubeconfigPath: kcPath, execEnv });
+          if (!install.ok) {
+            cdNotes.push(`[argocd] Install failed: ${install.error}`);
+          } else {
+            cdNotes.push(`[argocd] ${install.note}`);
+            const repoUrl = `https://github.com/${input.repoFullName}.git`;
+            const apps = deployed.map((d) =>
+              buildArgoApplication({
+                name: d.appName,
+                repoUrl,
+                branch,
+                path: multi ? `k8s/${input.envKey}/${d.name}` : `k8s/${input.envKey}`,
+                destinationNamespace: namespace,
+              }),
+            );
+            const applied = await applyArgoApplications({
+              kubeconfigPath: kcPath,
+              execEnv,
+              manifests: apps,
+            });
+            if (applied.ok) {
+              cdNotes.push(
+                `[argocd] ${applied.applied} Application(s) created and watching ${repoUrl} @ ${branch}. ` +
+                  "Every push now deploys: CI builds + commits the new image tag, Argo syncs that commit.",
+              );
+              cdNotes.push(`[argocd] UI → ${argoAccessInstructions(install.adminPassword)}`);
+            } else {
+              cdNotes.push(`[argocd] Could not create the Application: ${applied.error}`);
+            }
+          }
+        } catch (e) {
+          cdNotes.push(
+            `[argocd] Bootstrap error: ${e instanceof Error ? e.message : "unknown"}`,
+          );
+        } finally {
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
         }
       }
     }

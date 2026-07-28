@@ -66,7 +66,8 @@ type BaseStep = {
 export type ListField = {
   key: string;
   label: string;
-  kind: "text" | "select";
+  /** `number` renders like text but validates as integer + strips non-digits on blur. */
+  kind: "text" | "number" | "select";
   mono?: boolean;
   placeholder?: string;
   options?: (c: StepCtx) => Opt[];
@@ -86,7 +87,10 @@ export type Step =
       placeholder?: string;
       mono?: boolean;
       default?: (c: StepCtx) => string;
-      validate?: (v: string, a: Answers) => string | null;
+      /** `c` exposes live cloud inventory (c.sources) so a field can reject a
+       *  value that collides with something already in the account — catching
+       *  it here instead of 11 minutes into a doomed terraform apply. */
+      validate?: (v: string, a: Answers, c: StepCtx) => string | null;
     })
   | (BaseStep & {
       kind: "choice";
@@ -112,6 +116,11 @@ export type Step =
       fields: ListField[];
       addLabel?: string; // "+ Add user"
       max?: number;
+      /** JSON-stringified initial rows (e.g. `[{name:"...", ...}]`) so the list
+       *  can start pre-populated with 1+ default rows instead of empty. */
+      default?: (c: StepCtx) => string;
+      /** When true, blocks Next until at least one row is filled. */
+      required?: boolean;
     });
 
 export type ClusterChatConfig = {
@@ -273,7 +282,9 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
     if (s.kind === "choice") return v === undefined ? "Choose one." : null;
     if (s.kind === "info") return null;
     if (s.kind === "list") {
-      for (const row of parseListRows(v)) {
+      const rows = parseListRows(v);
+      if (s.required && rows.length === 0) return "Add at least one.";
+      for (const row of rows) {
         for (const f of s.fields) {
           const err = f.validate?.(String(row[f.key] ?? "").trim());
           if (err) return err;
@@ -284,12 +295,12 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
     if (s.kind === "number") {
       const n = Number(v);
       if (!Number.isFinite(n)) return "Enter a number.";
-      return s.validate?.(String(v), values) ?? null;
+      return s.validate?.(String(v), values, ctx) ?? null;
     }
     // text
     const t = String(v ?? "").trim();
     if (!t && !s.optional) return "Required.";
-    return s.validate?.(t, values) ?? null;
+    return s.validate?.(t, values, ctx) ?? null;
   }
 
   function validatePage(p: number): boolean {
@@ -715,6 +726,7 @@ function FieldControl({
                     />
                   ) : (
                     <Input
+                      type={f.kind === "number" ? "number" : "text"}
                       className={f.mono ? "mono" : undefined}
                       value={row[f.key] ?? ""}
                       placeholder={f.placeholder}
