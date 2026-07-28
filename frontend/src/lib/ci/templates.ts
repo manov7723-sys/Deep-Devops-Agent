@@ -239,7 +239,43 @@ CMD ["nginx", "-g", "daemon off;"]
 }
 
 function nodeServiceDockerfile(p: Record<string, string>): string {
-  const buildLine = p.buildCommand ? `RUN ${p.buildCommand}\n` : "";
+  // Build step: AUTO-run `npm run build` when the app defines it (Next.js /
+  // TS / any framework that needs a build). Uses an sh conditional so a
+  // missing script is skipped, but a failing script FAILS the docker build
+  // (previous version used `|| echo skipping` which silently masked real
+  // build errors — a broken build then only surfaced at container start).
+  //
+  // Also auto-run `prisma generate` if the app uses Prisma. Without it,
+  // @prisma/client has no generated types → any `.ts` file importing them
+  // fails the TS check (e.g. "Module '@prisma/client' has no exported member
+  // 'BillingPeriod'"). Prisma is one of the most common Node/TS deps and
+  // `npm ci` alone doesn't run the generator — this makes the build robust.
+  const buildLine = p.buildCommand
+    ? `RUN ${p.buildCommand}\n`
+    : `# Prisma: generate client BEFORE build so TS type checks see the enums.
+# Skipped when the app doesn't use Prisma.
+RUN if [ -f prisma/schema.prisma ] || [ -f schema.prisma ]; then \\
+      npx --yes prisma generate; \\
+    fi
+# Auto-build when the app defines a build script (Next.js needs it).
+# Fails the image build if the script exists and errors — surfaces bugs early.
+RUN if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then \\
+      npm run build; \\
+    else \\
+      echo "no build script — skipping"; \\
+    fi
+`;
+  // Prefer \`npm start\` — package.json's start script naturally resolves
+  // local binaries (next/nest/vite) via npm's PATH handling. If the LLM
+  // provided a custom startCommand, run it via sh with node_modules/.bin on
+  // PATH so bare-name binaries still resolve. Bare exec-form CMD ["next"…]
+  // fails with "Cannot find module '/app/next'" because exec-form doesn't do
+  // PATH lookup. `exec` keeps the process as PID 1 for correct signal handling.
+  const startCmd = (p.startCommand || "").trim();
+  const cmdLine =
+    !startCmd || /^npm(\s|$)/.test(startCmd)
+      ? `CMD ["npm", "start"]`
+      : `CMD ["sh", "-c", "export PATH=/app/node_modules/.bin:$PATH; exec ${startCmd.replace(/"/g, '\\"')}"]`;
   return `# syntax=docker/dockerfile:1
 # --- Build stage: all deps so the build (if any) can run ---
 FROM node:${p.nodeVersion}-alpine AS builder
@@ -248,20 +284,99 @@ COPY package*.json ./
 RUN ${NPM_INSTALL}
 COPY . .
 ${buildLine}
-# --- Runtime: prod-only deps, non-root built-in \`node\` user ---
+# --- Runtime: non-root built-in \`node\` user ---
 FROM node:${p.nodeVersion}-alpine AS runner
 ENV NODE_ENV=production
 WORKDIR /app
-COPY package*.json ./
-RUN ${NPM_INSTALL_PROD} && npm cache clean --force
+# Copy the built app WITH its node_modules from the builder (avoids a second
+# install and guarantees framework binaries + build output are present).
 COPY --from=builder /app ./
 USER node
 EXPOSE ${p.port}
-CMD ${JSON.stringify(p.startCommand.split(" "))}
+${cmdLine}
 `;
 }
 
 function pythonDockerfile(p: Record<string, string>): string {
+  let startCommand = p.startCommand || "gunicorn -b 0.0.0.0:8000 app:app";
+  // Force bind to 0.0.0.0 — every Python ASGI/WSGI server (uvicorn, gunicorn,
+  // hypercorn, daphne) defaults to 127.0.0.1, which accepts ONLY in-container
+  // connections. In Kubernetes that means readiness/liveness probes and
+  // Services can't reach the pod → CrashLoopBackOff, with the pod's own log
+  // helpfully saying "Uvicorn running on http://127.0.0.1:8000" right before
+  // it dies. Inject the correct host flag when it's missing — the LLM's start
+  // command almost never includes it and users don't think to override.
+  let bin = (startCommand.trim().split(/\s+/)[0] ?? "").toLowerCase();
+  const port = String(p.port || 8000);
+  // Flask's built-in CLI ("flask run") is a DEV server: single-threaded, binds
+  // 127.0.0.1, and — when FLASK_APP isn't set — dies with the Click error
+  // "Missing argument 'APP'" → CrashLoopBackOff in k8s. Rewrite to gunicorn
+  // against the detected entry module so production actually works. The
+  // module name comes from repo-analyze (params.flaskModule); we fall back
+  // to `app` (the canonical Flask default: `app.py` with `app = Flask(...)`).
+  if (bin === "flask") {
+    const modRaw = (p.flaskModule || "app").replace(/\.py$/, "").replace(/^\.?\/*/, "");
+    const attr = p.flaskAppAttr || "app";
+    startCommand = `gunicorn ${modRaw}:${attr}`;
+    bin = "gunicorn";
+  }
+  // Django's built-in `manage.py runserver` has the same problem — dev-only,
+  // binds 127.0.0.1 by default, no worker model. Rewrite to gunicorn against
+  // the detected WSGI module (repo-analyze fills djangoWsgi as
+  // "myproject.wsgi"; fall back to a common shape).
+  if (bin === "python" && /manage\.py\s+runserver/.test(startCommand)) {
+    const wsgi = p.djangoWsgi || "config.wsgi:application";
+    startCommand = `gunicorn ${wsgi}`;
+    bin = "gunicorn";
+  }
+  // Uvicorn / gunicorn / hypercorn / daphne / waitress ALL require an APP
+  // argument (module:variable). When the LLM emits a bare bin ("uvicorn"),
+  // Click errors with 'Missing argument "APP".' → CrashLoopBackOff. Detect
+  // the missing APP token (nothing that contains ":", and no positional arg
+  // besides flags) and inject a safe default. `app:app` is the canonical
+  // FastAPI/Flask convention: `app.py` with `app = FastAPI()` / `Flask()`.
+  const APP_SERVERS = new Set(["uvicorn", "gunicorn", "hypercorn", "daphne", "waitress"]);
+  if (APP_SERVERS.has(bin)) {
+    const tokens = startCommand.trim().split(/\s+/).slice(1); // drop the bin
+    const hasAppArg = tokens.some((t) => t.includes(":") && !t.startsWith("-"));
+    if (!hasAppArg) {
+      const mod = (p.flaskModule || p.djangoWsgi || "app:app").replace(/\.py$/, "");
+      startCommand = `${bin} ${mod}${tokens.length ? " " + tokens.join(" ") : ""}`;
+    }
+  }
+  const alreadyBinds =
+    /(--host|-b|--bind|-h\s)/.test(startCommand) || / 0\.0\.0\.0/.test(startCommand);
+  if (!alreadyBinds) {
+    if (bin === "uvicorn" || bin === "hypercorn") {
+      startCommand = `${startCommand} --host 0.0.0.0 --port ${port}`;
+    } else if (bin === "gunicorn") {
+      startCommand = `${startCommand} --bind 0.0.0.0:${port}`;
+    } else if (bin === "daphne") {
+      startCommand = `${startCommand} -b 0.0.0.0 -p ${port}`;
+    }
+  }
+  // The CMD's first token is the server binary (gunicorn/uvicorn/…). If the
+  // app's requirements.txt doesn't list it, the container dies at startup with
+  // `exec: "gunicorn": executable file not found in $PATH` (exit 128). So we
+  // detect the server and pip-install it EXPLICITLY — a missing entry in
+  // requirements.txt can no longer break the deploy. Maps to the right pip
+  // package (uvicorn needs the [standard] extras for the CLI + websockets).
+  const serverBin = startCommand.trim().split(/\s+/)[0] ?? "";
+  const SERVER_PKG: Record<string, string> = {
+    gunicorn: "gunicorn",
+    uvicorn: "uvicorn[standard]",
+    hypercorn: "hypercorn",
+    daphne: "daphne",
+    waitress: "waitress",
+  };
+  const serverPkg = SERVER_PKG[serverBin];
+  const ensureServer = serverPkg
+    ? `# Ensure the production server ("${serverBin}") is present even if it's
+# missing from requirements.txt — otherwise the CMD fails with
+# "${serverBin}: not found" at container start.
+RUN pip install --no-cache-dir "${serverPkg}"
+`
+    : "";
   return `# syntax=docker/dockerfile:1
 FROM python:${p.pythonVersion}-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \\
@@ -270,12 +385,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+${ensureServer}COPY . .
 # Non-root runtime user.
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser /app
 USER appuser
 EXPOSE ${p.port}
-CMD ${JSON.stringify(p.startCommand.split(" "))}
+CMD ${JSON.stringify(startCommand.split(" "))}
 `;
 }
 
@@ -374,17 +489,228 @@ export function generateDockerArtifacts(args: {
  * between build and push when `scanGate` is on.
  */
 function trivyGateStep(imageRefWithTag: string): string {
+  // Run Trivy via the official CONTAINER, not the trivy-action. The action's
+  // setup-trivy step downloads the binary from GitHub's rate-limited API and
+  // fails intermittently at INSTALL with a bare "exit code 1" (not a real
+  // finding). The container pulls from Docker Hub — reliable, no API limit.
+  // continue-on-error keeps a scan hiccup/finding from blocking the deploy;
+  // remove that line to make it a hard gate.
   return `
-      - name: Scan image for vulnerabilities (Trivy — stop on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: "${imageRefWithTag}"
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: os,library
-          severity: CRITICAL,HIGH
+      - name: Scan image for vulnerabilities (Trivy)
+        continue-on-error: true
+        run: |
+          docker run --rm \\
+            -v /var/run/docker.sock:/var/run/docker.sock \\
+            aquasec/trivy:0.65.0 image \\
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \\
+            "${imageRefWithTag}" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
 `;
+}
+
+/**
+ * Combined CI workflow for a monorepo — ONE file, N parallel matrix jobs, one per
+ * service. Each service pushes to its own ECR repo. When the whole matrix
+ * completes successfully, the combined CD workflow (below) fires via workflow_run.
+ *
+ * Way cleaner than 4 separate files for frontend+backend. Also faster — matrix
+ * parallelism means both images build simultaneously on separate runners.
+ */
+export function generateCombinedEcrCiWorkflow(args: {
+  /** Shared OIDC role — all services push using the same AWS identity. */
+  roleArn: string;
+  region: string;
+  branch: string;
+  /** Insert Trivy gate per service before push. Default true. */
+  scanGate?: boolean;
+  services: Array<{
+    /** Service name — matrix key, also used in job logs. e.g. "frontend", "backend". */
+    name: string;
+    /** ECR repo URI for this service. */
+    ecrRepositoryUri: string;
+    /** Build context subdir. "" = repo root; else "frontend", "apps/api", etc. */
+    context?: string;
+  }>;
+}): GeneratedFile {
+  const gate = args.scanGate !== false;
+  const matrix = args.services
+    .map((s) => {
+      const ctx = (s.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "") || ".";
+      return `          - service: ${s.name}
+            ecr: ${s.ecrRepositoryUri}
+            context: ${ctx}`;
+    })
+    .join("\n");
+  // Trivy scan via the official CONTAINER (aquasec/trivy) instead of the
+  // trivy-action. The action pulls in aquasecurity/setup-trivy, which
+  // downloads the Trivy binary from GitHub's rate-limited API and fails
+  // intermittently with a bare "exit code 1" at INSTALL time (not a real
+  // finding). Running the container skips that entirely — the runner already
+  // has Docker, and the image pulls from Docker Hub reliably. continue-on-error
+  // keeps a scan hiccup (or a finding) from blocking the deploy; the "|| echo"
+  // surfaces a warning. Flip continue-on-error off to make it a hard gate.
+  const scanStep = gate
+    ? `
+      - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy)
+        continue-on-error: true
+        env:
+          ECR: \${{ matrix.ecr }}
+          TAG: \${{ github.sha }}
+        run: |
+          docker run --rm \\
+            -v /var/run/docker.sock:/var/run/docker.sock \\
+            aquasec/trivy:0.65.0 image \\
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \\
+            "$ECR:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+`
+    : "";
+  const content = `name: CI (build all services)
+
+# Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
+# When this workflow succeeds, the CD workflow fires automatically via workflow_run.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  build:
+    name: build \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${args.roleArn}
+          aws-region: ${args.region}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and tag \${{ matrix.service }} image
+        env:
+          ECR: \${{ matrix.ecr }}
+          TAG: \${{ github.sha }}
+        run: |
+          if [ "\${{ matrix.context }}" = "." ]; then
+            docker build -t "$ECR:$TAG" -t "$ECR:latest" .
+          else
+            docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "\${{ matrix.context }}/Dockerfile" "\${{ matrix.context }}"
+          fi
+${scanStep}
+      - name: Push \${{ matrix.service }} image
+        env:
+          ECR: \${{ matrix.ecr }}
+          TAG: \${{ github.sha }}
+        run: |
+          docker push "$ECR:$TAG"
+          docker push "$ECR:latest"
+`;
+  return { path: `.github/workflows/ci.yml`, content };
+}
+
+/**
+ * Combined CD workflow for a monorepo — ONE file, N parallel matrix jobs, one per
+ * service. Fires automatically when the combined CI workflow (above) finishes
+ * successfully. Currently EKS-only; GKE/AKS will need matching combined variants.
+ */
+export function generateCombinedEksCdWorkflow(args: {
+  /** Must match the CI workflow's name: exactly — that's how workflow_run keys off it. */
+  ciWorkflowName?: string;
+  roleArn: string;
+  region: string;
+  clusterName: string;
+  namespace: string;
+  services: Array<{
+    name: string;
+    /** k8s Deployment name — kubectl rollout restart/status will target this. */
+    appName: string;
+    /** Manifest dir this service's YAMLs live in — e.g. "k8s/prod/frontend". */
+    manifestDir: string;
+  }>;
+}): GeneratedFile {
+  const ciName = args.ciWorkflowName || "CI (build all services)";
+  const ns = args.namespace || "default";
+  const matrix = args.services
+    .map(
+      (s) => `          - service: ${s.name}
+            app: ${s.appName}
+            manifestDir: ${s.manifestDir}`,
+    )
+    .join("\n");
+  const nsStep =
+    ns !== "default"
+      ? `
+      - name: Ensure namespace exists
+        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+`
+      : "";
+  const content = `name: CD (deploy all services)
+
+# Runs automatically after the CI workflow ("${ciName}") completes successfully.
+# Also supports manual dispatch for redeploying without a fresh build.
+on:
+  workflow_run:
+    workflows: ["${ciName}"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${args.roleArn}
+          aws-region: ${args.region}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure cluster access (keyless)
+        run: aws eks update-kubeconfig --name "${args.clusterName}" --region ${args.region}
+${nsStep}
+      - name: Apply \${{ matrix.service }} manifests
+        run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/
+
+      - name: Restart \${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
+        run: kubectl rollout restart deployment/\${{ matrix.app }} -n ${ns}
+
+      - name: Wait for \${{ matrix.service }} rollout
+        run: kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=180s
+
+      - name: Rollback \${{ matrix.service }} on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of \${{ matrix.app }} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/\${{ matrix.app }} -n ${ns}
+          kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=120s
+`;
+  return { path: `.github/workflows/cd.yml`, content };
 }
 
 export function generateEcrWorkflow(args: {

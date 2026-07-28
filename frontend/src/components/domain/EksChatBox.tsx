@@ -157,40 +157,6 @@ const STEPS: Step[] = [
   },
   {
     page: 2,
-    kind: "select",
-    key: "instanceType",
-    label: "Node instance type",
-    options: (c) => strList(c, "instanceTypes", ["t3.medium"]).map((t) => ({ value: t, label: t })),
-  },
-  {
-    page: 2,
-    kind: "number",
-    key: "desiredNodes",
-    label: "Desired nodes",
-    default: () => "2",
-    validate: (v) => (Number(v) >= 1 ? null : "At least 1 node."),
-  },
-  {
-    page: 2,
-    kind: "number",
-    key: "minNodes",
-    label: "Min nodes",
-    default: () => "1",
-    validate: (v, a) =>
-      Number(v) >= 1 && Number(v) <= Number(a.desiredNodes)
-        ? null
-        : "Min must be ≥ 1 and ≤ desired.",
-  },
-  {
-    page: 2,
-    kind: "number",
-    key: "maxNodes",
-    label: "Max nodes",
-    default: () => "3",
-    validate: (v, a) => (Number(v) >= Number(a.desiredNodes) ? null : "Max must be ≥ desired."),
-  },
-  {
-    page: 2,
     kind: "choice",
     key: "endpointPublic",
     label: "API endpoint",
@@ -269,74 +235,93 @@ const STEPS: Step[] = [
       { value: false, label: "Disabled" },
     ],
   },
-  // ── Page 4 · Node groups ─────────────────────────────────────────────
+  // ── Page 4 · Node groups — AWS-console-style. One row per node group,
+  //   with "+ Add another node group" to create additional pools. Users can
+  //   create a single group (the common case) or split into system+app+gpu+…
+  //   without leaving the wizard. Each row maps 1:1 to an
+  //   `eks_managed_node_groups` entry in the generated Terraform.
+  //   ────────────────────────────────────────────────────────────────────
   {
     page: 4,
-    kind: "select",
-    key: "systemDiskSize",
-    label: "System node disk (GB)",
-    options: (c) =>
-      (strList(c, "diskSizes", ["50", "100", "150", "200"]) as unknown[]).map((d) => ({
-        value: String(d),
-        label: `${d} GB`,
-      })),
-    default: () => "100",
-  },
-  {
-    page: 4,
-    kind: "choice",
-    key: "appNodeGroup",
-    label: "Application node group",
-    hint: "Add a second autoscaling node group for app workloads (system group gets tainted for critical add-ons).",
-    choices: [
-      { value: true, label: "Add app node group" },
-      { value: false, label: "System group only" },
+    kind: "list",
+    key: "nodeGroups",
+    label: "Node groups",
+    hint: "Every row becomes a managed node group in EKS. Start with one; click Add for more (e.g. a Spot pool for batch jobs).",
+    addLabel: "+ Add another node group",
+    max: 6,
+    required: true,
+    // One pre-populated row so the wizard has a working default out of the box.
+    default: (c) =>
+      JSON.stringify([
+        {
+          name: `${String(c.answers.name ?? "cluster")}-workers`,
+          instanceType: strList(c, "instanceTypes", ["t3.medium"])[0] ?? "t3.medium",
+          capacityType: "ON_DEMAND",
+          minNodes: "1",
+          desiredNodes: "2",
+          maxNodes: "3",
+          diskSize: "100",
+        },
+      ]),
+    fields: [
+      {
+        key: "name",
+        label: "Name",
+        kind: "text",
+        placeholder: "workers",
+        validate: (v) =>
+          /^[a-z][a-z0-9-]{0,62}$/.test(v)
+            ? null
+            : "Lowercase letters, digits and hyphens; start with a letter.",
+      },
+      {
+        key: "instanceType",
+        label: "Instance type",
+        kind: "select",
+        options: (c) =>
+          strList(c, "instanceTypes", ["t3.medium"]).map((t) => ({ value: t, label: t })),
+      },
+      {
+        key: "capacityType",
+        label: "Capacity",
+        kind: "select",
+        options: () => [
+          { value: "ON_DEMAND", label: "On-Demand" },
+          { value: "SPOT", label: "Spot" },
+        ],
+      },
+      {
+        key: "minNodes",
+        label: "Min",
+        kind: "number",
+        placeholder: "1",
+        validate: (v) => (Number(v) >= 1 ? null : "≥ 1"),
+      },
+      {
+        key: "desiredNodes",
+        label: "Desired",
+        kind: "number",
+        placeholder: "2",
+        validate: (v) => (Number(v) >= 1 ? null : "≥ 1"),
+      },
+      {
+        key: "maxNodes",
+        label: "Max",
+        kind: "number",
+        placeholder: "3",
+        validate: (v) => (Number(v) >= 1 ? null : "≥ 1"),
+      },
+      {
+        key: "diskSize",
+        label: "Disk (GB)",
+        kind: "select",
+        options: (c) =>
+          (strList(c, "diskSizes", ["50", "100", "150", "200"]) as unknown[]).map((d) => ({
+            value: String(d),
+            label: `${d} GB`,
+          })),
+      },
     ],
-  },
-  {
-    page: 4,
-    kind: "multiselect",
-    key: "appInstanceTypes",
-    label: "App node instance types",
-    hint: "Pick one or more (mixed instances improve Spot availability).",
-    skip: (a) => a.appNodeGroup !== true,
-    options: (c) => strList(c, "instanceTypes", ["m5.large"]).map((t) => ({ value: t, label: t })),
-  },
-  {
-    page: 4,
-    kind: "choice",
-    key: "appCapacityType",
-    label: "App capacity type",
-    skip: (a) => a.appNodeGroup !== true,
-    choices: [
-      { value: "SPOT", label: "Spot (cost-saving)" },
-      { value: "ON_DEMAND", label: "On-Demand" },
-    ],
-  },
-  {
-    page: 4,
-    kind: "number",
-    key: "appMinNodes",
-    label: "App min nodes",
-    default: () => "2",
-    skip: (a) => a.appNodeGroup !== true,
-  },
-  {
-    page: 4,
-    kind: "number",
-    key: "appMaxNodes",
-    label: "App max nodes",
-    default: () => "20",
-    skip: (a) => a.appNodeGroup !== true,
-    validate: (v, a) => (Number(v) >= Number(a.appMinNodes ?? 1) ? null : "Max must be ≥ min."),
-  },
-  {
-    page: 4,
-    kind: "number",
-    key: "appDesiredNodes",
-    label: "App desired nodes",
-    default: () => "3",
-    skip: (a) => a.appNodeGroup !== true,
   },
   // ── Page 5 · Access ───────────────────────────────────────────────────
   {
@@ -347,14 +332,33 @@ const STEPS: Step[] = [
     text: (c) => {
       const src = c.sources?.connectedRole as AwsConnectedRoleSource | undefined;
       if (!src?.connected)
-        return "Deep Agent's connected AWS account will get cluster-admin automatically once the cluster is created — no action needed.";
+        return "Deep Agent's connected AWS account will get cluster-admin automatically once the cluster is created. If your connected credentials are an IAM USER (not a role), that user will ALSO be auto-added so you can view this cluster in the AWS console.";
       const who = src.roleArn
         ? src.roleArn
         : src.providerName
           ? `${src.providerName} (stored keys)`
           : "your connected AWS account";
-      return `Deep Agent already gets cluster-admin automatically via ${who} — no need to add it below.`;
+      return `Deep Agent already gets cluster-admin automatically via ${who}. If the stored credentials are an IAM USER's, that user will ALSO be added so you can view the cluster in the AWS console — no need to paste an ARN below unless you want to add teammates.`;
     },
+  },
+  {
+    page: 5,
+    kind: "info",
+    key: "iamUserInfo",
+    label: "IAM user access — automatic",
+    text: () =>
+      "The IAM user whose access keys you gave to DeepAgent is ALWAYS granted cluster admin (Terraform enables `enable_cluster_creator_admin_permissions`). You never need a separate toggle for it. If you sign into the AWS Console with that IAM user, everything already works.",
+  },
+  {
+    page: 5,
+    kind: "choice",
+    key: "grantRootAccess",
+    label: "Grant access to the AWS account root user",
+    hint: "Adds arn:aws:iam::<accountId>:root to the cluster's Access Entries. Tick this if you sign into the AWS Console with your account email + password (root). You can tick BOTH this and the IAM-user option above — pick whichever you use in the browser (or both if you switch between them).",
+    choices: [
+      { value: false, label: "No — I don't sign in as root" },
+      { value: true, label: "Yes — grant access to the root user" },
+    ],
   },
   {
     page: 5,
@@ -418,7 +422,7 @@ const EKS_CONFIG: ClusterChatConfig = {
   applyEta: "~15–20 min",
   pageTitles: [
     "Networking",
-    "Cluster basics",
+    "Cluster & endpoint",
     "Security & tags",
     "Node groups",
     "Access",
@@ -440,14 +444,37 @@ const EKS_CONFIG: ClusterChatConfig = {
     },
   ],
   steps: STEPS,
-  buildBody: (a) => ({
+  buildBody: (a) => {
+    // Parse the node-groups list and normalize each row. First row becomes
+    // the request's required legacy fields (instanceType/desiredNodes/…) so
+    // the API contract stays back-compat; the full array is sent alongside
+    // as `nodeGroups` for multi-pool clusters.
+    const rows = parseListRows(a.nodeGroups).map((r) => ({
+      name: String(r.name ?? "").trim(),
+      instanceType: String(r.instanceType ?? "t3.medium").trim() || "t3.medium",
+      capacityType: r.capacityType === "SPOT" ? ("SPOT" as const) : ("ON_DEMAND" as const),
+      minNodes: Math.max(1, Number(r.minNodes) || 1),
+      desiredNodes: Math.max(1, Number(r.desiredNodes) || 1),
+      maxNodes: Math.max(1, Number(r.maxNodes) || 1),
+      diskSize: Math.max(20, Number(r.diskSize) || 100),
+    }));
+    const first = rows[0] ?? {
+      name: `${String(a.name ?? "cluster")}-workers`,
+      instanceType: "t3.medium",
+      capacityType: "ON_DEMAND" as const,
+      minNodes: 1,
+      desiredNodes: 2,
+      maxNodes: 3,
+      diskSize: 100,
+    };
+    return {
     name: String(a.name).trim(),
     region: String(a.region).trim(),
     kubernetesVersion: a.kubernetesVersion,
-    instanceType: a.instanceType,
-    desiredNodes: Number(a.desiredNodes),
-    minNodes: Number(a.minNodes),
-    maxNodes: Number(a.maxNodes),
+    instanceType: first.instanceType,
+    desiredNodes: first.desiredNodes,
+    minNodes: first.minNodes,
+    maxNodes: first.maxNodes,
     endpointPublic: a.endpointPublic !== false,
     envKey: a.envKey,
     createVpc: a.createVpc !== false,
@@ -474,25 +501,18 @@ const EKS_CONFIG: ClusterChatConfig = {
       a.endpointPublic !== false ? String(a.publicAccessCidrs ?? "0.0.0.0/0").trim() : undefined,
     controlPlaneLogs: a.controlPlaneLogs !== false,
     secretsEncryption: a.secretsEncryption !== false,
-    systemDiskSize: Number(a.systemDiskSize ?? 100),
+    systemDiskSize: first.diskSize,
     ebsCsi: a.ebsCsi !== false,
-    appNodeGroup: a.appNodeGroup === true,
-    appInstanceTypes:
-      a.appNodeGroup === true && String(a.appInstanceTypes ?? "").trim()
-        ? String(a.appInstanceTypes)
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : undefined,
-    appCapacityType:
-      a.appNodeGroup === true
-        ? a.appCapacityType === "ON_DEMAND"
-          ? "ON_DEMAND"
-          : "SPOT"
-        : undefined,
-    appMinNodes: a.appNodeGroup === true ? Number(a.appMinNodes ?? 2) : undefined,
-    appMaxNodes: a.appNodeGroup === true ? Number(a.appMaxNodes ?? 20) : undefined,
-    appDesiredNodes: a.appNodeGroup === true ? Number(a.appDesiredNodes ?? 3) : undefined,
+    // First row's name + capacity go into the console-style overrides so
+    // single-group clusters look identical to the previous flow.
+    nodeGroupName: first.name || undefined,
+    capacityType: first.capacityType,
+    // Multi-pool: send the full array. Backend generates one
+    // eks_managed_node_groups entry per row.
+    nodeGroups: rows,
+    // Legacy "system + application" pair is now expressed as two rows in
+    // nodeGroups[]. Keep off so we don't get an extra tainted group.
+    appNodeGroup: false,
     accessEntries: (() => {
       const entries = parseListRows(a.accessEntries)
         .map((r) => ({
@@ -502,7 +522,12 @@ const EKS_CONFIG: ClusterChatConfig = {
         .filter((e) => e.principalArn);
       return entries.length > 0 ? entries : undefined;
     })(),
-  }),
+    // Root toggle. Default FALSE — flip when the customer signs into the
+    // AWS Console as root. The connected IAM user is always admin via
+    // enable_cluster_creator_admin_permissions=true (no separate toggle).
+    grantRootAccess: a.grantRootAccess === true,
+    };
+  },
 };
 
 export function EksChatBox({ slug }: { slug: string }) {

@@ -918,6 +918,24 @@ export type SubmitRdsConnectInput = {
   engine?: "postgres" | "mysql";
   alsoStoreInAppSecret?: boolean;
   appSecretKey?: string;
+  /** RDS DBInstanceIdentifier + region. Supplying these lets the server check
+   *  and, if needed, open the RDS security group for the cluster's CURRENT node
+   *  security groups — which change on every cluster rebuild and are the usual
+   *  cause of "Can't reach database server" after one. */
+  dbInstanceIdentifier?: string;
+  region?: string;
+  /** OPT-IN, default false — both WRITE to the user's database, so neither
+   *  may be implied. createDatabase issues CREATE DATABASE when the target
+   *  is absent; runMigrations applies the app's schema migrations. */
+  createDatabase?: boolean;
+  runMigrations?: boolean;
+};
+
+/** One Deployment's envFrom-wiring outcome from POST /aws/rds-connect. */
+export type RdsWireOutcome = {
+  deployment: string;
+  status: "patched" | "already" | "failed";
+  message?: string;
 };
 
 export type SubmitRdsConnectResult = {
@@ -927,6 +945,37 @@ export type SubmitRdsConnectResult = {
   keysWritten?: string[];
   appSecretKey?: string | null;
   kubectl?: { command: string; stdout: string };
+  /** Per-Deployment results of injecting the Secret via envFrom.secretRef.
+   *  The route does this automatically — writing a Secret nothing consumes
+   *  leaves the app with no DATABASE_URL, which used to be a manual kubectl
+   *  step users skipped. */
+  wired?: RdsWireOutcome[];
+  /** Set when wiring could not run at all (no kubeconfig, no Deployments, …).
+   *  The Secret is still written when this is present. */
+  wireError?: string;
+  /** Result of the pre-flight security-group check. `changed: true` means an
+   *  inbound rule was created so the cluster's nodes can reach the DB — the
+   *  step that silently breaks after every cluster rebuild. */
+  network?: {
+    changed: boolean;
+    message: string;
+    /** "cidr" means the rule admits the whole cluster VPC — required for
+     *  inter-region peering, where AWS forbids security-group references. */
+    ruleKind: "security-group" | "cidr";
+    crossVpc: boolean;
+    crossRegion: boolean;
+    warnings: string[];
+  };
+  /** Set when the SG check could not run. The Secret is still written. */
+  networkError?: string;
+  /** Opt-in create-database / migrate results, in execution order. */
+  bootstrap?: Array<{
+    step: "create-database" | "migrate";
+    status: "done" | "skipped" | "failed";
+    message: string;
+  }>;
+  /** Human-readable roll-up the Connections panel renders under the banner. */
+  summary?: string;
   note?: string;
   manifest?: string; // returned on apply failure so the user can retry
   message?: string;

@@ -22,6 +22,8 @@
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import tls from "node:tls";
+import { createHash } from "node:crypto";
 import { runStage } from "@/lib/runner/exec";
 
 /** GitHub's OIDC issuer — the `url` of the IAM identity provider. */
@@ -29,14 +31,80 @@ const GITHUB_OIDC_ISSUER = "token.actions.githubusercontent.com";
 /** The audience GitHub mints tokens for when targeting AWS STS. */
 const GITHUB_OIDC_AUDIENCE = "sts.amazonaws.com";
 /**
- * GitHub's well-known certificate thumbprints. AWS no longer validates the
- * thumbprint for this library-backed IdP, but `create-open-id-connect-provider`
- * still requires the argument, so we pass the published values.
+ * FALLBACK thumbprints, only used if we can't fetch GitHub's live cert. When
+ * AWS validates the OIDC token via the "IAMTrustStore" method (which it does
+ * for providers it doesn't recognize as fully managed), it checks the token's
+ * signing cert against these thumbprints. GitHub ROTATES this cert — stale
+ * thumbprints cause "An unknown error occurred" → the workflow sees
+ * "Not authorized to perform sts:AssumeRoleWithWebIdentity". So the real
+ * source of truth is fetchGithubOidcThumbprints() below; these are the
+ * last-known-good values used only when the live fetch fails.
  */
-const GITHUB_OIDC_THUMBPRINTS = [
+const GITHUB_OIDC_THUMBPRINTS_FALLBACK = [
+  "2d74d6dfd96eea55ad7baafa0d3c6552b2dadc37",
   "6938fd4d98bab03faadb97b34396831e3780aea1",
   "1c58a3a8518e8759bf075b76b750d4f2df264fcd",
 ];
+
+/**
+ * Fetch GitHub's CURRENT OIDC signing-cert thumbprints by opening a TLS
+ * connection to the issuer and SHA1-fingerprinting each cert in the presented
+ * chain. AWS wants the fingerprint of an intermediate/root CA in the chain;
+ * we return ALL of them so whichever one AWS validates against is present.
+ * This is what makes the whole flow self-heal across GitHub cert rotations —
+ * no hardcoded thumbprint can go stale because we re-fetch on every setup.
+ */
+async function fetchGithubOidcThumbprints(): Promise<string[]> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v: string[]) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    try {
+      const socket = tls.connect(
+        443,
+        GITHUB_OIDC_ISSUER,
+        { servername: GITHUB_OIDC_ISSUER, rejectUnauthorized: false },
+        () => {
+          try {
+            const leaf = socket.getPeerCertificate(true);
+            const thumbs: string[] = [];
+            const seen = new Set<string>();
+            let c: tls.DetailedPeerCertificate | undefined = leaf;
+            // Walk the chain leaf → root, SHA1 each DER cert. Skip the leaf
+            // itself (AWS matches an intermediate/root), keep the rest.
+            let depth = 0;
+            while (c && c.raw && !seen.has(c.fingerprint)) {
+              seen.add(c.fingerprint);
+              if (depth > 0) {
+                thumbs.push(createHash("sha1").update(c.raw).digest("hex"));
+              }
+              const next: tls.DetailedPeerCertificate | undefined = c.issuerCertificate;
+              if (!next || next.fingerprint === c.fingerprint) break;
+              c = next;
+              depth++;
+            }
+            socket.end();
+            done(thumbs);
+          } catch {
+            socket.destroy();
+            done([]);
+          }
+        },
+      );
+      socket.on("error", () => done([]));
+      socket.setTimeout(8000, () => {
+        socket.destroy();
+        done([]);
+      });
+    } catch {
+      done([]);
+    }
+  });
+}
 
 export type GithubOidcSetupInput = {
   /** Ready-to-use AWS credential env from resolveAwsExecEnv(). */
@@ -45,8 +113,16 @@ export type GithubOidcSetupInput = {
   region: string;
   /** GitHub repo "owner/repo" — scopes the role's trust policy. */
   repoFullName: string;
-  /** ECR repository name to create/use (e.g. "my-api"). */
+  /** Primary ECR repository name to create/use (e.g. "my-api"). */
   ecrRepoName: string;
+  /**
+   * Additional ECR repositories to also grant push access on the SAME role.
+   * Used by the combined-workflow monorepo path — one role, one matrix, N
+   * services, N distinct ECR repos. Also each is created (idempotent) as
+   * part of this call. Without this, monorepo matrix jobs push to their own
+   * ECR using a role scoped to a DIFFERENT ECR → AccessDenied.
+   */
+  additionalEcrRepos?: string[];
   /** IAM role name to create/use (e.g. "gha-ecr-my-api"). */
   roleName: string;
   /**
@@ -124,6 +200,16 @@ export async function setupGithubOidcEcr(
       message: `Invalid ECR repository name "${input.ecrRepoName}".`,
     };
   }
+  const additionalEcrRepos = (input.additionalEcrRepos ?? []).filter((n) => n && n !== input.ecrRepoName);
+  for (const extra of additionalEcrRepos) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_./-]{1,255}$/.test(extra)) {
+      return {
+        ok: false,
+        code: "bad_input",
+        message: `Invalid ECR repository name "${extra}" (in additionalEcrRepos).`,
+      };
+    }
+  }
   if (!/^[A-Za-z0-9_+=,.@-]{1,64}$/.test(input.roleName)) {
     return { ok: false, code: "bad_input", message: `Invalid IAM role name "${input.roleName}".` };
   }
@@ -185,9 +271,40 @@ export async function setupGithubOidcEcr(
         stderr: tail(listProviders.stderr),
       };
     }
+    // Fetch GitHub's LIVE cert thumbprints. Falls back to last-known-good if
+    // the TLS fetch fails (offline/sandboxed). Merge live + fallback + dedupe
+    // so whichever cert AWS validates against is always present.
+    const liveThumbs = await fetchGithubOidcThumbprints();
+    const thumbprints = Array.from(
+      new Set([...liveThumbs, ...GITHUB_OIDC_THUMBPRINTS_FALLBACK]),
+    ).filter((t) => /^[0-9a-f]{40}$/.test(t));
+
     const providerExists = listProviders.stdout.includes(GITHUB_OIDC_ISSUER);
     if (providerExists) {
-      steps.push(`OIDC provider for ${GITHUB_OIDC_ISSUER} already present — reused.`);
+      // SELF-HEAL: the provider may have STALE thumbprints from when it was
+      // first created (GitHub rotates the cert). AWS then validates via
+      // IAMTrustStore against the old thumbprints and fails with "An unknown
+      // error occurred" → the workflow sees "Not authorized". Refresh the
+      // thumbprint list on every setup so a rotated cert never blocks a
+      // customer. This is the fix for the exact demo-blocker we hit.
+      const refresh = await aws(
+        [
+          "iam",
+          "update-open-id-connect-provider-thumbprint",
+          "--open-id-connect-provider-arn",
+          oidcProviderArn,
+          "--thumbprint-list",
+          ...thumbprints,
+        ],
+        awsEnv,
+        region,
+        workdir,
+      );
+      steps.push(
+        refresh.ok
+          ? `OIDC provider present — refreshed its cert thumbprints (${liveThumbs.length ? "live from GitHub" : "fallback"}) so a rotated GitHub cert can't block token validation.`
+          : `OIDC provider present — could NOT refresh thumbprints (${tail(refresh.stderr)}); if the CI OIDC step fails "Not authorized", the provider's thumbprint is stale.`,
+      );
     } else {
       const create = await aws(
         [
@@ -198,7 +315,7 @@ export async function setupGithubOidcEcr(
           "--client-id-list",
           GITHUB_OIDC_AUDIENCE,
           "--thumbprint-list",
-          ...GITHUB_OIDC_THUMBPRINTS,
+          ...thumbprints,
         ],
         awsEnv,
         region,
@@ -215,12 +332,45 @@ export async function setupGithubOidcEcr(
       }
       steps.push(
         create.ok
-          ? `Created OIDC provider for ${GITHUB_OIDC_ISSUER}.`
+          ? `Created OIDC provider for ${GITHUB_OIDC_ISSUER} (${liveThumbs.length ? "live" : "fallback"} thumbprints).`
           : "OIDC provider already existed.",
       );
     }
 
     // 2 — Trust policy: only this repo's Actions runs may assume the role.
+    // AWS StringLike is CASE-SENSITIVE; GitHub's OIDC `sub` uses GitHub's
+    // stored casing. If the repo was renamed (or attached with different
+    // casing than what's stored in Prisma), the trust check fails with
+    // exactly the "sts:AssumeRoleWithWebIdentity Not authorized" error
+    // we've seen. Belt-and-braces: match on both the exact case AND the
+    // lowercased form via ForAnyValue:StringLike, so a case drift on either
+    // side still passes. Also match with and without owner casing.
+    // `sub` is a SINGLE-valued claim, so plain StringLike with an ARRAY of
+    // values does the OR-match we want (matches if sub equals ANY entry).
+    // ForAnyValue: is ONLY for multi-valued keys and mis-behaves here — an
+    // earlier version used it and broke the match. Keep plain StringLike.
+    //
+    // We emit FOUR patterns per repo to cover every GitHub OIDC sub format:
+    //   1. standard:            repo:owner/repo:*
+    //   2. immutable (ID-suffixed): repo:owner@<orgId>/repo@<repoId>:*
+    //      — some orgs/enterprises enable the "immutable" subject claim which
+    //      embeds numeric org+repo IDs (e.g. repo:acme@123/app@456:ref:...).
+    //      The literal "owner/" can't match "owner@123/", so a plain pattern
+    //      silently fails with "Not authorized" — the exact demo-blocker we
+    //      hit. The @* wildcard covers the optional @<id> segment.
+    //   ×2 for exact-case AND lowercased owner/repo (StringLike is
+    //      case-sensitive; GitHub sends the repo's canonical casing).
+    const o = parsed.owner;
+    const r = parsed.repo;
+    const oLow = o.toLowerCase();
+    const rLow = r.toLowerCase();
+    const patterns = new Set<string>([
+      `repo:${o}/${r}:${subject}`,
+      `repo:${o}@*/${r}@*:${subject}`,
+      `repo:${oLow}/${rLow}:${subject}`,
+      `repo:${oLow}@*/${rLow}@*:${subject}`,
+    ]);
+    const subs = [...patterns];
     const trustPolicy = {
       Version: "2012-10-17",
       Statement: [
@@ -231,7 +381,7 @@ export async function setupGithubOidcEcr(
           Condition: {
             StringEquals: { [`${GITHUB_OIDC_ISSUER}:aud`]: GITHUB_OIDC_AUDIENCE },
             StringLike: {
-              [`${GITHUB_OIDC_ISSUER}:sub`]: `repo:${parsed.owner}/${parsed.repo}:${subject}`,
+              [`${GITHUB_OIDC_ISSUER}:sub`]: subs,
             },
           },
         },
@@ -314,6 +464,14 @@ export async function setupGithubOidcEcr(
     //     before it ever reaches cluster RBAC. EKS describe is read-only and
     //     account-scoped; cluster-side RBAC (Access Entries) is still required
     //     and gated separately by grant_eks_access.
+    // Push policy covers the primary ECR + every additional ECR (monorepo).
+    // AWS accepts an ARN array in Resource for cross-repo push — one Sid,
+    // one policy, one role. Also idempotent: re-runs re-write the policy
+    // with whatever set of ECRs the caller passes this time.
+    const allEcrRepos = [input.ecrRepoName, ...additionalEcrRepos];
+    const ecrArns = allEcrRepos.map(
+      (name) => `arn:aws:ecr:${region}:${accountId}:repository/${name}`,
+    );
     const permPolicy = {
       Version: "2012-10-17",
       Statement: [
@@ -335,7 +493,7 @@ export async function setupGithubOidcEcr(
             "ecr:BatchGetImage",
             "ecr:GetDownloadUrlForLayer",
           ],
-          Resource: `arn:aws:ecr:${region}:${accountId}:repository/${input.ecrRepoName}`,
+          Resource: ecrArns.length === 1 ? ecrArns[0] : ecrArns,
         },
         {
           Sid: "EksReadForKubeconfig",
@@ -372,22 +530,32 @@ export async function setupGithubOidcEcr(
     }
     steps.push(`Attached ECR push policy to ${input.roleName}.`);
 
-    // 4 — Ensure the ECR repository exists.
-    const describe = await aws(
-      ["ecr", "describe-repositories", "--repository-names", input.ecrRepoName],
-      awsEnv,
-      region,
-      workdir,
-    );
-    if (describe.ok) {
-      steps.push(`ECR repository ${input.ecrRepoName} already existed — reused.`);
-    } else if (describe.stderr.includes("RepositoryNotFoundException")) {
+    // 4 — Ensure each ECR repository (primary + additional) exists.
+    for (const repoName of allEcrRepos) {
+      const describe = await aws(
+        ["ecr", "describe-repositories", "--repository-names", repoName],
+        awsEnv,
+        region,
+        workdir,
+      );
+      if (describe.ok) {
+        steps.push(`ECR repository ${repoName} already existed — reused.`);
+        continue;
+      }
+      if (!describe.stderr.includes("RepositoryNotFoundException")) {
+        return {
+          ok: false,
+          code: "aws_error",
+          message: `ecr describe-repositories failed for ${repoName}.`,
+          stderr: tail(describe.stderr),
+        };
+      }
       const createRepo = await aws(
         [
           "ecr",
           "create-repository",
           "--repository-name",
-          input.ecrRepoName,
+          repoName,
           "--image-scanning-configuration",
           "scanOnPush=true",
           "--image-tag-mutability",
@@ -398,21 +566,39 @@ export async function setupGithubOidcEcr(
         workdir,
       );
       if (!createRepo.ok) {
-        return {
-          ok: false,
-          code: "aws_error",
-          message: "Could not create the ECR repository.",
-          stderr: tail(createRepo.stderr),
-        };
+        // Concurrent create race is benign — treat "already exists" as success.
+        if (!createRepo.stderr.includes("RepositoryAlreadyExistsException")) {
+          return {
+            ok: false,
+            code: "aws_error",
+            message: `Could not create ECR repository ${repoName}.`,
+            stderr: tail(createRepo.stderr),
+          };
+        }
       }
-      steps.push(`Created ECR repository ${input.ecrRepoName} (scan-on-push enabled).`);
-    } else {
-      return {
-        ok: false,
-        code: "aws_error",
-        message: "ecr describe-repositories failed.",
-        stderr: tail(describe.stderr),
-      };
+      steps.push(`Created ECR repository ${repoName} (scan-on-push enabled).`);
+    }
+
+    // 5 — Wait for the role to propagate before returning ok. AWS IAM/STS
+    // has a real 5-15s eventual-consistency window after create-role — if
+    // the user clicks "Run" on the GitHub workflow immediately, the very
+    // first AssumeRoleWithWebIdentity call gets "Not authorized" purely
+    // because the role isn't visible in STS yet. Poll get-role a few times.
+    // Skip when the role already existed pre-call (no propagation lag).
+    if (steps.some((s) => s.startsWith("Created IAM role"))) {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const check = await aws(
+          ["iam", "get-role", "--role-name", input.roleName],
+          awsEnv,
+          region,
+          workdir,
+        );
+        if (check.ok) {
+          steps.push(`IAM role visible after ~${(attempt + 1) * 3}s — safe to assume.`);
+          break;
+        }
+      }
     }
 
     return {

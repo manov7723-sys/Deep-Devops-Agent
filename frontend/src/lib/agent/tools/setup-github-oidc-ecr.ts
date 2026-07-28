@@ -8,7 +8,21 @@ type Input = {
   repoFullName: string;
   /** ECR repository name. Defaults to the repo's short name (lowercased). */
   ecrRepoName?: string;
-  /** IAM role name. Defaults to "gha-ecr-<ecrRepoName>". */
+  /**
+   * Extra ECR repository names to also grant push access to on the same IAM
+   * role — used by the combined-workflow (monorepo) path where one role
+   * matrix-builds N services into N distinct ECR repos. Without this the
+   * frontend matrix job would push its image using a role scoped only to
+   * the backend's ECR → AccessDenied on ecr:PutImage.
+   */
+  additionalEcrRepos?: string[];
+  /**
+   * IAM role name. Defaults to "gha-ecr-<owner>-<repo>-<ecrRepoName>"
+   * (truncated to 64) so two DIFFERENT GitHub repos that happen to share an
+   * ECR name don't collide on the SAME role — a collision silently rewrites
+   * the trust policy of the losing repo and causes exactly the
+   * "sts:AssumeRoleWithWebIdentity Not authorized" error we've seen.
+   */
   roleName?: string;
   /** AWS region for the ECR repo. Defaults to the connected account's region. */
   region?: string;
@@ -89,9 +103,16 @@ export const setupGithubOidcEcrTool: Tool<Input, Output> = {
         type: "string",
         description: "ECR repository name. Defaults to the repo's short name, lowercased.",
       },
+      additionalEcrRepos: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Extra ECR repository names to include in the SAME role's push policy. Use for monorepos where one role builds+pushes multiple images (frontend + backend). Without this, the matrix job pushing to the extra repo fails with AccessDenied.",
+      },
       roleName: {
         type: "string",
-        description: 'IAM role name. Defaults to "gha-ecr-<ecrRepoName>".',
+        description:
+          'IAM role name. Defaults to "gha-ecr-<owner>-<repo>-<ecrRepoName>" (repo-qualified so two GitHub repos with the same ECR name don\'t stomp on each other\'s trust policy).',
       },
       region: {
         type: "string",
@@ -135,13 +156,25 @@ export const setupGithubOidcEcrTool: Tool<Input, Output> = {
     const ecrRepoName = (
       input.ecrRepoName?.trim() || defaultEcrName(input.repoFullName)
     ).toLowerCase();
-    const roleName = input.roleName?.trim() || `gha-ecr-${ecrRepoName}`.slice(0, 64);
+    // Include owner + repo in the default role name so two GitHub repos
+    // that happen to have the same ECR image name don't collide on the
+    // same IAM role (which caused the demo-blocker AssumeRoleWithWebIdentity
+    // error — the second setup silently overwrote the first repo's trust
+    // policy). Truncate to 64 (IAM's max role-name length).
+    const [ownerRaw, repoRaw] = input.repoFullName.split("/");
+    const safeSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+    const defaultRoleName = `gha-${safeSlug(ownerRaw ?? "")}-${safeSlug(repoRaw ?? "")}-${ecrRepoName}`.slice(0, 64);
+    const roleName = input.roleName?.trim() || defaultRoleName;
+    const additionalEcrRepos = (input.additionalEcrRepos ?? [])
+      .map((n) => n.trim().toLowerCase())
+      .filter((n) => n && n !== ecrRepoName);
 
     const result = await setupGithubOidcEcr({
       awsEnv: resolved.env,
       region,
       repoFullName: input.repoFullName,
       ecrRepoName,
+      additionalEcrRepos,
       roleName,
     });
 

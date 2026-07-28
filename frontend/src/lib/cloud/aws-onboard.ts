@@ -367,3 +367,293 @@ export async function resolveAwsExecEnv(cloudProviderId: string): Promise<Resolv
       "No AWS credentials available. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the server's .env.local (or run `aws configure` on the host), then retry.",
   };
 }
+
+/**
+ * Inspect an EKS cluster's node subnets to decide whether the cluster is on
+ * public subnets, private subnets, or a mix. Used by deploy_my_app to pick
+ * the right Service manifest annotations WITHOUT asking the user:
+ *
+ *   All public  → plain `type: LoadBalancer` (no annotations, Classic ELB —
+ *                 works out of the box, no controller needed).
+ *   Any private → `service.beta.kubernetes.io/aws-load-balancer-scheme:
+ *                 internet-facing` annotation (needs AWS Load Balancer
+ *                 Controller, but is REQUIRED — a private-subnet cluster
+ *                 without this annotation strands the LB in the private
+ *                 subnet with no public IP).
+ *
+ * Steps: aws eks describe-cluster → subnet ids →
+ *        aws ec2 describe-subnets → MapPublicIpOnLaunch per subnet.
+ *
+ * Non-throwing: any failure returns { ok:false } so callers fall back to the
+ * safe-but-heavier ALB default. Never blocks a deploy.
+ */
+export async function detectClusterSubnetType(
+  cloudProviderId: string,
+  region: string,
+  clusterName: string,
+): Promise<
+  | { ok: true; kind: "all_public" | "has_private"; totalSubnets: number; privateCount: number }
+  | { ok: false; message: string }
+> {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { runStage } = await import("@/lib/runner/exec");
+
+  const resolved = await resolveAwsExecEnv(cloudProviderId);
+  if (!resolved.ok) return { ok: false, message: resolved.message };
+  const env = { ...resolved.env, AWS_REGION: region, AWS_DEFAULT_REGION: region };
+
+  const workdir = await mkdtemp(join(tmpdir(), "dda-subnets-"));
+  try {
+    // 1 — Resolve the NODE GROUPS' subnets — NOT the cluster's
+    //     resourcesVpcConfig.subnetIds. That field lists the CONTROL PLANE's
+    //     ENI subnets, which on a standard EKS layout spans BOTH public and
+    //     private subnets even when every worker node sits in a public one.
+    //     Using it made this function report "has_private" for all-public
+    //     clusters → deploy emitted internet-facing ALB annotations → the
+    //     Service hung at EXTERNAL-IP <pending> forever because no AWS Load
+    //     Balancer Controller was installed to reconcile them.
+    //     `describe-nodegroup.subnets` is the authoritative answer for
+    //     "where do the worker nodes actually live".
+    const ngList = await runStage({
+      command: "aws",
+      args: [
+        "eks",
+        "list-nodegroups",
+        "--cluster-name",
+        clusterName,
+        "--region",
+        region,
+        "--output",
+        "json",
+        "--no-cli-pager",
+      ],
+      cwd: workdir,
+      env,
+      timeoutMs: 30_000,
+    });
+    if (ngList.exitCode !== 0) {
+      return { ok: false, message: `list-nodegroups failed: ${ngList.stderr.slice(-300)}` };
+    }
+    const ngNames = (JSON.parse(ngList.stdout) as { nodegroups?: string[] }).nodegroups ?? [];
+    if (ngNames.length === 0) {
+      return { ok: false, message: "cluster has no managed node groups" };
+    }
+
+    const subnetIdSet = new Set<string>();
+    for (const ng of ngNames) {
+      const ngDesc = await runStage({
+        command: "aws",
+        args: [
+          "eks",
+          "describe-nodegroup",
+          "--cluster-name",
+          clusterName,
+          "--nodegroup-name",
+          ng,
+          "--region",
+          region,
+          "--output",
+          "json",
+          "--no-cli-pager",
+        ],
+        cwd: workdir,
+        env,
+        timeoutMs: 30_000,
+      });
+      if (ngDesc.exitCode !== 0) continue; // best-effort per node group
+      const subs =
+        (JSON.parse(ngDesc.stdout) as { nodegroup?: { subnets?: string[] } }).nodegroup?.subnets ??
+        [];
+      for (const s of subs) subnetIdSet.add(s);
+    }
+    const subnetIds = [...subnetIdSet];
+    if (subnetIds.length === 0) {
+      return { ok: false, message: "no subnets resolved from the cluster's node groups" };
+    }
+
+    // 2 — Describe those subnets to read MapPublicIpOnLaunch.
+    const subnets = await runStage({
+      command: "aws",
+      args: [
+        "ec2",
+        "describe-subnets",
+        "--subnet-ids",
+        ...subnetIds,
+        "--region",
+        region,
+        "--output",
+        "json",
+        "--no-cli-pager",
+      ],
+      cwd: workdir,
+      env,
+      timeoutMs: 30_000,
+    });
+    if (subnets.exitCode !== 0) {
+      return { ok: false, message: `describe-subnets failed: ${subnets.stderr.slice(-300)}` };
+    }
+    const subnetsJson = JSON.parse(subnets.stdout) as {
+      Subnets?: Array<{ MapPublicIpOnLaunch?: boolean }>;
+    };
+    const rows = subnetsJson.Subnets ?? [];
+    const privateCount = rows.filter((s) => s.MapPublicIpOnLaunch === false).length;
+    return {
+      ok: true,
+      kind: privateCount > 0 ? "has_private" : "all_public",
+      totalSubnets: rows.length,
+      privateCount,
+    };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  } finally {
+    await rm(workdir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Is the AWS Load Balancer Controller running on this cluster?
+ *
+ * Our default exposure pattern is Service type=ClusterIP + Ingress
+ * (ingressClassName=alb), which ONLY works if this controller is present to
+ * reconcile the Ingress into an actual ALB. Clusters built by our EKS
+ * Terraform always have it; a hand-built or older cluster may not, and on
+ * those an Ingress silently sits there doing nothing.
+ *
+ * Used by deploy_my_app to decide the fallback when the user expressed no
+ * preference: controller present → "alb"; absent + all-public nodes →
+ * "classic" (in-tree Classic ELB, needs no controller).
+ *
+ * Non-throwing: any failure returns false, which biases toward the
+ * dependency-free Classic ELB path rather than a silently-dead Ingress.
+ */
+export async function detectAlbController(kubeconfigPath: string): Promise<boolean> {
+  const { runStage } = await import("@/lib/runner/exec");
+  const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+    .filter(Boolean)
+    .join(":");
+  try {
+    const res = await runStage({
+      command: "kubectl",
+      args: [
+        "get",
+        "deployment",
+        "aws-load-balancer-controller",
+        "-n",
+        "kube-system",
+        "-o",
+        "jsonpath={.status.readyReplicas}",
+      ],
+      cwd: process.cwd(),
+      env: { PATH, KUBECONFIG: kubeconfigPath },
+      timeoutMs: 20_000,
+    });
+    if (res.exitCode !== 0) return false;
+    return Number(res.stdout.trim() || "0") > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Does this cluster have the Prometheus Operator's ServiceMonitor CRD?
+ *
+ * Deploys emit a ServiceMonitor by default so the Observability page's
+ * app-metrics cards fill in on their own. But a ServiceMonitor document on a
+ * cluster WITHOUT the CRD makes `kubectl apply` fail outright:
+ *
+ *     no matches for kind "ServiceMonitor" in version "monitoring.coreos.com/v1"
+ *
+ * and because the manifest is applied as one multi-doc file, that failure takes
+ * the whole deploy down with it. So we check first and omit the doc when the
+ * CRD is absent — monitoring is a nice-to-have, shipping the app is not.
+ *
+ * Non-throwing: any failure returns false, which biases toward a deploy that
+ * works without metrics rather than one that fails with them.
+ */
+export async function detectServiceMonitorCrd(kubeconfigPath: string): Promise<boolean> {
+  const { runStage } = await import("@/lib/runner/exec");
+  const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+    .filter(Boolean)
+    .join(":");
+  try {
+    const res = await runStage({
+      command: "kubectl",
+      args: ["get", "crd", "servicemonitors.monitoring.coreos.com", "-o", "name"],
+      cwd: process.cwd(),
+      env: { PATH, KUBECONFIG: kubeconfigPath },
+      timeoutMs: 20_000,
+    });
+    return res.exitCode === 0 && res.stdout.includes("servicemonitors");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Look up the IAM identity behind an env's stored AWS credentials.
+ *
+ * Uses `aws sts get-caller-identity` under the resolved exec env — same as
+ * every other AWS tool call. Returns the caller's ARN + type so callers can
+ * distinguish "an actual human's IAM user" from "a role DeepAgent assumed".
+ *
+ * Used by the EKS creation flow to auto-add the connected USER (if any) to
+ * the new cluster's Access Entries — otherwise the customer signs into the
+ * AWS console and hits "your principal doesn't have access to Kubernetes
+ * objects" on a cluster DeepAgent's role created and admins invisibly.
+ *
+ * Non-throwing: any failure returns `{ ok: false }` and callers fall back to
+ * not-adding-anything. This is a UX enhancement, never a blocker.
+ */
+export async function detectAwsCallerIdentity(
+  cloudProviderId: string,
+): Promise<
+  | { ok: true; arn: string; accountId: string; kind: "user" | "role" | "root" | "other" }
+  | { ok: false; message: string }
+> {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { runStage } = await import("@/lib/runner/exec");
+
+  const resolved = await resolveAwsExecEnv(cloudProviderId);
+  if (!resolved.ok) return { ok: false, message: resolved.message };
+
+  const workdir = await mkdtemp(join(tmpdir(), "dda-sts-"));
+  try {
+    const res = await runStage({
+      command: "aws",
+      args: [
+        "sts",
+        "get-caller-identity",
+        "--region",
+        resolved.region,
+        "--output",
+        "json",
+        "--no-cli-pager",
+      ],
+      cwd: workdir,
+      env: resolved.env,
+      timeoutMs: 30_000,
+    });
+    if (res.exitCode !== 0) return { ok: false, message: `sts failed: ${res.stderr.slice(-400)}` };
+    const j = JSON.parse(res.stdout) as { Arn?: string; Account?: string };
+    if (!j.Arn || !j.Account) return { ok: false, message: "sts returned empty identity" };
+    // Classify: :user/… = actual IAM user, :role/… or :assumed-role/… = a
+    // role (already covered by enable_cluster_creator_admin_permissions),
+    // :root = the account root (never add — huge blast radius).
+    const kind = j.Arn.includes(":user/")
+      ? "user"
+      : j.Arn.endsWith(":root")
+        ? "root"
+        : j.Arn.includes(":role/") || j.Arn.includes(":assumed-role/")
+          ? "role"
+          : "other";
+    return { ok: true, arn: j.Arn, accountId: j.Account, kind };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  } finally {
+    await rm(workdir, { recursive: true, force: true }).catch(() => {});
+  }
+}

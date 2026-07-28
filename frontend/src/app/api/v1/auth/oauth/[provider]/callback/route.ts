@@ -10,6 +10,7 @@ import { resolveIdentity } from "@/lib/oauth/resolve";
 import { createPendingSession, getActiveSession } from "@/lib/auth/session";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
 import { audit } from "@/lib/audit/log";
+import { authCookieSecure, publicOrigin } from "@/lib/auth/cookie-security";
 
 const NONCE_COOKIE = "ddaoauth";
 const NEXT_COOKIE = "ddaoauthnext";
@@ -123,7 +124,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   // Single-use: clear the nonce as soon as it's been spent.
   jar.delete(NONCE_COOKIE);
 
-  const origin = req.headers.get("origin") ?? url.origin;
+  // MUST match the origin used at /start — the provider compares the
+  // redirect_uri on the token exchange against the one from the authorize
+  // request, and a mismatch fails with redirect_uri_mismatch.
+  const origin = publicOrigin(req.headers.get("origin") ?? url.origin);
   const ex = await exchange(provider, code, origin);
   if (!ex.ok) {
     await audit({

@@ -233,9 +233,14 @@ ${
     .join("\n\n") || "(no recognizable manifest files at the root)"
 }
 
+STACK CLASSIFICATION RULES — follow EXACTLY:
+- A React / Vue / Angular / Svelte / Vite / CRA project whose package.json "build" script emits a static bundle (dist/build/out) and has NO server file calling listen() is "static-spa" (served by nginx). Do NOT call it "node-service" — that runs "node server.js" which doesn't exist and crashes the container.
+- Use "node-service" ONLY for a real long-running server (Express/Fastify/Nest/Koa dep + a start script running a server file, or Next.js SSR). Set params.startCommand to the ACTUAL package.json start command, never assume "node server.js".
+- "python": set params.startCommand to the real command; gunicorn/uvicorn is auto-installed even if missing from requirements.txt.
+
 Respond with ONLY a JSON object, no prose:
 {"stack": "static-spa" | "node-service" | "python" | "go", "params": { ... }, "reasoning": "<one short sentence>"}
-- For static-spa, set params.buildDir to the build output dir (dist | build | out).
+- For static-spa, set params.buildDir to the build output dir (dist | build | out) and NO port (always 8080).
 - For node-service / python / go, set params.port if you can infer the listening port (else omit).`;
 
   const llm = await analysisComplete(prompt);
@@ -308,6 +313,88 @@ const DEFAULT_PORT: Record<string, number> = {
   python: 8000,
   go: 8080,
 };
+
+/**
+ * Deterministic SPA classifier from a package.json — used to override the LLM
+ * when it mislabels a static frontend as a node-service. Returns isSpa=true
+ * only when the deps show a client-side build tool (CRA/Vite/Angular/Vue/…),
+ * there's a `build` script, AND there's NO long-running server framework
+ * (Express/Fastify/Nest/Koa/Next) — because those genuinely need node-service.
+ */
+function classifySpaFromPackageJson(raw: string): { isSpa: boolean; buildDir: string } {
+  try {
+    const pkg = JSON.parse(raw) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    const names = Object.keys(deps);
+    const has = (n: string) => names.some((d) => d === n || d.startsWith(n + "/") || d.startsWith(n));
+    const scripts = pkg.scripts ?? {};
+    const hasBuild = typeof scripts.build === "string" && scripts.build.trim().length > 0;
+
+    // A real long-running Node server → NOT a static SPA (keep node-service).
+    // "next" is here because Next.js SSR needs a node runtime; a pure static
+    // Next export is rare enough that defaulting it to node-service is safer.
+    const isServer =
+      has("express") ||
+      has("fastify") ||
+      has("@nestjs") ||
+      has("koa") ||
+      has("next") ||
+      has("@hapi") ||
+      has("hapi") ||
+      has("restify");
+    if (isServer) return { isSpa: false, buildDir: "dist" };
+
+    const isCra = has("react-scripts");
+    const isVite = has("vite");
+    const isAngular = has("@angular/cli") || has("@angular/core");
+    const isVueCli = has("@vue/cli-service");
+    const isParcel = has("parcel");
+    const isReactOrVue = has("react") || has("vue") || has("svelte") || has("solid-js");
+
+    const looksSpa =
+      isCra || isVite || isAngular || isVueCli || isParcel || (isReactOrVue && hasBuild);
+    if (looksSpa && hasBuild) {
+      // CRA builds to build/, most others to dist/.
+      const buildDir = isCra ? "build" : "dist";
+      return { isSpa: true, buildDir };
+    }
+  } catch {
+    /* not JSON / unreadable → let the LLM's choice stand */
+  }
+  return { isSpa: false, buildDir: "dist" };
+}
+
+/**
+ * Strip the service-directory segment from a start command's module/file
+ * references — the Docker build context is already that dir, so the prefix
+ * would point at a non-existent nested path inside the container.
+ *   path="backend", "uvicorn backend.main:app"   → "uvicorn main:app"
+ *   path="backend", "uvicorn backend:app"        → "uvicorn main:app" (defaults to main)
+ *   path="backend", "node backend/server.js"      → "node server.js"
+ *   path="api",     "gunicorn api.wsgi:application" → "gunicorn wsgi:application"
+ */
+function stripContextPrefix(startCommand: string, path: string): string {
+  const seg = path.split("/").pop() ?? path; // last dir segment
+  if (!seg) return startCommand;
+  const esc = seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (
+    startCommand
+      // Bare dir-as-module + attribute: "backend:app" → "main:app". This is a
+      // common ASGI shape ("<dir>:<attr>") that pretends the dir IS a module
+      // (there's usually no backend.py at /app/); rewrite to the conventional
+      // main.py entry file that's actually at /app/main.py after COPY . .
+      // Sits BEFORE the dotted rule so "backend.main:app" isn't touched here.
+      .replace(new RegExp(`(^|\\s)${esc}(:\\S+)`, "g"), `$1main$2`)
+      // Python dotted module: "backend.main:app" → "main:app"
+      .replace(new RegExp(`(^|\\s)${esc}\\.`, "g"), "$1")
+      // Filesystem path: "backend/server.js" → "server.js"
+      .replace(new RegExp(`(^|\\s)\\.?/?${esc}/`, "g"), "$1")
+  );
+}
 
 /** "owner/My_Repo" + "backend" -> "my-repo-backend" (DNS/ECR-safe, ≤200). */
 function imageNameFor(repoFullName: string, role: string): string {
@@ -387,10 +474,16 @@ ${stacksDesc}
 Repository layout and manifests:
 ${treeDesc}
 
+STACK CLASSIFICATION RULES — follow these EXACTLY, they prevent the two most common deploy-breaking mistakes:
+- A React / Vue / Angular / Svelte / Vite / Create-React-App project is a "static-spa" WHENEVER its package.json "build" script emits a static bundle (to dist/build/out) and there is NO server entry file that calls listen() (no server.js/index.js running Express/Fastify/Nest, not Next.js). Serving is done by nginx over the built files. Do NOT classify these as "node-service" — that would run "node server.js", which does not exist, and the container crashes with "Cannot find module server.js".
+  • Tell-tale static-spa deps: react-scripts, vite, @angular/cli, @vue/cli-service, parcel, webpack (as a build tool). buildDir: CRA→build, Vite/Angular/Vue→dist, Next export→out.
+- Only use "node-service" when the package.json has a real long-running server: an Express/Fastify/Nest/Koa dependency AND a start script that runs a server file (e.g. "node server.js", "nest start", "next start" for SSR). If you pick node-service, set params.startCommand to the ACTUAL command from package.json "scripts.start" (or the file named in "main") — never assume "node server.js" unless that file exists.
+- "python": set params.startCommand to the real server command; gunicorn/uvicorn will be auto-installed even if absent from requirements.txt.
+
 Respond with ONLY a JSON object, no prose:
 {"monorepo": true|false, "services": [{"name": "frontend"|"backend"|"app", "path": "<repo-relative dir, \"\" for root>", "stack": "static-spa"|"node-service"|"python"|"go", "params": { ... }, "port": <number> }]}
 - Use "frontend" for the UI/SPA service, "backend" for the API service, "app" for a single-service repo.
-- For static-spa set params.buildDir (dist|build|out). For others set params.port to the listening port when inferable.
+- For static-spa set params.buildDir (dist|build|out) — do NOT set a port, it always serves on 8080. For others set params.port to the listening port when inferable.
 - If the whole repo is one service, return exactly one service with path "".`;
 
   const llm = await analysisComplete(prompt);
@@ -420,14 +513,47 @@ Respond with ONLY a JSON object, no prose:
       : [{ name: "app", path: "", stack: parsed.services?.[0]?.stack }];
   const services: AppService[] = [];
   for (const s of rawServices) {
-    const stackId = (s.stack ?? "") as DockerStackId;
-    const stack = getStack(stackId);
-    if (!stack) continue;
+    let stackId = (s.stack ?? "") as DockerStackId;
+    let params = (s.params ?? {}) as Record<string, unknown>;
     const path = (s.path ?? "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
     const role = (s.name ?? "app").toLowerCase();
-    const port = Number(s.port) > 0 ? Number(s.port) : (DEFAULT_PORT[stackId] ?? 8080);
-    // Does this service dir already ship a Dockerfile?
     const dirKey = path || ".";
+
+    // DETERMINISTIC override — the LLM intermittently tags a static SPA as a
+    // "node-service", which then runs "node server.js" and crashes the pod
+    // with "Cannot find module server.js". Correct it straight from the
+    // service's real package.json: SPA build tooling + a build script + NO
+    // server framework ⇒ static-spa (served by nginx). This removes the LLM
+    // from the decision for the single most common deploy-breaking mistake.
+    if (stackId === "node-service" || stackId === "static-spa") {
+      const pkgRaw = dirContents[dirKey]?.["package.json"];
+      const spa = pkgRaw ? classifySpaFromPackageJson(pkgRaw) : null;
+      if (spa?.isSpa && stackId !== "static-spa") {
+        stackId = "static-spa" as DockerStackId;
+        params = { ...params, buildDir: spa.buildDir };
+      }
+    }
+
+    // The Docker BUILD CONTEXT is the service's own dir (e.g. "backend/"), so
+    // inside the container the code sits at /app/main.py — NOT /app/backend/
+    // main.py. But the LLM writes start commands with the repo-relative module
+    // path ("uvicorn backend.main:app", "node backend/server.js"), which then
+    // fails with "No module named 'backend'". Strip the leading service-dir
+    // segment from module references so the command matches the context.
+    if (path && typeof params.startCommand === "string") {
+      params = { ...params, startCommand: stripContextPrefix(params.startCommand as string, path) };
+    }
+
+    const stack = getStack(stackId);
+    if (!stack) continue;
+    // static-spa always serves on 8080 (nginx); ignore any port the LLM set.
+    const port =
+      stackId === "static-spa"
+        ? 8080
+        : Number(s.port) > 0
+          ? Number(s.port)
+          : (DEFAULT_PORT[stackId] ?? 8080);
+    // Does this service dir already ship a Dockerfile?
     const hasDockerfile = (dirManifests[dirKey] ?? []).some(
       (m) => m.toLowerCase() === "dockerfile",
     );
@@ -436,7 +562,7 @@ Respond with ONLY a JSON object, no prose:
       path,
       stack: stackId,
       stackTitle: stack.title,
-      params: s.params ?? {},
+      params,
       port,
       suggestedImageName: imageNameFor(repoFullName, role),
       existingDockerfile: hasDockerfile,

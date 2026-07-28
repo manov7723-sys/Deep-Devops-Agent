@@ -191,7 +191,11 @@ ${backendBlock(spec)}
 }
 
 provider "azurerm" {
-  features {}
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+  }
 }
 `;
 
@@ -233,6 +237,22 @@ locals {
   // Cluster-level production blocks.
   const blocks: string[] = [];
   if (spec.azureRbac !== false) {
+    // `managed = true` MUST stay on azurerm v3.x.
+    //
+    // The provider emits a deprecation warning for it ("will be removed and
+    // defaulted to true in v4.0"), which reads like an invitation to delete
+    // it. It is not. On v3.x the block carries an ExactlyOneOf constraint over
+    // { admin_group_object_ids, client_app_id, managed, server_app_id,
+    //   server_app_secret, tenant_id } — and `azure_rbac_enabled` is NOT a
+    // member of that set. Removing `managed` therefore leaves the block with
+    // none of its required arguments and the PLAN fails outright:
+    //
+    //     "azure_active_directory_role_based_access_control.0.managed":
+    //     one of ... must be specified
+    //
+    // A deprecation warning on a working plan beats a clean-looking config
+    // that cannot plan. Revisit only when the provider constraint moves to
+    // ~> 4.0, where the argument is removed and defaulted for us.
     blocks.push(`  azure_active_directory_role_based_access_control {
     managed            = true
     azure_rbac_enabled = true

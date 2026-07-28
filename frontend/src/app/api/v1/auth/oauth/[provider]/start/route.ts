@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { buildAuthorizeUrl, getProviderAsync, isMockMode } from "@/lib/oauth/providers";
 import { generateNonce, signState } from "@/lib/oauth/state";
+import { authCookieSecure, publicOrigin } from "@/lib/auth/cookie-security";
 
 const NONCE_COOKIE = "ddaoauth";
 const NEXT_COOKIE = "ddaoauthnext";
@@ -58,14 +59,21 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     popup: isPopup,
     next: requestedNext,
   });
-  const origin = req.headers.get("origin") ?? reqUrl.origin;
+  // APP_PUBLIC_URL wins over anything inferred from the request. Behind an
+  // ALB/ELB the inferred value is the proxy's or pod's view — and `Origin` is
+  // absent entirely on top-level GET navigations — so a deployed app can end
+  // up sending redirect_uri=http://localhost:3000/... The provider then bounces
+  // the user to localhost, which has no nonce cookie for that flow, and the
+  // callback fails with `missing_nonce` on a page that isn't even the app they
+  // started from.
+  const origin = publicOrigin(req.headers.get("origin") ?? reqUrl.origin);
   const authorizeUrl = buildAuthorizeUrl({ provider, origin, state });
 
   const jar = await cookies();
   jar.set(NONCE_COOKIE, nonce, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: authCookieSecure(),
     path: "/",
     maxAge: TEN_MIN_SEC,
   });
@@ -76,7 +84,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     jar.set(NEXT_COOKIE, requestedNext, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: authCookieSecure(),
       path: "/",
       maxAge: TEN_MIN_SEC,
     });
@@ -87,7 +95,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     jar.set(POPUP_COOKIE, "1", {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: authCookieSecure(),
       path: "/",
       maxAge: TEN_MIN_SEC,
     });
