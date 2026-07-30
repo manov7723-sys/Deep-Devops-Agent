@@ -918,6 +918,24 @@ export type SubmitRdsConnectInput = {
   engine?: "postgres" | "mysql";
   alsoStoreInAppSecret?: boolean;
   appSecretKey?: string;
+  /** RDS DBInstanceIdentifier + region. Supplying these lets the server check
+   *  and, if needed, open the RDS security group for the cluster's CURRENT node
+   *  security groups — which change on every cluster rebuild and are the usual
+   *  cause of "Can't reach database server" after one. */
+  dbInstanceIdentifier?: string;
+  region?: string;
+  /** OPT-IN, default false — both WRITE to the user's database, so neither
+   *  may be implied. createDatabase issues CREATE DATABASE when the target
+   *  is absent; runMigrations applies the app's schema migrations. */
+  createDatabase?: boolean;
+  runMigrations?: boolean;
+};
+
+/** One Deployment's envFrom-wiring outcome from POST /aws/rds-connect. */
+export type RdsWireOutcome = {
+  deployment: string;
+  status: "patched" | "already" | "failed";
+  message?: string;
 };
 
 export type SubmitRdsConnectResult = {
@@ -927,6 +945,37 @@ export type SubmitRdsConnectResult = {
   keysWritten?: string[];
   appSecretKey?: string | null;
   kubectl?: { command: string; stdout: string };
+  /** Per-Deployment results of injecting the Secret via envFrom.secretRef.
+   *  The route does this automatically — writing a Secret nothing consumes
+   *  leaves the app with no DATABASE_URL, which used to be a manual kubectl
+   *  step users skipped. */
+  wired?: RdsWireOutcome[];
+  /** Set when wiring could not run at all (no kubeconfig, no Deployments, …).
+   *  The Secret is still written when this is present. */
+  wireError?: string;
+  /** Result of the pre-flight security-group check. `changed: true` means an
+   *  inbound rule was created so the cluster's nodes can reach the DB — the
+   *  step that silently breaks after every cluster rebuild. */
+  network?: {
+    changed: boolean;
+    message: string;
+    /** "cidr" means the rule admits the whole cluster VPC — required for
+     *  inter-region peering, where AWS forbids security-group references. */
+    ruleKind: "security-group" | "cidr";
+    crossVpc: boolean;
+    crossRegion: boolean;
+    warnings: string[];
+  };
+  /** Set when the SG check could not run. The Secret is still written. */
+  networkError?: string;
+  /** Opt-in create-database / migrate results, in execution order. */
+  bootstrap?: Array<{
+    step: "create-database" | "migrate";
+    status: "done" | "skipped" | "failed";
+    message: string;
+  }>;
+  /** Human-readable roll-up the Connections panel renders under the banner. */
+  summary?: string;
   note?: string;
   manifest?: string; // returned on apply failure so the user can retry
   message?: string;
@@ -942,5 +991,123 @@ export function useSubmitRdsConnect(slug: string) {
       return res;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug, "secrets"] }),
+  });
+}
+
+// ── App config secrets (the non-database half of "make this app run") ─────
+
+export type AppSecretsInput = {
+  envKey: string;
+  namespace: string;
+  secretName?: string;
+  /** `.env`-style text, KEY=value per line. Parsed server-side; never stored. */
+  envText: string;
+};
+
+export type AppSecretsResult = {
+  ok: boolean;
+  secretName?: string;
+  namespace?: string;
+  keysWritten?: string[];
+  /** Lines that weren't KEY=value — surfaced rather than silently dropped. */
+  skippedLines?: string[];
+  /** Keys whose value points at localhost — fatal for OAuth callbacks in a cluster. */
+  localhostKeys?: string[];
+  wired?: RdsWireOutcome[];
+  wireError?: string;
+  summary?: string;
+  message?: string;
+  code?: string;
+};
+
+/** Write the app's config Secret and roll the namespace's Deployments. */
+export function useSubmitAppSecrets(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AppSecretsInput) => {
+      const res = await api.post<AppSecretsResult>(`/projects/${slug}/app-secrets`, input);
+      if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not write app secrets.");
+      return res;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug] }),
+  });
+}
+
+// ── Azure Database for PostgreSQL / MySQL (Flexible Server) ───────────────
+// Azure counterpart of the AWS RDS hooks above. Same four-step contract:
+// firewall → Secret → envFrom wiring → optional create-db / migrate.
+
+export type AzureDbServer = {
+  name: string;
+  resourceGroup: string;
+  location: string;
+  engine: "postgres" | "mysql";
+  fqdn: string;
+  adminUser: string;
+  version: string;
+  /** false = VNet-integrated (private); firewall rules don't apply. */
+  publicAccess: boolean;
+  state: string;
+};
+
+export type AzureDbListResult = {
+  ok: boolean;
+  connected?: boolean;
+  servers?: AzureDbServer[];
+  note?: string;
+};
+
+/** List Flexible Servers in the connected Azure subscription. */
+export function useAzureDatabases(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: ["p", slug, "azure-databases"],
+    queryFn: () => api.get<AzureDbListResult>(`/projects/${slug}/azure/databases`),
+    enabled: enabled && !!slug,
+    staleTime: 60_000,
+  });
+}
+
+export type AzureDbConnectInput = {
+  envKey: string;
+  namespace: string;
+  secretName?: string;
+  serverName: string;
+  database: string;
+  username: string;
+  password: string;
+  createDatabase?: boolean;
+  runMigrations?: boolean;
+};
+
+export type AzureDbConnectResult = {
+  ok: boolean;
+  server?: { name: string; engine: string; fqdn: string };
+  namespace?: string;
+  secretName?: string;
+  keysWritten?: string[];
+  network?: string[];
+  networkError?: string;
+  warnings?: string[];
+  wired?: RdsWireOutcome[];
+  wireError?: string;
+  bootstrap?: { step: "create-database" | "migrate"; status: "done" | "skipped" | "failed"; message: string }[];
+  summary?: string;
+  message?: string;
+  code?: string;
+};
+
+/** Connect an Azure Flexible Server to an env's cluster namespace. */
+export function useSubmitAzureDbConnect(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AzureDbConnectInput) => {
+      const res = await api.post<AzureDbConnectResult>(
+        `/projects/${slug}/azure/db-connect`,
+        input,
+      );
+      if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not connect the database.");
+      return res;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug] }),
   });
 }

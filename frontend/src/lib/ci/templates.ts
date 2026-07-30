@@ -306,8 +306,44 @@ function pythonDockerfile(p: Record<string, string>): string {
   // helpfully saying "Uvicorn running on http://127.0.0.1:8000" right before
   // it dies. Inject the correct host flag when it's missing — the LLM's start
   // command almost never includes it and users don't think to override.
-  const bin = (startCommand.trim().split(/\s+/)[0] ?? "").toLowerCase();
+  let bin = (startCommand.trim().split(/\s+/)[0] ?? "").toLowerCase();
   const port = String(p.port || 8000);
+  // Flask's built-in CLI ("flask run") is a DEV server: single-threaded, binds
+  // 127.0.0.1, and — when FLASK_APP isn't set — dies with the Click error
+  // "Missing argument 'APP'" → CrashLoopBackOff in k8s. Rewrite to gunicorn
+  // against the detected entry module so production actually works. The
+  // module name comes from repo-analyze (params.flaskModule); we fall back
+  // to `app` (the canonical Flask default: `app.py` with `app = Flask(...)`).
+  if (bin === "flask") {
+    const modRaw = (p.flaskModule || "app").replace(/\.py$/, "").replace(/^\.?\/*/, "");
+    const attr = p.flaskAppAttr || "app";
+    startCommand = `gunicorn ${modRaw}:${attr}`;
+    bin = "gunicorn";
+  }
+  // Django's built-in `manage.py runserver` has the same problem — dev-only,
+  // binds 127.0.0.1 by default, no worker model. Rewrite to gunicorn against
+  // the detected WSGI module (repo-analyze fills djangoWsgi as
+  // "myproject.wsgi"; fall back to a common shape).
+  if (bin === "python" && /manage\.py\s+runserver/.test(startCommand)) {
+    const wsgi = p.djangoWsgi || "config.wsgi:application";
+    startCommand = `gunicorn ${wsgi}`;
+    bin = "gunicorn";
+  }
+  // Uvicorn / gunicorn / hypercorn / daphne / waitress ALL require an APP
+  // argument (module:variable). When the LLM emits a bare bin ("uvicorn"),
+  // Click errors with 'Missing argument "APP".' → CrashLoopBackOff. Detect
+  // the missing APP token (nothing that contains ":", and no positional arg
+  // besides flags) and inject a safe default. `app:app` is the canonical
+  // FastAPI/Flask convention: `app.py` with `app = FastAPI()` / `Flask()`.
+  const APP_SERVERS = new Set(["uvicorn", "gunicorn", "hypercorn", "daphne", "waitress"]);
+  if (APP_SERVERS.has(bin)) {
+    const tokens = startCommand.trim().split(/\s+/).slice(1); // drop the bin
+    const hasAppArg = tokens.some((t) => t.includes(":") && !t.startsWith("-"));
+    if (!hasAppArg) {
+      const mod = (p.flaskModule || p.djangoWsgi || "app:app").replace(/\.py$/, "");
+      startCommand = `${bin} ${mod}${tokens.length ? " " + tokens.join(" ") : ""}`;
+    }
+  }
   const alreadyBinds =
     /(--host|-b|--bind|-h\s)/.test(startCommand) || / 0\.0\.0\.0/.test(startCommand);
   if (!alreadyBinds) {
@@ -657,6 +693,251 @@ ${matrix}
 
       - name: Configure cluster access (keyless)
         run: aws eks update-kubeconfig --name "${args.clusterName}" --region ${args.region}
+${nsStep}
+      - name: Apply \${{ matrix.service }} manifests
+        run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/
+
+      - name: Restart \${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
+        run: kubectl rollout restart deployment/\${{ matrix.app }} -n ${ns}
+
+      - name: Wait for \${{ matrix.service }} rollout
+        run: kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=180s
+
+      - name: Rollback \${{ matrix.service }} on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of \${{ matrix.app }} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/\${{ matrix.app }} -n ${ns}
+          kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=120s
+`;
+  return { path: `.github/workflows/cd.yml`, content };
+}
+
+/**
+ * Combined CI workflow for a monorepo pushing to Azure Container Registry —
+ * ONE `ci.yml` matrixed over services instead of N per-service files. Mirror
+ * of `generateCombinedEcrCiWorkflow` for Azure.
+ *
+ * Only secret-mode ACR auth is supported here — that's what our Azure OAuth
+ * connection can create (Application.Create is required for keyless OIDC and
+ * most user tokens don't have it). The three `ACR_<UPPER_NAME>_*` secrets
+ * per registry are set by `setupAcrSecretPush` / `repair_azure_acr_push_auth`
+ * during deploy_my_app.
+ *
+ * WHY THIS EXISTS (2026-07):
+ * Users kept getting `build-and-push-backend-acr.yml` + `-frontend-acr.yml`
+ * + `deploy-backend.yml` + `deploy-frontend.yml` — four workflow files for a
+ * two-service repo. Ugly and error-prone (auto-deploy-on-push toggles per-
+ * file, easy to miss one). Combined mode collapses that to `ci.yml` +
+ * `cd.yml`, matches AWS's shape, and enables push-triggering both services
+ * uniformly.
+ */
+export function generateCombinedAcrCiWorkflow(args: {
+  branch: string;
+  scanGate?: boolean;
+  services: Array<{
+    name: string;
+    /** ACR login server (e.g. `aiagenticappbackend.azurecr.io`). */
+    loginServer: string;
+    /** Full image ref sans tag (e.g. `aiagenticappbackend.azurecr.io/ai-agentic-app-backend`). */
+    imageBase: string;
+    /** Full UPPER_SNAKE prefix for the three GH secrets we docker-login with,
+     *  as produced by `acrSecretPrefix()` — ALREADY includes the leading
+     *  "ACR_" (e.g. "ACR_AIAGENTICAPPFRONTEND"). The secret names are
+     *  `<PREFIX>_LOGIN_SERVER` / `_USERNAME` / `_PASSWORD`; do NOT prepend
+     *  another "ACR_" here or the workflow reads
+     *  ACR_ACR_<NAME>_LOGIN_SERVER, which never exists. */
+    secretPrefix: string;
+    /** Build context subdir. "" = repo root. */
+    context?: string;
+  }>;
+}): GeneratedFile {
+  const gate = args.scanGate !== false;
+  const matrix = args.services
+    .map((s) => {
+      const ctx = (s.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "") || ".";
+      return `          - service: ${s.name}
+            image: ${s.imageBase}
+            context: ${ctx}
+            secretPrefix: ${s.secretPrefix}
+            loginServer: ${s.loginServer}`;
+    })
+    .join("\n");
+  const scanStep = gate
+    ? `
+      - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy)
+        continue-on-error: true
+        env:
+          IMAGE: \${{ matrix.image }}
+          TAG: \${{ github.sha }}
+        run: |
+          docker run --rm \\
+            -v /var/run/docker.sock:/var/run/docker.sock \\
+            aquasec/trivy:0.65.0 image \\
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \\
+            "$IMAGE:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+`
+    : "";
+  // ACR auth uses secretName indirection — GitHub secrets are only resolvable
+  // literally in `${{ secrets.<NAME> }}` (not `${{ secrets[matrix.x] }}`), so
+  // we mirror the AWS pattern by using bash env to move the value through.
+  // The `verify secrets present` step surfaces DEEPAGENT_ACR_SECRETS_MISSING
+  // so wait_for_workflow_run's classifier can route to
+  // `repair_azure_acr_push_auth` — same failureKind='acr_secrets_missing'
+  // regardless of whether it's per-service or combined mode.
+  const content = `name: CI (build all services)
+
+# Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
+# When this workflow succeeds, the CD workflow fires automatically via workflow_run.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Read the three ACR secrets for THIS matrix row by matrix.secretPrefix.
+      # We can't index secrets by variable, so we read every registry's set
+      # into env and pick at runtime. Each service block references only its
+      # own prefix; unused ones are silently unread.
+${args.services
+  .map(
+    (s) => `      - name: Read ${s.name} ACR secrets
+        if: matrix.service == '${s.name}'
+        env:
+          ACR_LOGIN_SERVER: \${{ secrets.${s.secretPrefix}_LOGIN_SERVER }}
+          ACR_USERNAME: \${{ secrets.${s.secretPrefix}_USERNAME }}
+          ACR_PASSWORD: \${{ secrets.${s.secretPrefix}_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ${s.secretPrefix}_LOGIN_SERVER"
+          [ -z "$ACR_USERNAME" ] && missing="$missing ${s.secretPrefix}_USERNAME"
+          [ -z "$ACR_PASSWORD" ] && missing="$missing ${s.secretPrefix}_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=\${{ github.repository }} service=${s.name} missing=$missing"
+            exit 1
+          fi
+          # Emit for the login step below.
+          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> "$GITHUB_ENV"
+          echo "ACR_USERNAME=$ACR_USERNAME" >> "$GITHUB_ENV"
+          echo "ACR_PASSWORD=$ACR_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Log in to ACR (${s.name})
+        if: matrix.service == '${s.name}'
+        uses: docker/login-action@v3
+        with:
+          registry: \${{ env.ACR_LOGIN_SERVER }}
+          username: \${{ env.ACR_USERNAME }}
+          password: \${{ env.ACR_PASSWORD }}
+`,
+  )
+  .join("")}
+      - name: Build and tag \${{ matrix.service }} image
+        env:
+          IMAGE: \${{ matrix.image }}
+          TAG: \${{ github.sha }}
+        run: |
+          if [ "\${{ matrix.context }}" = "." ]; then
+            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          else
+            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "\${{ matrix.context }}/Dockerfile" "\${{ matrix.context }}"
+          fi
+${scanStep}
+      - name: Push \${{ matrix.service }} image
+        env:
+          IMAGE: \${{ matrix.image }}
+          TAG: \${{ github.sha }}
+        run: |
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
+`;
+  return { path: `.github/workflows/ci.yml`, content };
+}
+
+/**
+ * Combined CD workflow for an AKS monorepo — single `cd.yml`, matrix over
+ * services. Runs after the combined CI succeeds. Cluster auth uses the
+ * `KUBECONFIG_B64` GitHub secret (same as the per-service AKS CD template),
+ * since AAD-based `azure/login` needs the same SP that keyless ACR would.
+ */
+export function generateCombinedAksCdWorkflow(args: {
+  ciWorkflowName?: string;
+  namespace: string;
+  services: Array<{
+    name: string;
+    /** k8s Deployment name — matches what the manifests use. */
+    appName: string;
+    manifestDir: string;
+  }>;
+}): GeneratedFile {
+  const ciName = args.ciWorkflowName || "CI (build all services)";
+  const ns = args.namespace || "default";
+  const matrix = args.services
+    .map(
+      (s) => `          - service: ${s.name}
+            app: ${s.appName}
+            manifestDir: ${s.manifestDir}`,
+    )
+    .join("\n");
+  const nsStep =
+    ns !== "default"
+      ? `
+      - name: Ensure namespace exists
+        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+`
+      : "";
+  const content = `name: CD (deploy all services)
+
+# Runs automatically after the CI workflow ("${ciName}") completes successfully.
+# Also supports manual dispatch for redeploying without a fresh build.
+on:
+  workflow_run:
+    workflows: ["${ciName}"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Decode KUBECONFIG_B64 into ~/.kube/config
+        env:
+          KUBECONFIG_B64: \${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          mkdir -p "$HOME/.kube"
+          if [ -z "$KUBECONFIG_B64" ]; then
+            echo "::error::KUBECONFIG_B64 secret is empty. The agent can heal this — say 'repair the CD kubeconfig'."
+            exit 1
+          fi
+          echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
 ${nsStep}
       - name: Apply \${{ matrix.service }} manifests
         run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/

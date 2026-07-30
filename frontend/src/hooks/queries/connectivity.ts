@@ -20,7 +20,7 @@ export type TfRun = {
   id: string;
   envKey: string;
   name: string;
-  action: "plan" | "apply";
+  action: "plan" | "apply" | "destroy";
   status: TfRunStatus;
   stages: TfStage[];
   createdAt: string;
@@ -259,7 +259,7 @@ export function useTerraformRun(slug: string, envKey: string, runId: string | nu
 }
 
 export type StartTfRunInput = {
-  action: "plan" | "apply";
+  action: "plan" | "apply" | "destroy";
   name: string;
   files: Record<string, string>;
   /** Stable logical stack id so state is keyed consistently (not by run name). */
@@ -332,8 +332,56 @@ export function useStartTerraformRun(slug: string, envKey: string) {
 export type RerunTfRunInput = {
   runId: string;
   /** Override the source run's action ("plan" → "apply" upgrades a preview). Default: reuse. */
-  action?: "plan" | "apply";
+  action?: "plan" | "apply" | "destroy";
 };
+
+/** Destroy the resources managed by a previously-applied Terraform run.
+ *  Reuses the source files + backend of the source run, but flips the action
+ *  to `destroy`. Hits the existing rerun endpoint since it already has the
+ *  replay-from-source machinery — the only new thing is that `destroy` is
+ *  now an accepted action. */
+export function useDestroyTerraformRun(slug: string, envKey: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { runId: string }) =>
+      api.post<{ ok: boolean; run?: TfRun; code?: string; message?: string }>(
+        `/projects/${slug}/envs/${envKey}/terraform/${input.runId}/rerun`,
+        { action: "destroy" },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+  });
+}
+
+/** Delete the remote Terraform state file for a stack. Used to recover from a
+ *  broken state (partial apply + upload failure → mismatched state vs reality).
+ *  Idempotent: 404 counts as success.
+ *
+ *  Uses raw fetch because the shared api client's `del` doesn't accept a body,
+ *  and the stack name is meaningfully part of the request (multiple stacks may
+ *  share an env's state container). */
+export function useDeleteTerraformState(slug: string, envKey: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { stack: string }) => {
+      const res = await fetch(`/api/v1/projects/${slug}/envs/${envKey}/tf-state`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        status?: string;
+        message?: string;
+        code?: string;
+      };
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message ?? json.code ?? `Delete state failed (${res.status})`);
+      }
+      return json;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["terraform", "runs", slug, envKey] }),
+  });
+}
 
 export type DeleteGkeClusterInput = {
   project: string;

@@ -17,9 +17,23 @@ const LOGIN = "https://login.microsoftonline.com";
 const ARM = "https://management.azure.com";
 /** Scopes shown to the user at CONSENT time. Multi-resource is allowed at
  *  authorize (one consent screen covers everything the app will ever request),
- *  so we include BOTH ARM and Graph here — that lets `autoProvisionSpFromOAuth`
- *  work cross-tenant without a second consent flow (fixes AADSTS65001). */
-const AUTHORIZE_SCOPES = `${ARM}/user_impersonation https://graph.microsoft.com/Application.ReadWrite.OwnedBy offline_access openid profile`;
+ *  so we CAN include BOTH ARM and Graph here — that lets `autoProvisionSpFromOAuth`
+ *  work cross-tenant without a second consent flow (fixes AADSTS65001).
+ *
+ *  BUT: personal Microsoft accounts (@gmail/@outlook/@hotmail) and their
+ *  "Default Directory" MSA tenants DO NOT expose Application.ReadWrite.OwnedBy
+ *  as a Delegated permission — asking for it up-front makes the initial
+ *  authorize fail with AADSTS650053. Gate the Graph scope behind
+ *  AZURE_OAUTH_GRAPH_ENABLED so MSA users can sign in end-to-end (ARM only)
+ *  and skip SP auto-provisioning gracefully. Set the env var to "true" only
+ *  when the app registration is in a proper work/school Entra tenant with the
+ *  permission granted + admin consent given. */
+function authorizeScopes(): string {
+  const base = `${ARM}/user_impersonation offline_access openid profile`;
+  return azureOAuthGraphEnabled()
+    ? `${ARM}/user_impersonation https://graph.microsoft.com/Application.ReadWrite.OwnedBy offline_access openid profile`
+    : base;
+}
 /** ARM-only scope for token requests (code exchange, ARM refresh). Azure v2
  *  token endpoints reject multi-audience requests — a single token cannot
  *  target both ARM and Graph. Graph tokens are minted separately from the
@@ -77,8 +91,8 @@ export function buildAzureAuthorizeUrl(
     response_type: "code",
     redirect_uri: redirectUri(),
     response_mode: "query",
-    // AUTHORIZE_SCOPES = ARM + Graph so ONE consent screen covers everything.
-    scope: AUTHORIZE_SCOPES,
+    // ARM + optionally Graph. Graph excluded on MSA tenants (see authorizeScopes).
+    scope: authorizeScopes(),
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",

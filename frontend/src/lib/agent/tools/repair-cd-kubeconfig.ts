@@ -145,12 +145,20 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
     );
 
     // 2 — mint a kubeconfig via ARM and store it on the env.
+    //
+    // "admin" is REQUIRED here, not a preference. This kubeconfig is pushed
+    // to the repo's KUBECONFIG_B64 secret in step 3 and read by every future
+    // CD run. User credentials on an Entra cluster carry a ~1-hour AAD token;
+    // any deploy after that window dies with "You must be logged in to the
+    // server (Unauthorized)". Admin credentials are certificate-based and
+    // valid for the cluster CA's lifetime.
     const kc = await getAksKubeconfig(
       accessToken,
       env.cloudProvider.accountRef,
       pick.resourceGroup,
       pick.name,
       env.cloudProvider.id,
+      "admin",
     );
     if (!kc.ok) return { ok: false, error: `Couldn't fetch AKS kubeconfig: ${kc.error}` };
     steps.push(`Fetched a ${kc.mode}-credential kubeconfig from ARM.`);

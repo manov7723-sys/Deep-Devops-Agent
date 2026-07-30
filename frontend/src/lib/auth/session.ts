@@ -16,6 +16,7 @@ import { cookies } from "next/headers";
 import { randomBytes, createHash } from "node:crypto";
 import type { SessionStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { authCookieSecure } from "./cookie-security";
 
 /**
  * Cookie names are env-configurable so deployments can rename their auth
@@ -36,6 +37,11 @@ const PENDING_TTL_SEC = 60 * 10; // 10 min to enter TOTP
  */
 const ACTIVE_TTL_SEC = Number(process.env.SESSION_TTL_DAYS ?? "7") * 24 * 60 * 60;
 const ACTIVE_NO_REMEMBER_TTL_SEC = 60 * 60 * 12; // 12 hours
+
+// Secure-flag policy lives in one place so the session store and the OAuth
+// routes can never drift apart again — see lib/auth/cookie-security.ts for
+// the incident this prevents.
+const sessionCookieSecure = authCookieSecure;
 
 function generateToken(): string {
   return randomBytes(32).toString("base64url");
@@ -79,7 +85,7 @@ export async function createPendingSession(args: CreatePendingArgs): Promise<voi
   jar.set(TEMP_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: sessionCookieSecure(),
     path: "/",
     maxAge: PENDING_TTL_SEC,
   });
@@ -173,7 +179,7 @@ export async function promotePendingToActive(sessionId: string): Promise<void> {
   jar.set(SESS_COOKIE, newToken, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: sessionCookieSecure(),
     path: "/",
     maxAge: ttl,
   });

@@ -26,6 +26,7 @@ export type WorkflowRun = {
     | "cd_no_aws_creds"
     | "cd_no_gcp_creds"
     | "cd_role_missing_eks_describe"
+    | "cd_aks_rbac_missing"
     | "ci_wif_binding_missing"
     | "unknown"
     | null;
@@ -203,6 +204,51 @@ async function classifyFailure(
                 "CD workflow's kubectl can't authenticate to EKS: no AWS credentials in the runner. " +
                 "Root cause: the env's kubeconfig is EKS but no AWS cloud provider is connected on the project. " +
                 "Connect AWS on the Cloud providers page, set the env's cloud provider to it, then re-run deploy_my_app to regenerate the workflow with the OIDC auth step.",
+            };
+          }
+          // AKS with AAD RBAC — the kubeconfig authenticated fine, but the
+          // deploy identity has no cluster-side role. Azure's message is
+          // unique enough to match on: "does not have access to the resource
+          // in Azure. Update role assignment to allow access". Distinct from
+          // cd_no_aws_creds (auth worked, RBAC didn't) so we route to
+          // grant_aks_access instead of repair_cd_kubeconfig — reissuing a
+          // kubeconfig wouldn't help, the missing piece is a role assignment
+          // in Azure that only ARM can add.
+          if (
+            /does not have access to the resource in Azure/i.test(text) ||
+            (/Forbidden.*deployments|namespaces.*forbidden/i.test(text) &&
+              /Update role assignment/i.test(text))
+          ) {
+            return {
+              kind: "cd_aks_rbac_missing",
+              hint:
+                "CD workflow's kubectl authenticated to AKS but the AAD principal has no cluster role. " +
+                "Root cause: the AKS blueprint enables Entra RBAC, and until the deploy identity is granted " +
+                "'Azure Kubernetes Service RBAC Cluster Admin' (or Writer), every kubectl call is rejected. " +
+                "Call grant_aks_access to add the role — no Portal click required, ARM propagates in ~30-60s.",
+            };
+          }
+          // KUBECONFIG_B64 secret is EMPTY or malformed. The CD template
+          // starts with:
+          //     echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
+          // and when the secret is empty/garbled `base64` errors with
+          // "invalid input", the config file is empty, and every kubectl
+          // call afterwards defaults to `localhost:8080` and fails with
+          // "connection refused". The remedy is the same as cd_no_aws_creds
+          // — repair_cd_kubeconfig re-issues the kubeconfig via the cloud
+          // API and pushes it as KUBECONFIG_B64 — so we return the same
+          // failureKind. Adding this shape means the agent now self-heals
+          // an empty-secret CD failure without user intervention.
+          if (
+            /base64:\s*invalid input/i.test(text) &&
+            /localhost:8080|connection refused/i.test(text)
+          ) {
+            return {
+              kind: "cd_no_aws_creds",
+              hint:
+                "CD workflow's KUBECONFIG_B64 secret is empty or malformed — base64 -d failed, kubectl fell back to localhost:8080. " +
+                "This happens when the env's kubeconfig was never pushed to the repo, was cleared, or points at a cluster on a cloud the project isn't currently connected to. " +
+                "Call repair_cd_kubeconfig to reissue the kubeconfig for the env's connected cluster and rewrite the secret — the exact same self-heal as cd_no_aws_creds.",
             };
           }
           // Same shape but for GKE — gcloud auth missing in the CD runner.

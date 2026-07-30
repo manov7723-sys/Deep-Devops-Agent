@@ -8,7 +8,7 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
 const RerunBody = z
   .object({
     /** Override the run's original action. Default: same as the source run. */
-    action: z.enum(["plan", "apply"]).optional(),
+    action: z.enum(["plan", "apply", "destroy"]).optional(),
   })
   .default({});
 

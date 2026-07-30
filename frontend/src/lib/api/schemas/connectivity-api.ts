@@ -219,6 +219,43 @@ export const CreateEksRequest = z.object({
   secretsEncryption: z.boolean().optional(),
   systemDiskSize: z.number().int().min(20).max(1000).optional(),
   ebsCsi: z.boolean().optional(),
+  // Primary node group — console-style overrides (used when nodeGroups is
+  // absent, and applied to nodeGroups[0] otherwise).
+  nodeGroupName: z
+    .string()
+    .trim()
+    .regex(/^[a-z][a-z0-9-]{0,62}$/, "Lowercase letters, digits and hyphens; start with a letter.")
+    .optional(),
+  capacityType: z.enum(["ON_DEMAND", "SPOT"]).optional(),
+  // Multi-node-group support — one entry per managed node group. When
+  // provided, this REPLACES the single-group construction; the required
+  // legacy fields (instanceType/desiredNodes/…) are still validated so the
+  // request stays back-compat with older callers.
+  nodeGroups: z
+    .array(
+      z.object({
+        name: z
+          .string()
+          .trim()
+          .regex(/^[a-z][a-z0-9-]{0,62}$/, "Lowercase letters, digits and hyphens."),
+        instanceType: z.string().trim().min(1).max(40),
+        capacityType: z.enum(["ON_DEMAND", "SPOT"]),
+        minNodes: z.number().int().min(1).max(50),
+        desiredNodes: z.number().int().min(1).max(50),
+        maxNodes: z.number().int().min(1).max(100),
+        diskSize: z.number().int().min(20).max(1000),
+      }),
+    )
+    .min(1)
+    .max(6)
+    .optional(),
+  // Two independent Access Entry toggles from the wizard's Access page.
+  // Either or both can be true (or both false, for API-only access).
+  //   grantIamUserAccess (default true) — add the connected IAM user
+  //     (as reported by sts:GetCallerIdentity on DeepAgent's stored creds)
+  //   grantRootAccess (default false) — also add arn:aws:iam::<acct>:root
+  grantIamUserAccess: z.boolean().optional(),
+  grantRootAccess: z.boolean().optional(),
   appNodeGroup: z.boolean().optional(),
   appInstanceTypes: z.array(z.string().trim().max(40)).max(8).optional(),
   appCapacityType: z.enum(["ON_DEMAND", "SPOT"]).optional(),
@@ -345,6 +382,28 @@ export const CreateAksRequest = z.object({
   monitoring: z.boolean().optional(),
   keyVaultSecretsProvider: z.boolean().optional(),
   kedaVpa: z.boolean().optional(),
+
+  // ── Terraform state backend (new 2026-07) ────────────────────────
+  // "local"      — no azurerm backend block; state lives on the runner disk.
+  //                Fine for demos and short-lived clusters, lost with the runner.
+  // "existing"   — reuse an Azure Storage account the user already has;
+  //                stateStorageAccount + stateContainer (+ stateResourceGroup) must
+  //                point at something ARM can actually read.
+  // "create"     — create a fresh storage account and container before the
+  //                Terraform apply runs. stateStorageAccount is the new SA's
+  //                name (must be globally unique, 3-24 lowercase alphanumeric).
+  //
+  // The wizard defaults to "create" with a suggested name so the user always
+  // walks away with a valid backend rather than the previous silent surprise.
+  stateBackendMode: z.enum(["local", "existing", "create"]).optional(),
+  stateResourceGroup: z.string().trim().max(90).optional(),
+  stateStorageAccount: z
+    .string()
+    .trim()
+    .max(24)
+    .regex(/^[a-z0-9]{3,24}$/, "Storage account: 3-24 lowercase letters/digits only.")
+    .optional(),
+  stateContainer: z.string().trim().max(63).default("tfstate").optional(),
 });
 export type CreateAksRequest = z.infer<typeof CreateAksRequest>;
 

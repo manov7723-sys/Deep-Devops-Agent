@@ -95,7 +95,20 @@ async function azureKubeconfig(
     if (scoped.ok) accessToken = scoped.accessToken;
   }
 
-  const kc = await getAksKubeconfig(accessToken, cp.accountRef, resourceGroup, clusterName, cp.id);
+  // "admin" — certificate-based credentials that don't expire in an hour.
+  // The kubeconfig stored here is the one setEnvKubeconfigSecret later pushes
+  // to the repo as KUBECONFIG_B64, so a short-lived AAD token would make every
+  // CD run fail with "Unauthorized" an hour after connecting the cluster.
+  // Admin certs also bypass Entra RBAC, so kubectl works without a separate
+  // role assignment on the cluster.
+  const kc = await getAksKubeconfig(
+    accessToken,
+    cp.accountRef,
+    resourceGroup,
+    clusterName,
+    cp.id,
+    "admin",
+  );
   if (!kc.ok) return { ok: false, code: "connect_failed", message: kc.error };
   return { ok: true, kubeconfig: kc.kubeconfig };
 }

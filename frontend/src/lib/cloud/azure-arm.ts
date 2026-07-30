@@ -303,6 +303,481 @@ export async function listAzureVnets(
   return { ok: true, vnets };
 }
 
+export type AksSupportedVersion = {
+  /** Minor version string as AKS reports it, e.g. "1.30". */
+  version: string;
+  /** Highest patch version available for this minor, e.g. "1.30.12" — what
+   *  Azure will actually deploy when the wizard requests "1.30". */
+  latestPatch?: string;
+  /** True when Azure marks this the default for new clusters in the region. */
+  isDefault: boolean;
+  /** Preview versions are only allowed with a subscription feature flag
+   *  enabled, so we tag them but never surface them by default. */
+  isPreview: boolean;
+};
+
+/**
+ * Live-fetch the Kubernetes versions AKS will accept in a given region.
+ *
+ * WHY THIS EXISTS (2026-07 pre-demo audit):
+ * The wizard shipped with a STATIC list of versions in `AKS_K8S_VERSIONS`. AKS
+ * deprecates two minors per year, staggered per region, so the static list
+ * always drifts toward "cluster creation fails with AksVersionUnsupported"
+ * about a quarter after it was last edited. That failure surfaces 30 seconds
+ * into the Terraform apply, which is the worst possible time to hit it live in
+ * front of a client.
+ *
+ * The endpoint is region-scoped because a version can be GA in eastus and
+ * unavailable in centralindia on the same day.
+ *
+ * Best-effort: on any failure the caller falls back to the static list. Nothing
+ * about the wizard flow depends on this succeeding; it only prevents choosing
+ * a version that AKS will refuse.
+ *
+ * @see https://learn.microsoft.com/en-us/rest/api/aks/managed-clusters/list-kubernetes-versions
+ */
+export async function listAksSupportedVersions(
+  token: string,
+  subscriptionId: string,
+  location: string,
+): Promise<{ ok: true; versions: AksSupportedVersion[] } | { ok: false; error: string }> {
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/providers/Microsoft.ContainerService/locations/${encodeURIComponent(
+      location,
+    )}/kubernetesVersions?api-version=2024-02-01`,
+  );
+  if (!r.ok) return r;
+  const values =
+    (
+      r.data as {
+        values?: Array<{
+          version?: string;
+          isDefault?: boolean;
+          isPreview?: boolean;
+          patchVersions?: Record<string, unknown>;
+        }>;
+      }
+    ).values ?? [];
+
+  const out: AksSupportedVersion[] = values
+    .map((v) => {
+      const patches = Object.keys(v.patchVersions ?? {}).sort(comparePatchDesc);
+      return {
+        version: v.version ?? "",
+        latestPatch: patches[0],
+        isDefault: v.isDefault === true,
+        isPreview: v.isPreview === true,
+      };
+    })
+    .filter((v) => v.version.length > 0);
+
+  // Newest first. Uses a numeric semver comparison rather than string sort so
+  // "1.30" sits above "1.9" rather than below it.
+  out.sort((a, b) => compareMinorDesc(a.version, b.version));
+  return { ok: true, versions: out };
+}
+
+function compareMinorDesc(a: string, b: string): number {
+  const [aMaj, aMin] = a.split(".").map((n) => parseInt(n, 10) || 0);
+  const [bMaj, bMin] = b.split(".").map((n) => parseInt(n, 10) || 0);
+  if (aMaj !== bMaj) return bMaj - aMaj;
+  return bMin - aMin;
+}
+
+function comparePatchDesc(a: string, b: string): number {
+  const parts = (s: string) => s.split(".").map((n) => parseInt(n, 10) || 0);
+  const [aMaj, aMin, aPat] = parts(a);
+  const [bMaj, bMin, bPat] = parts(b);
+  if (aMaj !== bMaj) return bMaj - aMaj;
+  if (aMin !== bMin) return bMin - aMin;
+  return bPat - aPat;
+}
+
+export type AzureStorageAccount = {
+  name: string;
+  resourceGroup: string;
+  location: string;
+};
+
+/**
+ * The set of VM SKUs available (any zones or none) for this sub in this
+ * location, restricted to `virtualMachines`. Used to detect a SKU that the
+ * caller asked for but ARM won't accept — the same 400 also fires when a
+ * SKU isn't quota'd for AKS agent pools even though it exists in the region.
+ */
+export async function listVmSkusInLocation(
+  token: string,
+  subscriptionId: string,
+  location: string,
+): Promise<{ ok: true; skus: string[] } | { ok: false; error: string }> {
+  const filter = encodeURIComponent(`location eq '${location}'`);
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=${filter}`,
+  );
+  if (!r.ok) return r;
+  const value =
+    (r.data as { value?: Array<{ resourceType?: string; name?: string }> }).value ?? [];
+  return {
+    ok: true,
+    skus: value
+      .filter((s) => s.resourceType === "virtualMachines" && s.name)
+      .map((s) => s.name as string),
+  };
+}
+
+/**
+ * The maximum cache and temp-disk sizes a VM SKU can offer, in GiB — the two
+ * places AKS's Ephemeral OS image can live.
+ *
+ * Returned only when both values are reliably parseable from the ARM
+ * capabilities blob (numbers-as-strings in an unstable schema). A caller
+ * comparing "will 128 GB fit?" should treat `null` as "don't know, don't
+ * guess" — degrade to Managed rather than assume.
+ */
+export async function getVmSkuEphemeralCapacity(
+  token: string,
+  subscriptionId: string,
+  location: string,
+  vmSize: string,
+): Promise<
+  | { ok: true; cacheGiB: number | null; tempDiskGiB: number | null }
+  | { ok: false; error: string }
+> {
+  const filter = encodeURIComponent(`location eq '${location}'`);
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=${filter}`,
+  );
+  if (!r.ok) return r;
+  const value =
+    (
+      r.data as {
+        value?: Array<{
+          resourceType?: string;
+          name?: string;
+          capabilities?: Array<{ name?: string; value?: string }>;
+        }>;
+      }
+    ).value ?? [];
+  const sku = value.find((s) => s.resourceType === "virtualMachines" && s.name === vmSize);
+  if (!sku) {
+    return { ok: false, error: `VM size "${vmSize}" is not listed in ${location}.` };
+  }
+  const caps = new Map<string, string>();
+  for (const c of sku.capabilities ?? []) if (c.name && c.value !== undefined) caps.set(c.name, c.value);
+
+  // ARM reports cache in MB and temp-disk in GB, both as decimal strings.
+  const cacheMb = Number(caps.get("CachedDiskBytes")); // actually in BYTES, name lies
+  const tempGb = Number(caps.get("MaxResourceVolumeMB")); // in MB despite the name
+  const cacheGiB =
+    Number.isFinite(cacheMb) && cacheMb > 0 ? Math.floor(cacheMb / 1024 / 1024 / 1024) : null;
+  const tempDiskGiB =
+    Number.isFinite(tempGb) && tempGb > 0 ? Math.floor(tempGb / 1024) : null;
+
+  return { ok: true, cacheGiB, tempDiskGiB };
+}
+
+/**
+ * Which availability zones does this subscription actually get for a specific
+ * VM size in a specific region?
+ *
+ * WHY THIS EXISTS (2026-07 incident): eastus normally advertises zones 1/2/3,
+ * but trial subscriptions get NONE — the AKS API rejected creation with
+ * `The supported zones for location 'eastus' are ''` (empty string, meaning
+ * zero). Region-general docs said "zones supported"; the truth is per-SKU per
+ * subscription. Only ARM knows.
+ *
+ * Returns the sorted list of zone strings (e.g. `["1","2","3"]`, or `[]` when
+ * zones are unavailable for this SKU/region on this subscription).
+ *
+ * Best-effort: on any failure (auth, quota, ARM outage) the caller treats the
+ * result as "unknown, don't touch what the user picked" — a live guard that
+ * silently forces zones off would surprise a user who actually needed them.
+ */
+export async function listVmSkuZones(
+  token: string,
+  subscriptionId: string,
+  location: string,
+  vmSize: string,
+): Promise<{ ok: true; zones: string[] } | { ok: false; error: string }> {
+  const filter = encodeURIComponent(`location eq '${location}'`);
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=${filter}`,
+  );
+  if (!r.ok) return r;
+  const value =
+    (
+      r.data as {
+        value?: Array<{
+          resourceType?: string;
+          name?: string;
+          locationInfo?: Array<{ location?: string; zones?: string[] }>;
+        }>;
+      }
+    ).value ?? [];
+  const sku = value.find((s) => s.resourceType === "virtualMachines" && s.name === vmSize);
+  if (!sku) {
+    // SKU not listed in this region at all — treat as no zones AND surface a
+    // clear error so the caller can distinguish "no zones" from "no SKU".
+    return {
+      ok: false,
+      error: `VM size "${vmSize}" is not available in "${location}" on this subscription.`,
+    };
+  }
+  const zones = (sku.locationInfo ?? [])
+    .find((li) => (li.location ?? "").toLowerCase() === location.toLowerCase())
+    ?.zones ?? [];
+  return { ok: true, zones: [...zones].sort() };
+}
+
+/**
+ * Does an ARM error string indicate "the thing you asked about doesn't exist"?
+ *
+ * Azure worded not-found errors DIFFERENTLY across services and I didn't know
+ * that when I first wrote the ensure-backend helpers:
+ *   • RG                 → "Resource group '<name>' could not be found."
+ *   • Storage account    → "The specified resource does not exist."
+ *   • Blob container     → "The specified container does not exist. RequestId:..."
+ *
+ * A too-narrow matcher turned a "please create this" into a fatal "could not
+ * check container" — the wizard bailed instead of creating the container, and
+ * cluster creation never got past state-backend prep. Any 404-shaped phrase
+ * counts as not-found so the caller creates the resource. Falsely treating an
+ * unrelated 5xx as "not found" would just cause a redundant PUT that ARM would
+ * reject; safer than the reverse.
+ */
+function isArmNotFound(err: string): boolean {
+  return /(?:not\s*found|could not be found|does not exist|no such|not\s*exist|resource\s*not\s*found)/i.test(
+    err,
+  );
+}
+
+/**
+ * List every Azure Storage account visible to the subscription — used by the
+ * AKS wizard so the user can PICK an existing account to hold Terraform state
+ * rather than typing a name and hoping it exists.
+ */
+export async function listAzureStorageAccounts(
+  token: string,
+  subscriptionId: string,
+): Promise<{ ok: true; accounts: AzureStorageAccount[] } | { ok: false; error: string }> {
+  const r = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/providers/Microsoft.Storage/storageAccounts?api-version=2023-05-01`,
+  );
+  if (!r.ok) return r;
+  const value =
+    (r.data as { value?: Array<{ id?: string; name?: string; location?: string }> }).value ?? [];
+  return {
+    ok: true,
+    accounts: value.map((a) => ({
+      name: a.name ?? "",
+      resourceGroup: rgFromId(a.id ?? ""),
+      location: a.location ?? "",
+    })),
+  };
+}
+
+/**
+ * Create an Azure Storage account and a blob container for Terraform state,
+ * idempotently.
+ *
+ * WHY THIS EXISTS (2026-07 incident): the AKS wizard used to write a backend
+ * block naming a storage account it never verified existed. If the account
+ * was gone (typo, wrong subscription, deleted between runs) the apply crashed
+ * with `no such host` mid-flight, leaving the state file orphaned on the
+ * runner disk and the resource group half-built in Azure. This helper closes
+ * that gap so the wizard can guarantee the backend URL will resolve before
+ * `terraform init` ever runs.
+ *
+ * Idempotent:
+ *   • If the resource group is missing, create it in the same location.
+ *   • If the storage account already exists AND is in the same subscription
+ *     under the same resource group, reuse it (no error).
+ *   • If it exists elsewhere in the subscription, return an informative error
+ *     — the naming space for storage accounts is *global*, and creating over
+ *     one you don't own destroys someone else's state.
+ *   • The container is created only if missing.
+ *
+ * Storage account creation is asynchronous; ARM returns 202 and a status URL
+ * that we poll until Succeeded / Failed. Typical wall-time: 15–40 seconds.
+ */
+export async function ensureAzureTfBackend(args: {
+  token: string;
+  subscriptionId: string;
+  resourceGroup: string;
+  location: string;
+  storageAccount: string;
+  container: string;
+}): Promise<
+  | { ok: true; created: { resourceGroup: boolean; storageAccount: boolean; container: boolean } }
+  | { ok: false; error: string }
+> {
+  const { token, subscriptionId, resourceGroup, location, storageAccount, container } = args;
+
+  // Storage account names are 3–24 chars, lowercase alphanumeric only. AKS
+  // wizard could otherwise let the user type something ARM rejects, and the
+  // ARM error message is unhelpful. Catch it here with an actionable one.
+  if (!/^[a-z0-9]{3,24}$/.test(storageAccount)) {
+    return {
+      ok: false,
+      error: `Storage account name "${storageAccount}" is invalid — must be 3-24 lowercase letters/digits only (no dashes, no uppercase).`,
+    };
+  }
+  if (!/^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$/.test(container)) {
+    return {
+      ok: false,
+      error: `Container name "${container}" is invalid — must be 3-63 lowercase letters/digits/dashes, starting and ending alphanumeric.`,
+    };
+  }
+
+  const created = { resourceGroup: false, storageAccount: false, container: false };
+
+  // 1 — ensure the resource group.
+  const rgGet = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(resourceGroup)}?api-version=2023-07-01`,
+  );
+  if (!rgGet.ok) {
+    // Any error other than 404 is fatal (auth failure, wrong subscription).
+    // ARM's error message string is our best signal — `armFetch` surfaces it.
+    if (!isArmNotFound(rgGet.error)) {
+      return { ok: false, error: `Could not check resource group: ${rgGet.error}` };
+    }
+    const rgPut = await armFetch(
+      token,
+      `/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(resourceGroup)}?api-version=2023-07-01`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location }),
+      },
+    );
+    if (!rgPut.ok) return { ok: false, error: `Creating resource group failed: ${rgPut.error}` };
+    created.resourceGroup = true;
+  }
+
+  // 2 — ensure the storage account. Check FIRST via a per-name lookup because
+  // it's cheap and gives a clean 404 vs "belongs to another subscription".
+  const saGet = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(
+      resourceGroup,
+    )}/providers/Microsoft.Storage/storageAccounts/${encodeURIComponent(storageAccount)}?api-version=2023-05-01`,
+  );
+  if (!saGet.ok) {
+    if (!isArmNotFound(saGet.error)) {
+      return { ok: false, error: `Could not check storage account: ${saGet.error}` };
+    }
+    // Names are globally unique — check whether someone else owns it before
+    // trying to create, so we return a clear message rather than an ARM 409.
+    const nameCheck = await armFetch(
+      token,
+      `/subscriptions/${subscriptionId}/providers/Microsoft.Storage/checkNameAvailability?api-version=2023-05-01`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: storageAccount,
+          type: "Microsoft.Storage/storageAccounts",
+        }),
+      },
+    );
+    if (nameCheck.ok) {
+      const info = nameCheck.data as { nameAvailable?: boolean; reason?: string; message?: string };
+      if (info.nameAvailable === false) {
+        return {
+          ok: false,
+          error: `Storage account name "${storageAccount}" is already taken globally by another subscription. Pick a different name (they must be globally unique) — try adding a suffix.`,
+        };
+      }
+    }
+    // Create — 202 + long poll.
+    const saPut = await armFetch(
+      token,
+      `/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(
+        resourceGroup,
+      )}/providers/Microsoft.Storage/storageAccounts/${encodeURIComponent(storageAccount)}?api-version=2023-05-01`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: { name: "Standard_LRS" },
+          kind: "StorageV2",
+          location,
+          properties: {
+            minimumTlsVersion: "TLS1_2",
+            allowBlobPublicAccess: false,
+            allowSharedKeyAccess: true, // Terraform's azurerm backend uses shared key.
+          },
+        }),
+      },
+    );
+    if (!saPut.ok) return { ok: false, error: `Creating storage account failed: ${saPut.error}` };
+    // Poll until provisioningState = Succeeded (Storage account creation is async).
+    const deadline = Date.now() + 90_000;
+    for (;;) {
+      const check = await armFetch(
+        token,
+        `/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(
+          resourceGroup,
+        )}/providers/Microsoft.Storage/storageAccounts/${encodeURIComponent(storageAccount)}?api-version=2023-05-01`,
+      );
+      if (check.ok) {
+        const state = (check.data as { properties?: { provisioningState?: string } }).properties
+          ?.provisioningState;
+        if (state === "Succeeded") break;
+        if (state === "Failed") {
+          return { ok: false, error: `Storage account provisioning failed at ARM.` };
+        }
+      }
+      if (Date.now() > deadline) {
+        return {
+          ok: false,
+          error: `Storage account creation didn't finish within 90s — check the Azure portal and retry.`,
+        };
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    created.storageAccount = true;
+  }
+
+  // 3 — ensure the container inside the storage account.
+  const cGet = await armFetch(
+    token,
+    `/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(
+      resourceGroup,
+    )}/providers/Microsoft.Storage/storageAccounts/${encodeURIComponent(
+      storageAccount,
+    )}/blobServices/default/containers/${encodeURIComponent(container)}?api-version=2023-05-01`,
+  );
+  if (!cGet.ok) {
+    if (!isArmNotFound(cGet.error)) {
+      return { ok: false, error: `Could not check state container: ${cGet.error}` };
+    }
+    const cPut = await armFetch(
+      token,
+      `/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(
+        resourceGroup,
+      )}/providers/Microsoft.Storage/storageAccounts/${encodeURIComponent(
+        storageAccount,
+      )}/blobServices/default/containers/${encodeURIComponent(container)}?api-version=2023-05-01`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: { publicAccess: "None" } }),
+      },
+    );
+    if (!cPut.ok) return { ok: false, error: `Creating state container failed: ${cPut.error}` };
+    created.container = true;
+  }
+
+  return { ok: true, created };
+}
+
 /**
  * Fetch an AKS cluster's kubeconfig via ARM (no `az`). Admin credentials are
  * cert-based and self-contained, so `kubectl` works with no extra plugin; if
@@ -340,6 +815,8 @@ async function latestManagedClustersApiVersion(
 async function toTokenKubeconfig(
   userYaml: string,
   cloudProviderId: string,
+  clusterName: string,
+  resourceGroup: string,
 ): Promise<{ ok: true; kubeconfig: string } | { ok: false; error: string }> {
   const ca = userYaml.match(/certificate-authority-data:\s*([A-Za-z0-9+/=]+)/)?.[1];
   const server = userYaml.match(/server:\s*(\S+)/)?.[1];
@@ -348,21 +825,42 @@ async function toTokenKubeconfig(
   const tok = await getAksAadToken(cloudProviderId);
   if (!tok.ok)
     return { ok: false, error: `couldn't mint an AAD token for the cluster: ${tok.error}` };
+  // CRITICAL — the cluster + context + user names MUST carry the real cluster
+  // identity, not a generic "aks" placeholder (2026-07 incident).
+  //
+  // This function used to hardcode `name: aks` / `current-context: aks`. Every
+  // downstream consumer that re-derives the cluster from a stored kubeconfig
+  // (parseAksClusterRef, grant_aks_access, attach_acr_to_aks, deploy_my_app's
+  // aksRef detection) then read back the literal string "aks" as the cluster
+  // name — which matches no real cluster. The knock-on effects were severe and
+  // hard to trace:
+  //   • deploy_my_app's aksRef stayed null → combined ci.yml/cd.yml generation
+  //     never fired → every Azure monorepo deploy emitted 4 per-service
+  //     workflow files, and only one of them ever got run, so half the images
+  //     were never pushed.
+  //   • grant_aks_access / attach_acr_to_aks couldn't identify the cluster and
+  //     fell back to subscription-wide listing.
+  //
+  // Writing `clusterUser_<rg>_<cluster>` as the user name matches exactly what
+  // `az aks get-credentials` produces, so parseAksClusterRef's existing regex
+  // recovers BOTH the cluster name and its resource group with no further
+  // parsing changes.
+  const userName = `clusterUser_${resourceGroup}_${clusterName}`;
   const kubeconfig = `apiVersion: v1
 kind: Config
 clusters:
 - cluster:
     certificate-authority-data: ${ca}
     server: ${server}
-  name: aks
+  name: ${clusterName}
 contexts:
 - context:
-    cluster: aks
-    user: aks-aad
-  name: aks
-current-context: aks
+    cluster: ${clusterName}
+    user: ${userName}
+  name: ${clusterName}
+current-context: ${clusterName}
 users:
-- name: aks-aad
+- name: ${userName}
   user:
     token: ${tok.accessToken}
 `;
@@ -375,6 +873,27 @@ export async function getAksKubeconfig(
   resourceGroup: string,
   clusterName: string,
   cloudProviderId: string,
+  /**
+   * Which credential to try FIRST.
+   *
+   * "user" (default) — least privilege. On an Entra/AAD cluster this returns
+   *   an exec/kubelogin config that we convert to a self-contained bearer
+   *   token. That token is an AAD access token: it expires in ~1 HOUR.
+   *   Correct for server-side use, where the app re-mints on demand.
+   *
+   * "admin" — cluster-admin credentials. When local accounts are enabled
+   *   (the blueprint's default) these are CERTIFICATE-based: `client-
+   *   certificate-data` + `client-key-data`, valid for the cluster CA's
+   *   lifetime (years, not an hour) and they bypass AAD RBAC entirely.
+   *
+   * WHY THE CHOICE MATTERS (2026-07 incident):
+   * `KUBECONFIG_B64` is written ONCE into a GitHub Actions secret and read by
+   * every future CD run. Handing it a 1-hour AAD token means every deploy
+   * more than an hour later dies with "You must be logged in to the server
+   * (Unauthorized)" — and with auto-deploy-on-push, that is nearly every run.
+   * Long-lived callers MUST pass "admin".
+   */
+  prefer: "user" | "admin" = "user",
 ): Promise<
   { ok: true; kubeconfig: string; mode: "admin" | "user" } | { ok: false; error: string }
 > {
@@ -468,7 +987,11 @@ export async function getAksKubeconfig(
       return null;
     }
     if (/\bexec:/.test(kc)) {
-      const conv = await toTokenKubeconfig(kc, cloudProviderId);
+      // Pass the REAL cluster identity through so the converted kubeconfig
+      // stays parseable by parseAksClusterRef — see the comment in
+      // toTokenKubeconfig for why a generic "aks" name breaks the whole
+      // Azure deploy path.
+      const conv = await toTokenKubeconfig(kc, cloudProviderId, name, rg);
       if (conv.ok) return { kubeconfig: conv.kubeconfig };
       lastErr = conv.error;
       return null;
@@ -479,10 +1002,22 @@ export async function getAksKubeconfig(
   for (const v of versions) {
     // ARM credential actions are SINGULAR (listClusterUserCredential); the plural
     // form returns a bare "404: Page Not Found" from the gateway.
-    const user = await tryCreds("listClusterUserCredential", v);
-    if (user) return { ok: true, kubeconfig: user.kubeconfig, mode: "user" };
-    const admin = await tryCreds("listClusterAdminCredential", v);
-    if (admin) return { ok: true, kubeconfig: admin.kubeconfig, mode: "admin" };
+    //
+    // Order follows `prefer`. Both are still attempted — a caller asking for
+    // long-lived admin certs on a cluster with local accounts DISABLED still
+    // gets a working (if short-lived) user kubeconfig rather than a hard
+    // failure.
+    if (prefer === "admin") {
+      const admin = await tryCreds("listClusterAdminCredential", v);
+      if (admin) return { ok: true, kubeconfig: admin.kubeconfig, mode: "admin" };
+      const user = await tryCreds("listClusterUserCredential", v);
+      if (user) return { ok: true, kubeconfig: user.kubeconfig, mode: "user" };
+    } else {
+      const user = await tryCreds("listClusterUserCredential", v);
+      if (user) return { ok: true, kubeconfig: user.kubeconfig, mode: "user" };
+      const admin = await tryCreds("listClusterAdminCredential", v);
+      if (admin) return { ok: true, kubeconfig: admin.kubeconfig, mode: "admin" };
+    }
   }
 
   // Diagnose: a non-JSON "Page Not Found" can't come from Azure's API. Fire a

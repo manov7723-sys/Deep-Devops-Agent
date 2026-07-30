@@ -98,6 +98,32 @@ export type CicdPipelineSpec = {
   /** Unique CD workflow file basename, e.g. "deploy-frontend.yml". */
   cdFileName?: string;
   /**
+   * GitOps mode — ArgoCD reconciles the cluster from git.
+   *
+   * Changes two things about the generated pipeline:
+   *   • the manifest's image tag becomes an immutable `:<git-sha>`, because a
+   *     `:latest` tag never changes the git content and so never triggers a
+   *     sync — the new image would sit unused in the registry;
+   *   • CI gains a step that rewrites that tag and COMMITS the manifest. That
+   *     commit is the deploy trigger; Argo watches git, not the registry.
+   *
+   * The caller must ALSO skip generating a CD workflow (include.cdWorkflow =
+   * false): a workflow running `kubectl apply` fights Argo's self-heal, and
+   * the two flap against each other.
+   */
+  gitops?: boolean;
+  /**
+   * Trigger CI on push to the deploy branch, not just the Run button.
+   *
+   * Generated workflows are `workflow_dispatch` only by default so files can
+   * land on the branch without immediately building. That surprises anyone
+   * expecting a normal pipeline — 'I pushed and nothing happened'. Turning
+   * this on adds a `push:` trigger (keeping workflow_dispatch for manual
+   * re-runs) and, in a monorepo, a `paths:` filter so a frontend change does
+   * not rebuild the backend.
+   */
+  autoDeployOnPush?: boolean;
+  /**
    * EKS cluster the CD workflow deploys to — enables the KEYLESS CD variant
    * (OIDC role + `aws eks update-kubeconfig`, no KUBECONFIG_B64 secret).
    * AWS registry only. Omit for the kubeconfig-secret CD.
@@ -128,19 +154,174 @@ const CI_WORKFLOW_NAME: Record<CicdRegistry["cloud"], string> = {
   azure: "Build and push to ACR",
 };
 
-/** The registry image:tag the CD deploys (CI pushes :latest + :<sha>). */
-function registryImageLatest(r: CicdRegistry): string {
+/** Registry path WITHOUT a tag — callers append :latest or :<sha>. */
+function registryImageBase(r: CicdRegistry): string {
   switch (r.cloud) {
     case "aws":
-      return `${r.ecrRepositoryUri}:latest`;
+      return r.ecrRepositoryUri;
     case "gcp":
-      return `${r.location}-docker.pkg.dev/${r.projectId}/${r.repository}/${r.image}:latest`;
+      return `${r.location}-docker.pkg.dev/${r.projectId}/${r.repository}/${r.image}`;
     case "azure":
-      return `${r.registry}.azurecr.io/${r.image}:latest`;
+      return `${r.registry}.azurecr.io/${r.image}`;
   }
 }
 
+/**
+ * The image reference baked into the generated manifest.
+ *
+ * GitOps mode uses an IMMUTABLE `:<sha>` tag. `:latest` cannot work under
+ * ArgoCD: Argo reconciles against git, so if the manifest text never changes
+ * neither does the cluster — a new `:latest` push would sit in the registry
+ * forever. The CI workflow rewrites this tag on every build and commits it,
+ * and that commit is what Argo actually deploys.
+ *
+ * Push-based CD keeps `:latest` + `rollout restart`, which is simpler and has
+ * no commit-back step.
+ */
+function registryImageLatest(r: CicdRegistry, gitops = false): string {
+  const base = registryImageBase(r);
+  // A literal placeholder the CI step replaces with the real SHA. Kept
+  // recognisable so a human reading the committed manifest can tell it is
+  // machine-managed.
+  return gitops ? `${base}:REPLACED_BY_CI` : `${base}:latest`;
+}
+
+/**
+ * Append the GitOps "bump image tag and commit" job to a generated CI workflow.
+ *
+ * Appended rather than woven into each cloud's generator so the three
+ * registries (ECR/GAR/ACR) stay untouched and the GitOps behaviour lives in
+ * exactly one place.
+ *
+ * This job IS the deploy trigger. ArgoCD reconciles against git, so the only
+ * way a freshly built image reaches the cluster is for its tag to appear in a
+ * committed manifest. Without this step the pipeline would build, push, and
+ * change nothing.
+ *
+ * `[skip ci]` in the commit message prevents the commit from re-triggering the
+ * same workflow — otherwise every build queues another build, forever.
+ */
+function appendGitopsBumpJob(
+  file: GeneratedFile,
+  args: { manifestDir: string; imageBase: string; branch: string },
+): GeneratedFile {
+  const { manifestDir, imageBase, branch } = args;
+  const dir = manifestDir.replace(/^\/+|\/+$/g, "");
+  const bump = `
+  bump-manifest:
+    name: Bump image tag + commit (GitOps)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${branch}
+          # Default GITHUB_TOKEN is enough to push back to the same repo when
+          # contents:write is granted above.
+          token: \${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point the manifest at this commit's image
+        run: |
+          set -euo pipefail
+          TAG="\${GITHUB_SHA::7}"
+          FILE="${dir}/manifest.yaml"
+          test -f "$FILE" || { echo "::error::$FILE not found"; exit 1; }
+          # Replace whatever tag is currently on our image with the new SHA.
+          # Anchored to the image path so other images in the file are untouched.
+          sed -i -E "s#(${imageBase.replace(/[.*+?^\${}()|[\]\\]/g, "\\\\$&")}):[A-Za-z0-9._-]+#\\1:\${TAG}#g" "$FILE"
+          echo "Image now:"; grep -n "image:" "$FILE" || true
+
+      - name: Commit the bump
+        run: |
+          set -euo pipefail
+          git config user.name  "deepagent-ci"
+          git config user.email "ci@deepagent.local"
+          if git diff --quiet -- "${dir}/manifest.yaml"; then
+            echo "Manifest already at this SHA — nothing to commit."
+            exit 0
+          fi
+          git add "${dir}/manifest.yaml"
+          # [skip ci] stops this commit from re-triggering the build workflow.
+          git commit -m "chore(deploy): \${GITHUB_SHA::7} [skip ci]"
+          git push origin HEAD:${branch}
+          echo "Pushed — ArgoCD will sync this commit to the cluster."
+`;
+  return { ...file, content: `${file.content.replace(/\s*$/, "")}\n${bump}` };
+}
+
+/**
+ * Turn a manual-only CI workflow into one that also fires on push.
+ *
+ * The generators emit `on: workflow_dispatch:` — a deliberate default so
+ * generated files can land on the default branch without immediately building
+ * anything. But it means "I pushed code and nothing happened", which is not
+ * what most people expect from a deploy pipeline. This rewrites the trigger
+ * when the user asks for auto-deploy.
+ *
+ * `workflow_dispatch` is KEPT alongside `push` so the Run button and manual
+ * re-runs still work — losing that would make a failed build unrepeatable
+ * without an empty commit.
+ *
+ * In a monorepo a `paths:` filter is added from the service's build context,
+ * so pushing a frontend change doesn't rebuild and redeploy the backend. The
+ * workflow file itself is included in the filter so edits to the pipeline
+ * still trigger a run.
+ */
+function enablePushTrigger(
+  file: GeneratedFile,
+  args: { branch: string; context?: string; fileName?: string },
+): GeneratedFile {
+  const { branch, context, fileName } = args;
+  const ctx = (context ?? "").replace(/^\.?\/*/, "").replace(/\/+$/, "");
+  const pathsBlock = ctx
+    ? `\n    paths:\n      - "${ctx}/**"\n${fileName ? `      - ".github/workflows/${fileName}"\n` : ""}`
+    : "\n";
+  const replacement = `on:
+  push:
+    branches: ["${branch}"]${pathsBlock}  workflow_dispatch:`;
+
+  // Match the generators' exact shape: `on:` then an indented workflow_dispatch
+  // (with or without an empty-map suffix).
+  const re = /on:\n\s+workflow_dispatch:(\s*\{\})?/;
+  if (!re.test(file.content)) return file; // unknown shape — leave it alone
+  return { ...file, content: file.content.replace(re, replacement) };
+}
+
 function ciWorkflowFor(
+  branch: string,
+  scanGate: boolean,
+  r: CicdRegistry,
+  opts?: {
+    context?: string;
+    workflowName?: string;
+    fileName?: string;
+    useVars?: boolean;
+    gitops?: boolean;
+    manifestDir?: string;
+    imageBase?: string;
+    autoDeployOnPush?: boolean;
+  },
+): GeneratedFile {
+  const withGitops = (f: GeneratedFile): GeneratedFile =>
+    opts?.gitops && opts.manifestDir && opts.imageBase
+      ? appendGitopsBumpJob(f, {
+          manifestDir: opts.manifestDir,
+          imageBase: opts.imageBase,
+          branch,
+        })
+      : f;
+  const withPush = (f: GeneratedFile): GeneratedFile =>
+    opts?.autoDeployOnPush
+      ? enablePushTrigger(f, { branch, context: opts.context, fileName: opts.fileName })
+      : f;
+  // Order matters only for readability: the trigger sits at the top of the
+  // file, the bump job at the bottom, so either order produces the same YAML.
+  return withPush(withGitops(ciWorkflowForInner(branch, scanGate, r, opts)));
+}
+
+function ciWorkflowForInner(
   branch: string,
   scanGate: boolean,
   r: CicdRegistry,
@@ -376,7 +557,7 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
   // CI workflow (needs a registry) + the registry-derived image.
   let imageRef = "";
   if (spec.registry) {
-    imageRef = registryImageLatest(spec.registry);
+    imageRef = registryImageLatest(spec.registry, spec.gitops === true);
     if (want("ciWorkflow")) {
       files.push(
         ciWorkflowFor(spec.branch, spec.scanGate !== false, spec.registry, {
@@ -384,6 +565,10 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
           workflowName: spec.ciWorkflowName,
           fileName: spec.ciFileName,
           useVars: spec.registryUseVars,
+          gitops: spec.gitops === true,
+          autoDeployOnPush: spec.autoDeployOnPush === true,
+          manifestDir: spec.manifestDir,
+          imageBase: registryImageBase(spec.registry),
         }),
       );
       notes.push(

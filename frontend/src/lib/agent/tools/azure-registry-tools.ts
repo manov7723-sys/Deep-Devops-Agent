@@ -18,7 +18,41 @@ import type { Tool } from "./types";
  * secret stored). Detected here so we can automatically switch to the secret-
  * based ACR push path instead of dead-ending the user on "reconnect as SP".
  */
-const NEEDS_SP_ERROR = /Keyless ACR setup needs a SERVICE-PRINCIPAL Azure connection/i;
+/**
+ * Any error that means "this Azure identity can't create AD apps for keyless OIDC" —
+ * fall back to the secret-mode ACR push regardless of how the underlying API
+ * worded the rejection.
+ *
+ * The original matcher only recognised our own internal marker string. Two
+ * problems with that:
+ *   1. When Graph rejected AD-app creation directly (as with a personal-Entra
+ *      account or a work account missing Application.Create), the error came
+ *      back as "Insufficient privileges to complete the operation" — that
+ *      matcher missed it, and the agent surfaced the raw error to the user,
+ *      violating the "Azure OAuth is the intended shape, use secret fallback"
+ *      playbook rule.
+ *   2. Even Application.ReadWrite.OwnedBy scoped tokens can fail with
+ *      "Authorization_RequestDenied" for non-owned apps.
+ *
+ * Every phrasing here means the same thing: keyless is impossible, use
+ * secret mode. Adding a phrasing is cheap; missing one leaks a scary error
+ * to the user for a case the app can auto-heal.
+ */
+const NEEDS_SP_ERROR = new RegExp(
+  [
+    "Keyless ACR setup needs a SERVICE-PRINCIPAL Azure connection",
+    "Insufficient privileges to complete the operation",
+    "Authorization_RequestDenied",
+    "Application\\.ReadWrite",
+    "does not have permission",
+    "does not have authorization",
+    "not authorized to perform",
+    "requires Global Administrator",
+    "requires Application Administrator",
+    "requires .*directory role",
+  ].join("|"),
+  "i",
+);
 
 async function azureProviderId(projectId: string): Promise<string | null> {
   const cp = await prisma.cloudProvider.findFirst({

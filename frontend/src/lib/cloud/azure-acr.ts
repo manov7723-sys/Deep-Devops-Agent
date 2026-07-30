@@ -380,8 +380,34 @@ export type AzurePushSetup =
 export function parseAksClusterRef(
   kubeconfig: string,
 ): { clusterName: string; resourceGroup: string | null } | null {
-  const clusterName = kubeconfig.match(/current-context:\s*([A-Za-z0-9._-]+)/)?.[1];
+  let clusterName = kubeconfig.match(/current-context:\s*([A-Za-z0-9._-]+)/)?.[1];
+
+  // Reject the legacy generic placeholder. Kubeconfigs written by an older
+  // `toTokenKubeconfig` hardcoded `current-context: aks` regardless of the
+  // real cluster, so "aks" here means "identity unknown", NOT "a cluster
+  // called aks". Returning it as a real name is worse than returning null:
+  // callers then look up a cluster that doesn't exist, get a miss, and skip
+  // their list-based fallback because the parse "succeeded". (2026-07 —
+  // this silently disabled combined ci.yml/cd.yml generation for every
+  // Azure monorepo deploy.)
+  if (clusterName === "aks") clusterName = undefined;
+
+  // Fall back to the API-server FQDN, which always encodes the cluster:
+  //   https://<cluster>-<8-char-hash>.hcp.<region>.azmk8s.io:443
+  // Strip the hash suffix to recover the cluster name.
+  if (!clusterName) {
+    const fqdn = kubeconfig.match(
+      /server:\s*https?:\/\/([A-Za-z0-9._-]+)\.hcp\.[a-z0-9]+\.azmk8s\.io/i,
+    )?.[1];
+    if (fqdn) {
+      // AKS appends "-<hash>" where hash is lowercase alphanumeric. Only strip
+      // when the tail actually looks like a generated suffix, so a legitimately
+      // hyphenated cluster name ("my-prod-cluster") survives intact.
+      clusterName = fqdn.replace(/-[a-z0-9]{6,10}$/i, "") || fqdn;
+    }
+  }
   if (!clusterName) return null;
+
   const escaped = clusterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rg = kubeconfig.match(
     new RegExp(`user:\\s*cluster(?:Admin|User)_([A-Za-z0-9._-]+)_${escaped}\\b`),
@@ -389,8 +415,103 @@ export function parseAksClusterRef(
   return { clusterName, resourceGroup: rg ?? null };
 }
 
-/** Built-in role id for "Azure Kubernetes Service Cluster Admin Role". */
+/** Built-in role id for "Azure Kubernetes Service Cluster Admin Role" — ARM
+ *  role that lets a principal call `listClusterAdminCredentials`. Does NOT
+ *  grant kubectl-level access on an AAD-enabled cluster; for that, use
+ *  AKS_RBAC_CLUSTER_ADMIN_ROLE below. */
 const AKS_CLUSTER_ADMIN_ROLE = "0ab0b1a8-8aac-4efd-b8c2-3ee1fb270be8";
+
+/** Built-in role id for "AcrPull" — the least-privilege role that lets a
+ *  principal `docker pull` from an ACR. Kubelet needs this on every ACR the
+ *  cluster's Deployments reference; without it Kubernetes serves
+ *  ImagePullBackOff for every fresh pod. */
+const ACR_PULL_ROLE = "7f951dda-4ed3-4680-a7ca-43fe172d538d";
+
+/**
+ * Attach one or more ACRs to an AKS cluster's kubelet identity, so that
+ * kubelet can pull images from those registries without an imagePullSecret.
+ *
+ * WHY THIS EXISTS (2026-07 incident):
+ * A deploy pushed images to ACR successfully but every pod came up
+ * ImagePullBackOff — the AKS kubelet had no permission on the ACR, so its
+ * anonymous docker-pull was rejected. `az aks update --attach-acr` is the
+ * documented one-liner fix; this is the ARM equivalent so the agent can do
+ * it without shelling to az CLI on the host.
+ *
+ * Two ARM calls:
+ *   1. GET the cluster to discover its kubelet identity's principalId
+ *      (managedClusters/{name}?api-version → properties.identityProfile.kubeletidentity.objectId)
+ *   2. PUT a role assignment on the ACR scope granting AcrPull to that
+ *      principalId. Idempotent — a repeated PUT of the same GUID is a
+ *      no-op.
+ */
+export async function attachAcrToAksCluster(args: {
+  cloudProviderId: string;
+  resourceGroup: string;
+  clusterName: string;
+  acrName: string;
+  /** ACR resource group; often the same as the cluster's RG. */
+  acrResourceGroup: string;
+}): Promise<Res<{ kubeletObjectId: string }>> {
+  const { cloudProviderId, resourceGroup, clusterName, acrName, acrResourceGroup } = args;
+  const armTok = await getAzureAccessToken(cloudProviderId);
+  if (!armTok.ok) return { ok: false, error: armTok.error };
+  const sp = await resolveSp(cloudProviderId);
+  if (!sp.ok) return sp;
+  const subscription = sp.data.subscription;
+
+  const aksId = `/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ContainerService/managedClusters/${clusterName}`;
+  const aksGet = await http(
+    armTok.accessToken,
+    `${ARM}${aksId}?api-version=2024-02-01`,
+    "GET",
+  );
+  if (!aksGet.ok) {
+    return { ok: false, error: `Couldn't fetch AKS cluster to find its kubelet identity: ${aksGet.error}` };
+  }
+  const kubeletOid = (
+    aksGet.data as {
+      properties?: { identityProfile?: { kubeletidentity?: { objectId?: string } } };
+    }
+  ).properties?.identityProfile?.kubeletidentity?.objectId;
+  if (!kubeletOid) {
+    return {
+      ok: false,
+      error: `AKS cluster "${clusterName}" has no kubelet identity — is it an older cluster? Enable managed identity on it first.`,
+    };
+  }
+
+  const acrId = `/subscriptions/${subscription}/resourceGroups/${acrResourceGroup}/providers/Microsoft.ContainerRegistry/registries/${acrName}`;
+  const assignmentName = await deterministicGuid(`${kubeletOid}:${acrName}:acrpull`);
+  const ra = await http(
+    armTok.accessToken,
+    `${ARM}${acrId}/providers/Microsoft.Authorization/roleAssignments/${assignmentName}?api-version=2022-04-01`,
+    "PUT",
+    {
+      properties: {
+        roleDefinitionId: `/subscriptions/${subscription}/providers/Microsoft.Authorization/roleDefinitions/${ACR_PULL_ROLE}`,
+        principalId: kubeletOid,
+        principalType: "ServicePrincipal",
+      },
+    },
+  );
+  if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error)) {
+    return { ok: false, error: `AcrPull role assignment failed: ${ra.error}` };
+  }
+
+  return { ok: true, data: { kubeletObjectId: kubeletOid } };
+}
+
+/** Built-in role id for "Azure Kubernetes Service RBAC Cluster Admin" — the
+ *  role that ACTUALLY lets kubectl create/get resources on a cluster with
+ *  `azure_rbac_enabled = true`. Distinct from the ARM admin role above; the
+ *  two are frequently confused because their names are one word apart.
+ *
+ *  The AKS blueprint this codebase generates ships with `azure_rbac_enabled
+ *  = true`, so every deploy runner needs this role on the cluster or every
+ *  kubectl call fails with "does not have access to the resource in Azure".
+ */
+const AKS_RBAC_CLUSTER_ADMIN_ROLE = "b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b";
 
 /**
  * Grant a service principal admin access to fetch AKS credentials (the same
@@ -428,6 +549,85 @@ export async function grantAksClusterAdmin(
   if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error))
     return { ok: false, error: `AKS admin role assignment failed: ${ra.error}` };
   return { ok: true, data: true };
+}
+
+/**
+ * Grant an AAD principal `Azure Kubernetes Service RBAC Cluster Admin` on an
+ * AKS cluster — the role that lets kubectl actually create/get resources when
+ * the cluster is AAD-RBAC-enabled (which the blueprint here always is).
+ *
+ * WHY THIS IS SEPARATE FROM grantAksClusterAdmin (2026-07 incident):
+ * The two roles are one word apart in the Azure portal ("Cluster Admin" vs
+ * "RBAC Cluster Admin") and DO different things:
+ *   • grantAksClusterAdmin — ARM privilege to fetch admin credentials
+ *   • grantAksRbacClusterAdmin — cluster-side kubectl privileges
+ * A CD workflow using a User/SP token to speak to an AAD-RBAC cluster hits
+ * "does not have access to the resource in Azure. Update role assignment to
+ * allow access" for every kubectl call until this role is assigned. This
+ * helper is the auto-heal path.
+ *
+ * Idempotent. Works for User, ServicePrincipal, and Group principal types —
+ * the type must be passed in so ARM's role-assignment API accepts it (it
+ * rejects PUTs whose type doesn't match Graph's record for the object).
+ */
+export async function grantAksRbacClusterAdmin(
+  cloudProviderId: string,
+  principalObjectId: string,
+  principalType: "User" | "ServicePrincipal" | "Group",
+  resourceGroup: string,
+  clusterName: string,
+): Promise<Res<true>> {
+  const armTok = await getAzureAccessToken(cloudProviderId);
+  if (!armTok.ok) return { ok: false, error: armTok.error };
+  const sp = await resolveSp(cloudProviderId);
+  if (!sp.ok) return sp;
+  const aksId = `/subscriptions/${sp.data.subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ContainerService/managedClusters/${clusterName}`;
+  const assignmentName = await deterministicGuid(
+    `${principalObjectId}:${clusterName}:aks-rbac-admin`,
+  );
+  const ra = await http(
+    armTok.accessToken,
+    `${ARM}${aksId}/providers/Microsoft.Authorization/roleAssignments/${assignmentName}?api-version=2022-04-01`,
+    "PUT",
+    {
+      properties: {
+        roleDefinitionId: `/subscriptions/${sp.data.subscription}/providers/Microsoft.Authorization/roleDefinitions/${AKS_RBAC_CLUSTER_ADMIN_ROLE}`,
+        principalId: principalObjectId,
+        principalType,
+      },
+    },
+  );
+  if (!ra.ok && !/already exists|RoleAssignmentExists/i.test(ra.error))
+    return { ok: false, error: `AKS RBAC Cluster Admin assignment failed: ${ra.error}` };
+  return { ok: true, data: true };
+}
+
+/**
+ * Decode the object id (oid) of whoever the connected Azure token was minted
+ * for, and infer whether it's a user or a service principal. Used by the
+ * grant_aks_access tool when the caller doesn't supply a principalObjectId —
+ * the connected identity is almost always the one that needs the role.
+ */
+export function callerIdentityFromToken(
+  jwt: string,
+): { oid: string; type: "User" | "ServicePrincipal" } | null {
+  try {
+    const payload = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64").toString("utf8")) as {
+      oid?: string;
+      appid?: string;
+      idtyp?: string;
+    };
+    if (!payload.oid) return null;
+    // `idtyp` is present on newer AAD tokens and reliably tags the identity;
+    // fall back to "appid present" as the SP heuristic on older tokens.
+    const type: "User" | "ServicePrincipal" =
+      payload.idtyp === "app" || (!payload.idtyp && payload.appid)
+        ? "ServicePrincipal"
+        : "User";
+    return { oid: payload.oid, type };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -631,8 +831,33 @@ export async function setupAzureDeployRegistry(
       },
     };
   }
-  // Non-OAuth failure: surface it — don't silently mask a real Graph/ARM issue.
-  if (!/Keyless ACR setup needs a SERVICE-PRINCIPAL Azure connection/i.test(oidc.error)) {
+  // Non-OAuth failure: surface it — don't silently mask a real Graph/ARM
+  // issue.
+  //
+  // Any phrasing that reduces to "this identity can't create AD apps" MUST
+  // trigger the secret-mode fallback rather than reach the user. The original
+  // matcher only knew our own internal marker; when Graph rejected the AD-app
+  // creation directly (personal-Entra accounts, work accounts without
+  // Application.Create, Authorization_RequestDenied for scoped tokens) the
+  // check missed it and the deploy failed with a scary error the app could
+  // have silently healed. Matches must stay in sync with the same list in
+  // agent/tools/azure-registry-tools.ts.
+  const NEEDS_SP = new RegExp(
+    [
+      "Keyless ACR setup needs a SERVICE-PRINCIPAL Azure connection",
+      "Insufficient privileges to complete the operation",
+      "Authorization_RequestDenied",
+      "Application\\.ReadWrite",
+      "does not have permission",
+      "does not have authorization",
+      "not authorized to perform",
+      "requires Global Administrator",
+      "requires Application Administrator",
+      "requires .*directory role",
+    ].join("|"),
+    "i",
+  );
+  if (!NEEDS_SP.test(oidc.error)) {
     return oidc;
   }
 
