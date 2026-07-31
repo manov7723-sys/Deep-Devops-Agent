@@ -149,19 +149,54 @@ export async function ensureRdsReachableFromCluster(args: {
       if (rsg) nodeSgs.add(rsg);
     }
 
-    // The per-nodegroup SG above is only present when remote access is
-    // configured. The SG that actually carries pod traffic is the cluster's
-    // managed "additional" SG, which EKS attaches to every node.
+    // The per-nodegroup SG above only exists when remote access is configured,
+    // and the cluster's own clusterSecurityGroupId is NOT necessarily what is
+    // attached to worker instances — the terraform-aws-modules EKS module
+    // creates a SEPARATE node security group and attaches that instead.
+    // Opening the RDS firewall for the cluster SG in that case looks like it
+    // worked and changes nothing: pods still egress from the node SG and the
+    // connection still times out.
+    //
+    // The only authoritative answer is the EC2 instances themselves. Query
+    // running instances tagged for this cluster and take the SGs actually on
+    // them. The two lookups above are kept as a fallback for clusters where no
+    // instance is running yet (a scaled-to-zero node group).
     const cl = await awsJson(["eks", "describe-cluster", "--name", clusterName], env, region, cwd);
     let clusterVpcId: string | undefined;
+    let clusterSg: string | undefined;
     if (cl.ok) {
       const cluster = cl.json.cluster as
         | { resourcesVpcConfig?: { clusterSecurityGroupId?: string; vpcId?: string } }
         | undefined;
-      const csg = cluster?.resourcesVpcConfig?.clusterSecurityGroupId;
-      if (csg) nodeSgs.add(csg);
+      clusterSg = cluster?.resourcesVpcConfig?.clusterSecurityGroupId;
       clusterVpcId = cluster?.resourcesVpcConfig?.vpcId;
     }
+
+    const nodeInstances = await awsJson(
+      [
+        "ec2",
+        "describe-instances",
+        "--filters",
+        `Name=tag:kubernetes.io/cluster/${clusterName},Values=owned,shared`,
+        "Name=instance-state-name,Values=running",
+      ],
+      env,
+      region,
+      cwd,
+    );
+    if (nodeInstances.ok) {
+      const reservations =
+        (nodeInstances.json.Reservations as
+          | Array<{ Instances?: Array<{ SecurityGroups?: Array<{ GroupId?: string }> }> }>
+          | undefined) ?? [];
+      for (const r of reservations)
+        for (const i of r.Instances ?? [])
+          for (const g of i.SecurityGroups ?? []) if (g.GroupId) nodeSgs.add(g.GroupId);
+    }
+
+    // Fallback only — an SG on a real instance is always preferred over the
+    // control-plane's SG, which pods do not egress from.
+    if (nodeSgs.size === 0 && clusterSg) nodeSgs.add(clusterSg);
 
     if (nodeSgs.size === 0) {
       return {

@@ -25,6 +25,9 @@ import { listGcpInstancesTool } from "./list-gcp-instances";
 import { listGcpProjectsTool, setGcpContextTool } from "./gcp-context-tools";
 import { setupGithubOidcEcrTool } from "./setup-github-oidc-ecr";
 import { grantEksAccessTool } from "./grant-eks-access";
+import { grantAksAccessTool } from "./grant-aks-access";
+import { applyAppEnvSecretTool } from "./apply-app-env-secret";
+import { attachAcrToAksTool } from "./attach-acr-to-aks";
 import { listEcrReposTool } from "./list-ecr-repos";
 import { analyzeAppServicesTool } from "./analyze-app-services";
 import { listRepoBranchesTool } from "./list-repo-branches";
@@ -264,6 +267,12 @@ export const ALL_TOOLS: Tool[] = [
   runHelmUpgradeTool,
   // EKS cluster access — grant an IAM role K8s RBAC via Access Entries (no aws-auth)
   grantEksAccessTool,
+  // AKS cluster access — grant the AAD principal 'RBAC Cluster Admin' (no Portal click)
+  grantAksAccessTool,
+  // App config secrets — write user's .env into a K8s Secret + roll pods
+  applyAppEnvSecretTool,
+  // Attach ACRs to AKS (kubelet AcrPull) — fixes ImagePullBackOff
+  attachAcrToAksTool,
   // Registry + service analysis for the deploy flow (list ECR repos, detect frontend/backend)
   listEcrReposTool,
   analyzeAppServicesTool,
@@ -328,6 +337,7 @@ const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp" | "proxmox"> = {
   setup_github_oidc_ecr: "aws",
   generate_ecr_workflow: "aws",
   grant_eks_access: "aws",
+  grant_aks_access: "azure",
   list_ecr_repos: "aws",
   // RDS provisioner — AWS-only. create_rds_k8s_secret + connect_existing_rds
   // stay cloud-agnostic (they only write a K8s Secret into the app namespace).

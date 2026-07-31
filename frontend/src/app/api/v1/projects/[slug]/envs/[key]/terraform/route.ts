@@ -24,7 +24,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
 }
 
 const StartBody = z.object({
-  action: z.enum(["plan", "apply"]).default("plan"),
+  action: z.enum(["plan", "apply", "destroy"]).default("plan"),
   name: z.string().trim().min(1).max(80).default("infra"),
   // Generated Terraform tree: relative path → contents. Comes from the EKS box
   // or any infra generator. Capped to keep request + workdir sane.
@@ -73,13 +73,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   // blindly S3, which used to force AWS creds onto every apply. Refuse `apply`
   // without any backend so state doesn't land in a throwaway temp dir.
   const backend = pickBackendForEnv(env);
-  if (action === "apply" && !backend) {
+  // Destroy MUST run against the same backend the apply wrote to — otherwise
+  // it reads an empty local state, decides "nothing to destroy", and returns
+  // green while resources remain in the cloud. Same guard as apply.
+  if ((action === "apply" || action === "destroy") && !backend) {
     return NextResponse.json(
       {
         ok: false,
         code: "no_state_backend",
         message:
-          "Set a Terraform state backend for this environment before applying (Cluster connection page → Terraform state backend).",
+          "Set a Terraform state backend for this environment before running apply/destroy (Cluster connection page → Terraform state backend).",
       },
       { status: 409 },
     );

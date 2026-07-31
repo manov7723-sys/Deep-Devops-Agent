@@ -69,22 +69,39 @@ export function ChangeRepoModal({
 
   const change = useMutation({
     mutationFn: async (r: GitHubRow) => {
-      // Step 1: upsert the Repo row (idempotent on ownerId+fullName).
-      const create = await api.post<{ ok: boolean; repo?: { id: string }; code?: string }>(
-        "/repos",
-        {
-          fullName: r.fullName,
-          description: "",
-          lang: r.lang,
-          kind: "Service",
-          defaultBranch: r.defaultBranch,
-          visibility: r.kind,
-          oauthAccountId: effectiveAccountId ?? undefined,
-          provider,
-          providerRepoId: r.providerRepoId,
-        },
-      );
-      let repoId = create.repo?.id ?? null;
+      // Step 1: ensure a Repo row exists.
+      //
+      // POST /repos returns 409 when the repo is ALREADY connected — which is
+      // the normal case when switching BACK to a repo you connected before, or
+      // one attached to another project. The api client throws on any non-2xx,
+      // so an unguarded call aborts the mutation here and step 2 (the actual
+      // switch) never runs — surfacing as a bare "Conflict" on a screen whose
+      // whole job is to change repos.
+      //
+      // A 409 means "the row you want already exists", which for our purposes
+      // is success: swallow it and fall through to the lookup below.
+      let repoId: string | null = null;
+      try {
+        const create = await api.post<{ ok: boolean; repo?: { id: string }; code?: string }>(
+          "/repos",
+          {
+            fullName: r.fullName,
+            description: "",
+            lang: r.lang,
+            kind: "Service",
+            defaultBranch: r.defaultBranch,
+            visibility: r.kind,
+            oauthAccountId: effectiveAccountId ?? undefined,
+            provider,
+            providerRepoId: r.providerRepoId,
+          },
+        );
+        repoId = create.repo?.id ?? null;
+      } catch (e) {
+        const status = (e as { status?: number } | null)?.status;
+        // Anything other than "already exists" is a real failure worth showing.
+        if (status !== 409) throw e;
+      }
       if (!repoId) {
         const all =
           await api.get<Array<{ id: string; fullName: string; provider?: GitProvider }>>("/repos");

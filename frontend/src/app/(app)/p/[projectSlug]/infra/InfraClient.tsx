@@ -13,6 +13,8 @@ import { api } from "@/lib/api/client";
 import {
   useDeleteGkeCluster,
   useRerunTerraformRun,
+  useDestroyTerraformRun,
+  useDeleteTerraformState,
   useDeleteTerraformRun,
   useTerraformRuns,
   type TfRun,
@@ -262,6 +264,8 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
   const runningTone =
     run.status === "succeeded" ? "ok" : run.status === "failed" ? "danger" : "info";
   const rerun = useRerunTerraformRun(slug, run.envKey);
+  const destroy = useDestroyTerraformRun(slug, run.envKey);
+  const deleteState = useDeleteTerraformState(slug, run.envKey);
   const deleteRun = useDeleteTerraformRun(slug, run.envKey);
   const deleteGke = useDeleteGkeCluster(slug, run.envKey);
   const isTerminal = run.status === "succeeded" || run.status === "failed";
@@ -349,7 +353,7 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
               variant="outline"
               icon="refresh"
               loading={rerun.isPending}
-              disabled={!isTerminal || rerun.isPending || deleteGke.isPending || deleteRun.isPending}
+              disabled={!isTerminal || rerun.isPending || deleteGke.isPending || deleteRun.isPending || destroy.isPending || deleteState.isPending}
               title={
                 isTerminal
                   ? `Replay this run with the same files + backend.`
@@ -358,6 +362,60 @@ function RunCard({ slug, run }: { slug: string; run: TfRun }) {
               onClick={() => rerun.mutate({ runId: run.id })}
             >
               {rerunLabel}
+            </Btn>
+            {/*
+              Destroy — runs `terraform destroy -auto-approve` against the same
+              files + backend. Only shown for runs whose original action was
+              apply (destroying a plan-only run makes no sense). Guarded with a
+              confirm because it wipes real cloud resources.
+            */}
+            {run.action === "apply" && (
+              <Btn
+                size="sm"
+                variant="outline"
+                icon="trash"
+                loading={destroy.isPending}
+                disabled={!isTerminal || rerun.isPending || destroy.isPending || deleteState.isPending || deleteRun.isPending}
+                title={
+                  isTerminal
+                    ? "Run terraform destroy against the same stack — wipes every resource this apply created (~5-15 min for AKS/EKS)."
+                    : "Wait for the run to finish before destroying."
+                }
+                onClick={() => {
+                  if (window.confirm(`terraform destroy for "${run.name}"?\nThis wipes every cloud resource this apply created. Not reversible.`)) {
+                    destroy.mutate({ runId: run.id });
+                  }
+                }}
+              >
+                Destroy
+              </Btn>
+            )}
+            {/*
+              Delete state — removes the tfstate blob from the env's remote
+              backend. Recovery path for a partial apply whose state upload
+              failed (network drop mid-apply): after destroy, the state is
+              often stale; delete it so the next apply starts clean.
+              Also useful when the cluster was manually deleted in the cloud
+              console and state now references non-existent resources.
+            */}
+            <Btn
+              size="sm"
+              variant="outline"
+              icon="trash"
+              loading={deleteState.isPending}
+              disabled={!isTerminal || rerun.isPending || destroy.isPending || deleteState.isPending || deleteRun.isPending}
+              title={
+                isTerminal
+                  ? "Delete this stack's terraform state blob. Use AFTER destroy (or when state is orphaned) so the next apply starts fresh. Cloud resources are NOT touched."
+                  : "Wait for the run to finish before deleting state."
+              }
+              onClick={() => {
+                if (window.confirm(`Delete terraform state for stack "${run.name}"?\nDoes NOT touch cloud resources — run Destroy first if you want them gone.`)) {
+                  deleteState.mutate({ stack: run.name });
+                }
+              }}
+            >
+              Delete state
             </Btn>
             <Btn
               size="sm"

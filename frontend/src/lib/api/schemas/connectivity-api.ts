@@ -382,6 +382,28 @@ export const CreateAksRequest = z.object({
   monitoring: z.boolean().optional(),
   keyVaultSecretsProvider: z.boolean().optional(),
   kedaVpa: z.boolean().optional(),
+
+  // ── Terraform state backend (new 2026-07) ────────────────────────
+  // "local"      — no azurerm backend block; state lives on the runner disk.
+  //                Fine for demos and short-lived clusters, lost with the runner.
+  // "existing"   — reuse an Azure Storage account the user already has;
+  //                stateStorageAccount + stateContainer (+ stateResourceGroup) must
+  //                point at something ARM can actually read.
+  // "create"     — create a fresh storage account and container before the
+  //                Terraform apply runs. stateStorageAccount is the new SA's
+  //                name (must be globally unique, 3-24 lowercase alphanumeric).
+  //
+  // The wizard defaults to "create" with a suggested name so the user always
+  // walks away with a valid backend rather than the previous silent surprise.
+  stateBackendMode: z.enum(["local", "existing", "create"]).optional(),
+  stateResourceGroup: z.string().trim().max(90).optional(),
+  stateStorageAccount: z
+    .string()
+    .trim()
+    .max(24)
+    .regex(/^[a-z0-9]{3,24}$/, "Storage account: 3-24 lowercase letters/digits only.")
+    .optional(),
+  stateContainer: z.string().trim().max(63).default("tfstate").optional(),
 });
 export type CreateAksRequest = z.infer<typeof CreateAksRequest>;
 

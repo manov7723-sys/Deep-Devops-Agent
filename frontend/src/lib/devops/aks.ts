@@ -77,10 +77,13 @@ export type AksDefaults = Omit<AksSpec, "name" | "resourceGroup">;
 export const AKS_DEFAULTS: AksDefaults = {
   location: "eastus",
   kubernetesVersion: "1.33",
-  // Standard_B2s (2 vCPU) fits inside Azure's 4-vCPU trial quota — system pool
-  // + app pool together consume 4 vCPU on the minimum config. Bumping this
-  // requires either a quota increase or a Pay-As-You-Go subscription.
-  vmSize: "Standard_B2s",
+  // Standard_D2s_v3 (2 vCPU, 8GB) is the smallest SKU AKS reliably accepts
+  // across trial + PAYG subs. Standard_B2s LOOKS cheaper but AKS rejects
+  // B-series for many system-pool creation calls with a "SKU not supported"
+  // 400 that lists everything EXCEPT B-series as valid, wasting a 45-second
+  // apply. Two D2s_v3 nodes (system + app pool) = 4 vCPU, which still fits
+  // the default 4-vCPU trial quota.
+  vmSize: "Standard_D2s_v3",
   desiredNodes: 1,
   minNodes: 1,
   maxNodes: 2,
@@ -106,14 +109,14 @@ export const AKS_DEFAULTS: AksDefaults = {
   workloadIdentity: true,
   azurePolicy: true,
   systemDiskSize: 30,
-  // Managed (not Ephemeral) — Standard_B2s doesn't support ephemeral OS disks,
-  // and B-series is the cheapest option that fits trial quotas.
+  // Managed disks with D-series (not Ephemeral): D2s_v3 has a small cache
+  // that can't hold a full OS image reliably; Managed is universal.
   systemOsDiskType: "Managed",
   systemMaxPods: 50,
   appNodePool: true,
-  appVmSize: "Standard_B2s",
-  // Regular (not Spot) — Spot capacity for small B-series VMs is rarely
-  // available and errors with "SkuNotAvailable" on trial subs.
+  appVmSize: "Standard_D2s_v3",
+  // Regular (not Spot) — Spot capacity for small SKUs is rarely available on
+  // trial subs and errors with "SkuNotAvailable".
   appSpot: false,
   appMinNodes: 1,
   appMaxNodes: 2,
@@ -122,16 +125,23 @@ export const AKS_DEFAULTS: AksDefaults = {
   kedaVpa: true,
 };
 
+// AKS-supported SKUs, ordered smallest-to-largest so the wizard's first-choice
+// default is the cheapest workable option. B-series intentionally omitted:
+// AKS refuses B-series in the CreateOrUpdate 400 with an allow-list that
+// excludes them, and a "trial-friendly" pick that never applies is worse than
+// a $18/mo pick that always does.
 export const AKS_VM_SIZES = [
-  "Standard_B2s",
-  "Standard_DS2_v2",
   "Standard_D2s_v3",
+  "Standard_DS2_v2",
   "Standard_D4s_v3",
   "Standard_D8s_v3",
   "Standard_E4s_v3",
 ];
 export const AKS_K8S_VERSIONS = ["1.36", "1.35", "1.34", "1.33", "1.32", "1.31", "1.30"];
-export const AKS_DISK_SIZES = [64, 128, 256, 512];
+// 30 GB first — matches AKS_DEFAULTS.systemDiskSize and fits Ephemeral OS on
+// the small D-series SKUs the wizard tends to pick. 128 stays in the list for
+// users who explicitly want it and know their SKU's cache size.
+export const AKS_DISK_SIZES = [30, 64, 128, 256, 512];
 export const AKS_REGIONS = [
   "eastus",
   "eastus2",

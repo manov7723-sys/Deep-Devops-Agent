@@ -151,21 +151,10 @@ export class GithubRepoClient implements GitRepoClient {
     files: CommitFile[];
   }): Promise<{ commitSha: string }> {
     const { branch, message, files } = args;
-    const headSha = await this.refSha(branch);
-    if (!headSha)
-      throw new Error(
-        `Branch "${branch}" not found in ${this.fullName} — call ensureBranch first.`,
-      );
 
-    // Base tree of the branch HEAD.
-    const commitRes = await this.http(
-      `${this.apiBase}/repos/${this.fullName}/git/commits/${headSha}`,
-      { headers: this.headers(), cache: "no-store" },
-    );
-    if (!commitRes.ok) throw new Error(`Could not read HEAD commit: ${commitRes.status}`);
-    const baseTree = ((await commitRes.json()) as { tree: { sha: string } }).tree.sha;
-
-    // Blob per file, then a tree, then a commit, then move the ref.
+    // Blobs FIRST, once. Git blobs are content-addressed, so uploading them is
+    // independent of which commit ends up referencing them — they survive a
+    // retry below without being re-sent.
     const tree = await Promise.all(
       files.map(async (f) => {
         const blob = await this.post(`/repos/${this.fullName}/git/blobs`, {
@@ -177,37 +166,84 @@ export class GithubRepoClient implements GitRepoClient {
         return { path: f.path.replace(/^\/+/, ""), mode: "100644", type: "blob", sha };
       }),
     );
-    const treeRes = await this.post(`/repos/${this.fullName}/git/trees`, {
-      base_tree: baseTree,
-      tree,
-    });
-    if (!treeRes.ok)
-      throw new Error(`Tree failed: ${treeRes.status} ${await treeRes.text().catch(() => "")}`);
-    const newTree = ((await treeRes.json()) as { sha: string }).sha;
 
-    const commit = await this.post(`/repos/${this.fullName}/git/commits`, {
-      message,
-      tree: newTree,
-      parents: [headSha],
-    });
-    if (!commit.ok)
-      throw new Error(`Commit failed: ${commit.status} ${await commit.text().catch(() => "")}`);
-    const newCommitSha = ((await commit.json()) as { sha: string }).sha;
+    // Read HEAD → build tree → commit → move ref, retrying when the branch
+    // moves underneath us.
+    //
+    // WHY THE RETRY: this is a read-modify-write across many HTTP round-trips
+    // (one per file, plus tree/commit/ref). If ANYTHING else pushes to the
+    // branch in that window, the ref PATCH is rejected:
+    //
+    //     422 Update is not a fast forward
+    //
+    // …surfaced to the user as "the branch has diverged, sync your local repo
+    // and try again" — advice that doesn't apply, since nothing here is local.
+    // A deploy writes Dockerfiles, workflows and manifests for every service,
+    // so the window is wide and a concurrent push (a teammate, CI's own commit
+    // in GitOps mode, or a second deploy) is entirely ordinary.
+    //
+    // Re-reading HEAD and rebuilding on the new tip is exactly what a human
+    // would do, and it PRESERVES the other commit: base_tree comes from the
+    // NEW head, so their changes stay and ours layer on top. No force-push,
+    // nothing overwritten.
+    const MAX_ATTEMPTS = 4;
+    let lastErr = "";
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const headSha = await this.refSha(branch);
+      if (!headSha)
+        throw new Error(
+          `Branch "${branch}" not found in ${this.fullName} — call ensureBranch first.`,
+        );
 
-    const patch = await this.http(
-      `${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodePath(branch)}`,
-      {
-        method: "PATCH",
-        headers: { ...this.headers(), "Content-Type": "application/json" },
-        body: JSON.stringify({ sha: newCommitSha }),
-      },
-    );
-    if (!patch.ok)
-      throw new Error(
-        `Could not update branch ref: ${patch.status} ${await patch.text().catch(() => "")}`,
+      const commitRes = await this.http(
+        `${this.apiBase}/repos/${this.fullName}/git/commits/${headSha}`,
+        { headers: this.headers(), cache: "no-store" },
       );
+      if (!commitRes.ok) throw new Error(`Could not read HEAD commit: ${commitRes.status}`);
+      const baseTree = ((await commitRes.json()) as { tree: { sha: string } }).tree.sha;
 
-    return { commitSha: newCommitSha };
+      const treeRes = await this.post(`/repos/${this.fullName}/git/trees`, {
+        base_tree: baseTree,
+        tree,
+      });
+      if (!treeRes.ok)
+        throw new Error(`Tree failed: ${treeRes.status} ${await treeRes.text().catch(() => "")}`);
+      const newTree = ((await treeRes.json()) as { sha: string }).sha;
+
+      const commit = await this.post(`/repos/${this.fullName}/git/commits`, {
+        message,
+        tree: newTree,
+        parents: [headSha],
+      });
+      if (!commit.ok)
+        throw new Error(`Commit failed: ${commit.status} ${await commit.text().catch(() => "")}`);
+      const newCommitSha = ((await commit.json()) as { sha: string }).sha;
+
+      const patch = await this.http(
+        `${this.apiBase}/repos/${this.fullName}/git/refs/heads/${encodePath(branch)}`,
+        {
+          method: "PATCH",
+          headers: { ...this.headers(), "Content-Type": "application/json" },
+          body: JSON.stringify({ sha: newCommitSha }),
+        },
+      );
+      if (patch.ok) return { commitSha: newCommitSha };
+
+      const body = await patch.text().catch(() => "");
+      lastErr = `${patch.status} ${body}`;
+      // Only a stale-parent rejection is worth retrying. A 403 (protected
+      // branch) or 404 (bad ref) will fail identically every time — retrying
+      // just delays a clear error.
+      const stale = /not a fast forward|fast-forward/i.test(body) || patch.status === 409;
+      if (!stale || attempt === MAX_ATTEMPTS) break;
+      // Brief backoff so a burst of concurrent writers doesn't lock-step.
+      await new Promise((r) => setTimeout(r, 400 * attempt));
+    }
+
+    throw new Error(
+      `Could not update branch ref after ${MAX_ATTEMPTS} attempts: ${lastErr}. ` +
+        `The branch "${branch}" is being written to concurrently, or is protected against direct pushes.`,
+    );
   }
 
   async openChangeRequest(args: {

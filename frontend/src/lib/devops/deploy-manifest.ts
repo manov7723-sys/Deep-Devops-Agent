@@ -293,6 +293,24 @@ function service(spec: DeploySpec, app: string): string {
     annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] = "internet-facing";
     annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "ip";
   }
+  // Azure: give the LoadBalancer a real hostname instead of a bare IP.
+  //
+  // AWS returns a DNS name from `type: LoadBalancer` for free; Azure returns
+  // only an IP unless this annotation is present, in which case AKS registers
+  // <label>.<region>.cloudapp.azure.com against the public IP. Without it,
+  // users get "20.121.45.67" as their app URL — unusable in a browser bookmark,
+  // impossible to put in an OAuth callback, and it CHANGES whenever the
+  // Service is recreated. With it, the hostname is stable across redeploys.
+  //
+  // The label must be unique per region and DNS-safe (lowercase alphanumeric +
+  // hyphens, no leading/trailing hyphen). The app name already satisfies that
+  // (sanitizeAppName upstream), so we reuse it directly — a collision means
+  // another cluster in the same region already claimed the name, and Azure
+  // surfaces that as a clear Service event rather than a silent failure.
+  if (svcType === "LoadBalancer" && spec.cloud === "azure") {
+    const label = app.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "");
+    if (label) annotations["service.beta.kubernetes.io/azure-dns-label-name"] = label;
+  }
   const annLines = Object.entries(annotations).map(
     ([k, v]) => `    ${JSON.stringify(k)}: ${q(v)}`,
   );

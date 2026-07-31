@@ -993,3 +993,208 @@ export function useSubmitRdsConnect(slug: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug, "secrets"] }),
   });
 }
+
+// ── App config secrets (the non-database half of "make this app run") ─────
+
+export type AppSecretsInput = {
+  envKey: string;
+  namespace: string;
+  secretName?: string;
+  /** `.env`-style text, KEY=value per line. Parsed server-side; never stored. */
+  envText: string;
+};
+
+export type AppSecretsResult = {
+  ok: boolean;
+  secretName?: string;
+  namespace?: string;
+  keysWritten?: string[];
+  /** Lines that weren't KEY=value — surfaced rather than silently dropped. */
+  skippedLines?: string[];
+  /** Keys whose value points at localhost — fatal for OAuth callbacks in a cluster. */
+  localhostKeys?: string[];
+  wired?: RdsWireOutcome[];
+  wireError?: string;
+  summary?: string;
+  message?: string;
+  code?: string;
+};
+
+/** Write the app's config Secret and roll the namespace's Deployments. */
+export function useSubmitAppSecrets(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AppSecretsInput) => {
+      const res = await api.post<AppSecretsResult>(`/projects/${slug}/app-secrets`, input);
+      if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not write app secrets.");
+      return res;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug] }),
+  });
+}
+
+// ── Azure Database for PostgreSQL / MySQL (Flexible Server) ───────────────
+// Azure counterpart of the AWS RDS hooks above. Same four-step contract:
+// firewall → Secret → envFrom wiring → optional create-db / migrate.
+
+export type AzureDbServer = {
+  name: string;
+  resourceGroup: string;
+  location: string;
+  engine: "postgres" | "mysql";
+  fqdn: string;
+  adminUser: string;
+  version: string;
+  /** false = VNet-integrated (private); firewall rules don't apply. */
+  publicAccess: boolean;
+  state: string;
+};
+
+export type AzureDbListResult = {
+  ok: boolean;
+  connected?: boolean;
+  servers?: AzureDbServer[];
+  note?: string;
+};
+
+/** List Flexible Servers in the connected Azure subscription. */
+export function useAzureDatabases(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: ["p", slug, "azure-databases"],
+    queryFn: () => api.get<AzureDbListResult>(`/projects/${slug}/azure/databases`),
+    enabled: enabled && !!slug,
+    staleTime: 60_000,
+  });
+}
+
+export type AzureDbConnectInput = {
+  envKey: string;
+  namespace: string;
+  secretName?: string;
+  serverName: string;
+  database: string;
+  username: string;
+  password: string;
+  createDatabase?: boolean;
+  runMigrations?: boolean;
+};
+
+export type AzureDbConnectResult = {
+  ok: boolean;
+  server?: { name: string; engine: string; fqdn: string };
+  namespace?: string;
+  secretName?: string;
+  keysWritten?: string[];
+  network?: string[];
+  networkError?: string;
+  warnings?: string[];
+  wired?: RdsWireOutcome[];
+  wireError?: string;
+  bootstrap?: { step: "create-database" | "migrate"; status: "done" | "skipped" | "failed"; message: string }[];
+  summary?: string;
+  message?: string;
+  code?: string;
+};
+
+/** Connect an Azure Flexible Server to an env's cluster namespace. */
+export function useSubmitAzureDbConnect(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AzureDbConnectInput) => {
+      const res = await api.post<AzureDbConnectResult>(
+        `/projects/${slug}/azure/db-connect`,
+        input,
+      );
+      if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not connect the database.");
+      return res;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug] }),
+  });
+}
+
+// ── Cloud SQL (GCP) via the Cloud SQL Auth Proxy ─────────────────────────
+// Unlike AWS/Azure there is no firewall step: access is granted to an IAM
+// identity through Workload Identity, and a proxy sidecar brokers the
+// connection on 127.0.0.1. Nothing to leave stale after a cluster rebuild.
+
+export type CloudSqlInstanceRow = {
+  name: string;
+  connectionName: string;
+  region: string;
+  databaseVersion: string;
+  engine: "postgres" | "mysql";
+  state: string;
+  publicIp?: string;
+  privateIp?: string;
+  requireSsl: boolean;
+};
+
+export type CloudSqlListResult = {
+  ok: boolean;
+  connected?: boolean;
+  instances?: CloudSqlInstanceRow[];
+  databases?: string[];
+  note?: string;
+};
+
+/** Cloud SQL instances in the connected GCP project. */
+export function useCloudSqlInstances(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: ["p", slug, "gcp-databases"],
+    queryFn: () => api.get<CloudSqlListResult>(`/projects/${slug}/gcp/databases`),
+    enabled: enabled && !!slug,
+    staleTime: 60_000,
+  });
+}
+
+/** Databases inside one instance — enabled only once an instance is picked. */
+export function useCloudSqlDatabases(slug: string, instance: string | null) {
+  return useQuery({
+    queryKey: ["p", slug, "gcp-databases", instance],
+    queryFn: () =>
+      api.get<CloudSqlListResult>(`/projects/${slug}/gcp/databases`, { instance: instance ?? "" }),
+    enabled: !!slug && !!instance,
+    staleTime: 60_000,
+  });
+}
+
+export type CloudSqlConnectInput = {
+  envKey: string;
+  namespace: string;
+  secretName?: string;
+  instanceName: string;
+  database: string;
+  username: string;
+  password: string;
+  createDatabase?: boolean;
+  runMigrations?: boolean;
+};
+
+export type CloudSqlConnectResult = {
+  ok: boolean;
+  instance?: { name: string; engine: string; connectionName: string };
+  namespace?: string;
+  secretName?: string;
+  keysWritten?: string[];
+  /** Workload Identity steps — service account, IAM roles, KSA binding. */
+  identity?: string[];
+  sidecars?: { deployment: string; status: "patched" | "already" | "failed"; message?: string }[];
+  sidecarError?: string;
+  bootstrap?: { step: "create-database" | "migrate"; status: "done" | "skipped" | "failed"; message: string }[];
+  summary?: string;
+  message?: string;
+  code?: string;
+};
+
+/** Connect a Cloud SQL instance to a GKE namespace via the Auth Proxy. */
+export function useSubmitCloudSqlConnect(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: CloudSqlConnectInput) => {
+      const res = await api.post<CloudSqlConnectResult>(`/projects/${slug}/gcp/db-connect`, input);
+      if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not connect Cloud SQL.");
+      return res;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug] }),
+  });
+}

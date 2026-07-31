@@ -91,10 +91,36 @@ export async function wireSecretToWorkloads(args: {
     const name = d.metadata!.name!;
     const existing = d.spec?.template?.spec?.containers?.[0]?.envFrom;
 
-    // Idempotency: never add the same secretRef twice — a duplicate entry is
-    // legal YAML but makes the pod spec confusing and re-rolls pods for nothing.
+    // Already references the Secret — no patch needed, but the pods may still
+    // predate it.
+    //
+    // WHY A RESTART IS STILL REQUIRED: generated manifests now declare
+    // `envFrom: [app-db, app-env]` up front (both optional), so a Deployment
+    // references the Secret from its very first apply — BEFORE the Secret
+    // exists. Kubernetes reads Secret values at container START and never
+    // hot-reloads them, so those pods run without the values and stay that way.
+    // Skipping the restart here meant the panel reported "already set /
+    // nothing to change" while DATABASE_URL was absent from the container —
+    // the most misleading state possible.
+    //
+    // A patch implicitly rolls pods; "already wired" has no patch, so roll
+    // explicitly.
     if (existing?.some((e) => e.secretRef?.name === secretName)) {
-      outcomes.push({ deployment: name, status: "already", message: `already references ${secretName}` });
+      const restart = await runStage({
+        command: "kubectl",
+        args: ["rollout", "restart", "deployment", name, "-n", namespace],
+        cwd: process.cwd(),
+        env,
+        timeoutMs: 30_000,
+      });
+      outcomes.push({
+        deployment: name,
+        status: "already",
+        message:
+          restart.exitCode === 0
+            ? `already references ${secretName} — rolled pods to pick up its current values`
+            : `already references ${secretName}, but the restart failed: ${restart.stderr.slice(-200)}`,
+      });
       continue;
     }
 

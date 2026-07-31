@@ -9,6 +9,7 @@ import { runAllDueUptimeChecks } from "@/lib/observability/uptime";
 import { runDueScheduledDeploys } from "@/lib/devops/scheduled-deploy";
 import { runDeployWatchdog } from "@/lib/devops/deploy-watch";
 import { runPipelineWatchdog } from "@/lib/ci/pipeline-watch";
+import { runDueReports } from "@/lib/reports/run-reports";
 
 const TICK_MS = 60_000; // evaluate what's due once a minute
 let started = false;
@@ -41,6 +42,15 @@ export function startScheduler(): void {
           `[scheduler] watchdog auto-rolled-back ${rolledBack} app${rolledBack === 1 ? "" : "s"}`,
         );
       }
+      // Daily application reports — no-ops until the local hour reaches
+      // REPORT_HOUR, and the once-per-day guard lives in the DB so a restart
+      // mid-morning can't re-mail everyone.
+      const reportsSent = await runDueReports(now);
+      if (reportsSent > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[scheduler] sent ${reportsSent} application report${reportsSent === 1 ? "" : "s"}`);
+      }
+
       const autoHealed = await runPipelineWatchdog();
       if (autoHealed > 0) {
         // eslint-disable-next-line no-console

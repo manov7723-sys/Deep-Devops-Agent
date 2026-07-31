@@ -263,9 +263,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
             }
 
             if (body.runMigrations) {
-              const target =
-                wired.find((w) => w.status === "patched")?.deployment ??
-                wired.find((w) => w.status === "already")?.deployment;
+              // Every wired deployment — runMigrations finds the one with
+              // the migration tool rather than assuming the first.
+              const targets = wired
+                .filter((w) => w.status === "patched" || w.status === "already")
+                .map((w) => w.deployment);
+              const target = targets[0];
               if (!target) {
                 bootstrap.push({
                   step: "migrate",
@@ -274,13 +277,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
                     "No Deployment available to run migrations in — deploy the app first, then reconnect.",
                 });
               } else {
-                await new Promise((r) => setTimeout(r, 8_000)); // let the roll start
+                // runMigrations waits on `kubectl rollout status` internally —
+                // the fixed sleep that used to be here was far shorter than a
+                // typical pod restart, so the migration could execute inside the
+                // OLD pod and therefore against the OLD database.
                 bootstrap.push(
                   await runDbMigrations({
                     kubeconfigPath: kcfg.handle.path,
                     execEnv,
                     namespace: built.output.namespace,
-                    deployment: target,
+                    deployments: targets,
+                    expectDatabase: body.database,
                   }),
                 );
               }

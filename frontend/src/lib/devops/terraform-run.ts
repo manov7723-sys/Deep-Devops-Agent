@@ -23,7 +23,7 @@ import { pickBackendForEnv } from "@/lib/devops/envs";
 import { prisma } from "@/lib/db/prisma";
 import type { Prisma } from "@prisma/client";
 
-export type TfRunAction = "plan" | "apply";
+export type TfRunAction = "plan" | "apply" | "destroy";
 export type TfStageStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
 export type TfRunStatus = "queued" | "running" | "succeeded" | "failed";
 
@@ -482,10 +482,18 @@ export function backendOverride(b: TfBackendCfg, key: string, azureAccessKey?: s
  */
 export function startTerraformRun(args: StartTfRunArgs): TfRun {
   const id = `tf_${randomId()}`;
+  // For destroy runs the "apply" stage is repurposed to run `terraform destroy`.
+  // Keeping the stage name stable avoids schema churn on stored TfRun rows and
+  // lets the polling UI render destroy exactly like apply — same panel, same
+  // log stream, just different action verb in the label.
   const stages: TfStage[] = [
     { name: "init", status: "pending", logs: "" },
     { name: "plan", status: "pending", logs: "" },
-    { name: "apply", status: args.action === "apply" ? "pending" : "skipped", logs: "" },
+    {
+      name: "apply",
+      status: args.action === "apply" || args.action === "destroy" ? "pending" : "skipped",
+      logs: "",
+    },
   ];
   const run: TfRun = {
     id,
@@ -676,6 +684,18 @@ async function execRun(run: TfRun, args: StartTfRunArgs): Promise<void> {
         // import them and retry apply ONCE. If any orphan is of an unknown type,
         // don't half-import — leave the failure so the user can see it.
         if (!applied) await maybeAutoImportAndRetry(run, runCwd, childEnv);
+      } else if (ranPlan && args.action === "destroy") {
+        // Destroy: same runner shape as apply, `-auto-approve` skips the
+        // confirmation prompt (there's no human at the runner). Logs stream
+        // into the "apply" stage for UI simplicity.
+        await runTfStage(
+          run,
+          "apply",
+          runCwd,
+          childEnv,
+          ["destroy", "-auto-approve", "-input=false", "-no-color"],
+          APPLY_TIMEOUT_MS,
+        );
       }
     }
     if (run.status === "running") {

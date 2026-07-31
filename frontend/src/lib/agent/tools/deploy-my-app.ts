@@ -3,6 +3,8 @@ import { decryptSecret } from "@/lib/auth/crypto";
 import { analyzeAppServices, type AppService } from "@/lib/automation/repo-analyze";
 import { getAzureAccessToken } from "@/lib/cloud/azure";
 import { parseAksClusterRef, setupAzureDeployRegistry } from "@/lib/cloud/azure-acr";
+import { grantAksAccessTool } from "./grant-aks-access";
+import { attachAcrToAksTool } from "./attach-acr-to-aks";
 import { findAksClusterByName } from "@/lib/cloud/azure-arm";
 import {
   detectAlbController,
@@ -551,23 +553,52 @@ export const deployMyAppTool: Tool<Input, Output> = {
         if (cloud === "aws") eksRef = parseEksClusterRef(kc);
         else if (cloud === "gcp") gkeRef = parseGkeClusterRef(kc);
         else {
+          // Resolve the AKS cluster identity through THREE escalating paths.
+          // aksRef being null is not a soft failure — it disables combined
+          // ci.yml/cd.yml generation AND the proactive RBAC/AcrPull grants,
+          // so every path here matters (2026-07 incident).
+          const tok = await getAzureAccessToken(cloudProviderId);
+          const subscription = provider!.accountRef?.trim();
           const parsed = parseAksClusterRef(kc);
-          if (parsed) {
-            let rg = parsed.resourceGroup;
-            if (!rg) {
-              // Kubeconfig didn't carry the resource group — resolve it via ARM.
-              const tok = await getAzureAccessToken(cloudProviderId);
-              const subscription = provider!.accountRef?.trim();
-              if (tok.ok && subscription) {
-                const found = await findAksClusterByName(
-                  tok.accessToken,
-                  subscription,
-                  parsed.clusterName,
-                );
-                if (found.ok) rg = found.resourceGroup;
-              }
+
+          // 1 — kubeconfig carried both cluster + RG (the `clusterUser_<rg>_<name>`
+          //     shape `az aks get-credentials` and our own writer produce).
+          if (parsed?.clusterName && parsed.resourceGroup) {
+            aksRef = { clusterName: parsed.clusterName, resourceGroup: parsed.resourceGroup };
+          }
+
+          // 2 — cluster name known, RG missing → look the RG up by name.
+          if (!aksRef && parsed?.clusterName && tok.ok && subscription) {
+            const found = await findAksClusterByName(
+              tok.accessToken,
+              subscription,
+              parsed.clusterName,
+            );
+            if (found.ok) {
+              aksRef = { clusterName: parsed.clusterName, resourceGroup: found.resourceGroup };
             }
-            if (rg) aksRef = { clusterName: parsed.clusterName, resourceGroup: rg };
+          }
+
+          // 3 — nothing parseable, or the name didn't match any real cluster
+          //     (stale kubeconfig, legacy generic "aks" placeholder, renamed
+          //     cluster). Fall back to listing the subscription: exactly one
+          //     cluster is unambiguous. Same policy grant_aks_access and
+          //     repair_cd_kubeconfig already use.
+          //
+          //     MUST run even when step 1/2 produced a name — a parsed name
+          //     that no longer resolves is exactly the stale-kubeconfig case,
+          //     and giving up there is what left aksRef null for every Azure
+          //     deploy.
+          if (!aksRef && tok.ok && subscription) {
+            const { listAksClusters } = await import("@/lib/cloud/azure-arm");
+            const listed = await listAksClusters(tok.accessToken, subscription);
+            if (listed.ok && listed.clusters.length === 1) {
+              const only = listed.clusters[0];
+              aksRef = { clusterName: only.name, resourceGroup: only.resourceGroup };
+            }
+            // Multiple clusters + an unresolvable kubeconfig → genuinely
+            // ambiguous. Leave null; the deploy still works via the
+            // KUBECONFIG_B64 CD path, just without combined mode.
           }
         }
       } catch {
@@ -630,9 +661,62 @@ export const deployMyAppTool: Tool<Input, Output> = {
         : "[metrics] No Prometheus Operator CRDs on this cluster — skipping ServiceMonitor. Install in-cluster monitoring from the Observability page to enable app metrics.",
     );
 
+    // ── HARD GUARD: reject AWS-only expose modes on non-AWS clouds ─────────
+    //
+    // 'alb' and 'nlb' are AWS-specific. 'alb' emits an Ingress with
+    // `ingressClassName: alb`, claimed ONLY by the AWS Load Balancer
+    // Controller; 'nlb' emits `service.beta.kubernetes.io/aws-load-balancer-*`
+    // annotations that Azure/GCP controllers ignore. On AKS/GKE the result is
+    // an Ingress that never gets an ADDRESS — no event, no error, no timeout.
+    // The app is simply unreachable and nothing says why (2026-07 incident).
+    //
+    // This runs as a SERVER-SIDE correction rather than a playbook rule
+    // because the caller is an LLM: a prompt instruction is advisory, and a
+    // product cannot ship a silent-unreachable failure mode that depends on
+    // the model remembering which cloud it's on. Substitute rather than
+    // error — the user asked for "a public load balancer" and 'classic'
+    // (Service type=LoadBalancer, no annotations) delivers exactly that via
+    // each cloud's in-tree controller.
+    if (cloud !== "aws") {
+      for (const p of plans) {
+        if (p.exposeMode === "alb" || p.exposeMode === "nlb") {
+          const from = p.exposeMode;
+          p.exposeMode = "classic";
+          cdNotes.push(
+            `[expose] "${p.svc.name}": exposeMode '${from}' is AWS-only and does nothing on ${cloud} — ` +
+              `substituted 'classic' (Service type=LoadBalancer). ${cloud === "azure" ? "Azure" : "GCP"} ` +
+              `provisions a public load balancer for it directly. An '${from}' Ingress here would never ` +
+              `receive an address.`,
+          );
+        }
+      }
+    }
+
     const anyNeedsAutoExpose = plans.some((p) => p.expose && !p.exposeMode);
     if (anyNeedsAutoExpose) {
-      let auto: ExposeMode = "alb";
+      // Cloud-aware default. "alb" emits an Ingress with
+      // `ingressClassName: alb`, which ONLY the AWS Load Balancer Controller
+      // watches — it is meaningless on AKS/GKE. Defaulting every cloud to
+      // "alb" (the pre-2026-07 behaviour) produced an Ingress that sat with
+      // an empty ADDRESS forever on Azure: no controller claimed it, no error
+      // surfaced, and the app was simply unreachable.
+      //
+      // "classic" = Service type=LoadBalancer with no annotations, which each
+      // cloud's in-tree controller honours natively:
+      //   Azure → Standard Load Balancer + public IP
+      //   GCP   → Network Load Balancer + public IP
+      // No add-on controller required, works on a bare cluster. AWS keeps its
+      // richer detection below (real ALB when the controller is installed).
+      let auto: ExposeMode = cloud === "aws" ? "alb" : "classic";
+      if (cloud !== "aws") {
+        cdNotes.push(
+          `[expose] Cloud is "${cloud}" — auto exposeMode='classic' (Service type=LoadBalancer). ` +
+            `The in-tree cloud controller provisions a public load balancer directly; ` +
+            `'alb' is AWS-only and would leave the Ingress unassigned forever here. ` +
+            `For host-based routing on this cloud, install an ingress controller (nginx / AGIC) ` +
+            `and pass exposeMode='ingress' with a host.`,
+        );
+      }
       if (cloud === "aws" && eksRef) {
         let hasController = false;
         if (envRow?.kubeconfigRef) {
@@ -713,9 +797,33 @@ export const deployMyAppTool: Tool<Input, Output> = {
     // loop below; the combined files get generated + prepended AFTER the loop.
     // GCP/Azure keep the per-service pattern for now — same combined shape can
     // be added later with matching generators.
+    // Combined mode covers ANY multi-service deploy onto a known cluster.
+    // Historically AWS-only; extended in 2026-07 so Azure/AKS monorepo deploys
+    // also collapse to `ci.yml` + `cd.yml` instead of 4+ per-service files.
+    // GCP/GKE will follow the same shape when the matching generators land.
     const useCombinedEksMode = multi && cloud === "aws" && !!eksRef;
+    const useCombinedAksMode = multi && cloud === "azure" && !!aksRef;
+    const useCombinedGkeMode = multi && cloud === "gcp" && !!gkeRef;
+    const useCombinedMode = useCombinedEksMode || useCombinedAksMode || useCombinedGkeMode;
     const combinedCiServices: Array<{ name: string; ecrRepositoryUri: string; context?: string }> = [];
     const combinedCdServices: Array<{ name: string; appName: string; manifestDir: string }> = [];
+    // Azure-specific combined collector. Kept separate from combinedCiServices
+    // because the two clouds' shapes diverge (secret-mode ACR vs OIDC ECR).
+    const combinedAcrServices: Array<{
+      name: string;
+      loginServer: string;
+      imageBase: string;
+      secretPrefix: string;
+      context?: string;
+    }> = [];
+    // GCP collector. WIF provider + service account are the same across
+    // services (one identity for the repo), so only the image and build
+    // context differ per matrix row.
+    const combinedGarServices: Array<{ name: string; imageBase: string; context?: string }> = [];
+    let combinedGarWif = "";
+    let combinedGarSa = "";
+    let combinedGarLocation = "";
+    let combinedGarProject = "";
     let combinedCiRoleArn = "";
     let combinedCiRegion = "";
     // Combined-mode: call setup_github_oidc_ecr ONCE upfront with the primary
@@ -768,7 +876,8 @@ export const deployMyAppTool: Tool<Input, Output> = {
       const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
       // Combined mode uses one shared cd.yml across all services; per-service
       // mode uses deploy-<name>.yml per service.
-      const useCombinedForThisSvc = multi && cloud === "aws" && !!eksRef;
+      // Any multi-service deploy targeting a known cluster gets one cd.yml.
+      const useCombinedForThisSvc = useCombinedMode;
       const cdWorkflowFile = useCombinedForThisSvc
         ? "cd.yml"
         : multi
@@ -881,15 +990,30 @@ export const deployMyAppTool: Tool<Input, Output> = {
           cdNotes.push(
             `${label}Granted the CI service account GKE deploy access (keyless CD ready).`,
           );
-        workflowFile = multi ? `build-and-push-${svc.name}-gar.yml` : "build-and-push-gar.yml";
+        registryUri = `${location}-docker.pkg.dev/${gcp.data.projectId}/${imageName}/${appName}`;
+        // Combined mode: collect for the single ci.yml/cd.yml emitted after
+        // the loop, and suppress this service's own workflow files.
+        if (useCombinedGkeMode) {
+          combinedGarServices.push({ name: svc.name, imageBase: registryUri, context: svc.path });
+          combinedCdServices.push({ name: svc.name, appName, manifestDir });
+          combinedGarWif = gcp.data.workloadIdentityProvider;
+          combinedGarSa = gcp.data.serviceAccount;
+          combinedGarLocation = location;
+          combinedGarProject = gcp.data.projectId;
+        }
+        workflowFile = useCombinedGkeMode
+          ? "ci.yml"
+          : multi ? `build-and-push-${svc.name}-gar.yml` : "build-and-push-gar.yml";
         const ciWorkflowName = multi
           ? `Build and push ${svc.name} to Artifact Registry`
           : "Build and push to Artifact Registry";
-        registryUri = `${location}-docker.pkg.dev/${gcp.data.projectId}/${imageName}/${appName}`;
         built = buildCicdArtifacts({
           ...commonSpec,
           ciWorkflowName,
           ciFileName: workflowFile,
+          include: useCombinedGkeMode
+            ? { ...commonSpec.include, ciWorkflow: false, cdWorkflow: false }
+            : commonSpec.include,
           registryUseVars: false,
           registry: {
             cloud: "gcp",
@@ -946,7 +1070,71 @@ export const deployMyAppTool: Tool<Input, Output> = {
           cdNotes.push(
             `${label}AKS CD via GitHub Actions isn't wired (needs a service-principal Azure connection). Once the image is pushed, use deploy_app to deploy server-side with the stored kubeconfig.`,
           );
-        workflowFile = multi ? `build-and-push-${svc.name}-acr.yml` : "build-and-push-acr.yml";
+        // Proactive AKS RBAC grant — symmetric with the EKS Access Entry
+        // grant above. The AKS blueprint ships with `azure_rbac_enabled =
+        // true`, so any principal that will run kubectl against this cluster
+        // needs the AAD RBAC role first. Without this, every deploy's first
+        // kubectl call fails with "does not have access to the resource in
+        // Azure" and only recovers via the classifier's auto-heal — which
+        // works but wastes one round-trip and confuses the demo. Called
+        // whether keyless or secret mode; grant_aks_access auto-detects the
+        // caller identity (SP in keyless mode, user in OAuth secret mode)
+        // and grants the appropriate principal type. Idempotent.
+        if (aksRef) {
+          const aksGrant = await grantAksAccessTool.execute(
+            { envKey: input.envKey },
+            ctx,
+          );
+          cdNotes.push(
+            aksGrant.ok
+              ? `${label}Granted ${aksGrant.output.principalType} ${aksGrant.output.principalObjectId} 'RBAC Cluster Admin' on AKS ${aksGrant.output.clusterName} — kubectl will work on first apply.`
+              : `${label}Couldn't preemptively grant AKS RBAC (${aksGrant.error}) — if the CD fails with 'does not have access to the resource in Azure', the auto-heal will fire on the retry.`,
+          );
+          // Proactive AcrPull grant to the AKS kubelet — prevents the pods
+          // coming up ImagePullBackOff because kubelet has no permission on
+          // the ACR the deploy just pushed to. Idempotent (RoleAssignmentExists
+          // = success) and cheap (one ARM PUT). Same-cluster call after the
+          // RBAC grant so we hit both auth failures in one wave.
+          const acrAttach = await attachAcrToAksTool.execute(
+            { envKey: input.envKey, acrNames: [azureAcrName] },
+            ctx,
+          );
+          cdNotes.push(
+            acrAttach.ok
+              ? `${label}Granted AKS kubelet AcrPull on ACR '${azureAcrName}' — pods can pull images on first apply.`
+              : `${label}Couldn't preemptively grant AcrPull (${acrAttach.error}) — if pods come up ImagePullBackOff, call attach_acr_to_aks(envKey, acrNames=['${azureAcrName}']).`,
+          );
+        }
+        // Combined mode: collapse to ONE ci.yml + ONE cd.yml (matrix over
+        // services). Collected here; the actual files get generated once
+        // after the loop. Only viable in secret-mode ACR right now — the
+        // combined CI template uses docker/login-action per matrix row with
+        // the same secret-prefix scheme as the per-service secret template.
+        // Keyless mode continues on the per-service path until we ship a
+        // matrix-friendly azure/login step.
+        // TypeScript narrows `az.data.mode === "secret"` only inside the same
+        // conditional — nest the check so `secretPrefix` (only present on the
+        // secret branch of AzureDeployRegistry) is reachable.
+        let combineThisSvc = false;
+        if (useCombinedAksMode && az.data.mode === "secret") {
+          combineThisSvc = true;
+          combinedAcrServices.push({
+            name: svc.name,
+            loginServer: az.data.loginServer,
+            imageBase: `${az.data.loginServer}/${appName}`,
+            secretPrefix: az.data.secretPrefix,
+            context: svc.path,
+          });
+          combinedCdServices.push({
+            name: svc.name,
+            appName,
+            manifestDir,
+          });
+        }
+
+        workflowFile = combineThisSvc
+          ? "ci.yml"
+          : multi ? `build-and-push-${svc.name}-acr.yml` : "build-and-push-acr.yml";
         const ciWorkflowName = multi
           ? `Build and push ${svc.name} to ACR`
           : "Build and push to ACR";
@@ -980,6 +1168,12 @@ export const deployMyAppTool: Tool<Input, Output> = {
             aksRef && keyless
               ? { clusterName: aksRef.clusterName, resourceGroup: aksRef.resourceGroup }
               : undefined,
+          // Combined mode owns ci.yml + cd.yml at the end of the loop, so
+          // suppress the per-service workflows this call would otherwise
+          // emit. Manifests + Dockerfiles still flow through normally.
+          include: combineThisSvc
+            ? { ...commonSpec.include, ciWorkflow: false, cdWorkflow: false }
+            : commonSpec.include,
         });
       } else {
         // Combined mode: reuse the SINGLE role + policy provisioned upfront
@@ -1139,6 +1333,60 @@ export const deployMyAppTool: Tool<Input, Output> = {
       allFiles.push(combinedCd);
       registrySteps.push(
         `Emitted ONE combined CI workflow (ci.yml — matrix over ${combinedCiServices.length} services, parallel builds) + ONE combined CD workflow (cd.yml — workflow_run gated on CI success, parallel deploys) instead of ${combinedCiServices.length * 2} per-service files.`,
+      );
+    }
+
+    // GCP/GKE mirror of the AWS + Azure combined-mode emissions. Simpler than
+    // Azure's because GCP auth is keyless: one WIF identity serves every
+    // matrix row, so there are no per-service secrets to select between.
+    if (useCombinedGkeMode && combinedGarServices.length > 0 && gkeRef) {
+      const { generateCombinedGarCiWorkflow, generateCombinedGkeCdWorkflow } = await import(
+        "@/lib/ci/templates"
+      );
+      const combinedCi = generateCombinedGarCiWorkflow({
+        workloadIdentityProvider: combinedGarWif,
+        serviceAccount: combinedGarSa,
+        location: combinedGarLocation,
+        branch,
+        scanGate: true,
+        services: combinedGarServices,
+      });
+      const combinedCd = generateCombinedGkeCdWorkflow({
+        workloadIdentityProvider: combinedGarWif,
+        serviceAccount: combinedGarSa,
+        projectId: combinedGarProject,
+        location: gkeRef.location,
+        clusterName: gkeRef.clusterName,
+        namespace,
+        services: combinedCdServices,
+      });
+      allFiles.push(combinedCi);
+      allFiles.push(combinedCd);
+      registrySteps.push(
+        `Emitted ONE combined CI workflow (ci.yml — matrix over ${combinedGarServices.length} services, parallel builds) + ONE combined CD workflow (cd.yml — workflow_run gated on CI success, keyless GKE access) instead of ${combinedGarServices.length * 2} per-service files.`,
+      );
+    }
+
+    // Azure/AKS mirror of the AWS combined-mode emission above. Runs when
+    // multi-service Azure deploys used secret-mode ACR auth for every
+    // service (the current common case for OAuth-connected Azure).
+    if (useCombinedAksMode && combinedAcrServices.length > 0 && aksRef) {
+      const { generateCombinedAcrCiWorkflow, generateCombinedAksCdWorkflow } = await import(
+        "@/lib/ci/templates"
+      );
+      const combinedCi = generateCombinedAcrCiWorkflow({
+        branch,
+        scanGate: true,
+        services: combinedAcrServices,
+      });
+      const combinedCd = generateCombinedAksCdWorkflow({
+        namespace,
+        services: combinedCdServices,
+      });
+      allFiles.push(combinedCi);
+      allFiles.push(combinedCd);
+      registrySteps.push(
+        `Emitted ONE combined CI workflow (ci.yml — matrix over ${combinedAcrServices.length} services, parallel builds) + ONE combined CD workflow (cd.yml — workflow_run gated on CI success, parallel deploys) instead of ${combinedAcrServices.length * 2} per-service files.`,
       );
     }
 

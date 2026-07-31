@@ -712,26 +712,26 @@ model CheckoutSession {
 // Projects + membership
 // ---------------------------------------------------------------------------
 model Project {
-  id          String       @id @default(uuid(7)) @db.Uuid
-  slug        String       @unique
-  ownerId     String       @db.Uuid
-  name        String
-  colorHue    Int
-  description String
-  health      HealthStatus @default(ok)
-  cloud       String? // the cloud this project targets: "aws" | "gcp" | "azure" (locks the Connect-provider UI)
-  activeEnvKey String? // the project's ACTIVE environment — env-scoped pages default to it (user-selectable)
-  alertEmails String[]     @default([]) // extra addresses that get alert emails (managed in the UI)
+  id                  String       @id @default(uuid(7)) @db.Uuid
+  slug                String       @unique
+  ownerId             String       @db.Uuid
+  name                String
+  colorHue            Int
+  description         String
+  health              HealthStatus @default(ok)
+  cloud               String? // the cloud this project targets: "aws" | "gcp" | "azure" (locks the Connect-provider UI)
+  activeEnvKey        String? // the project's ACTIVE environment — env-scoped pages default to it (user-selectable)
+  alertEmails         String[]     @default([]) // extra addresses that get alert emails (managed in the UI)
   // Ed25519 deploy keypair used to SSH into Proxmox VMs the project provisions.
   // Public key is baked into VM cloud-init on create; private key is stored
   // AES-GCM-encrypted (via lib/auth/crypto) and copied into a repo secret when
   // wiring the Proxmox deploy workflow. Both null until first Proxmox deploy.
   deployPublicKey     String? // OpenSSH format ("ssh-ed25519 AAAA… deploy@dda")
   deployPrivateKeyEnc String? // AES-256-GCM encrypted private key (PEM)
-  archivedAt  DateTime? // "Archive project" (reversible) — read-only, agents paused
-  deletedAt   DateTime? // soft-delete; retained for undo/audit before hard purge
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  archivedAt          DateTime? // "Archive project" (reversible) — read-only, agents paused
+  deletedAt           DateTime? // soft-delete; retained for undo/audit before hard purge
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   owner             User                   @relation(fields: [ownerId], references: [id])
   memberships       Membership[]
@@ -770,6 +770,8 @@ model Project {
   costSnapshots     CostSnapshot[]
   costTrend         CostTrendPoint[]
   tfRuns            TfRun[]
+  reportRecipients  ReportRecipient[]
+  reportRuns        ReportRun[]
 
   @@index([ownerId])
 }
@@ -840,35 +842,35 @@ model ProjectSetting {
 // Repos — account-level (a connected GitHub repo), wired into projects & envs
 // ---------------------------------------------------------------------------
 model Repo {
-  id              String         @id @default(uuid(7)) @db.Uuid
-  ownerId         String         @db.Uuid // the user whose GitHub connection owns this repo
+  id             String         @id @default(uuid(7)) @db.Uuid
+  ownerId        String         @db.Uuid // the user whose GitHub connection owns this repo
   /**
    * The specific OAuth identity row this repo was discovered through. A user
    * may have multiple connected GitHub accounts; this binds the repo to the
    * one whose token grants access. Nullable for rows created before this
    * column was added; backfilled lazily on next sync.
    */
-  oauthAccountId  String?        @db.Uuid
-  provider        GitProvider    @default(github)
-  fullName        String // e.g. "alice/api"; GitLab: path_with_namespace, may nest ("group/sub/repo")
+  oauthAccountId String?        @db.Uuid
+  provider       GitProvider    @default(github)
+  fullName       String // e.g. "alice/api"; GitLab: path_with_namespace, may nest ("group/sub/repo")
   /**
    * Provider-native repo id (GitLab numeric project id as a string). Used for
    * API calls instead of the URL-encoded path — survives renames/transfers.
    * Null for GitHub rows (fullName is the API identity there).
    */
-  providerRepoId  String?
-  name            String
-  description     String?
-  lang            String // TypeScript | HCL | YAML | Python | …
-  kind            RepoKind
-  defaultBranch   String         @default("main")
-  visibility      RepoVisibility @default(private)
-  openIssues      Int            @default(0)
-  openPrs         Int            @default(0)
-  lastCommitSha   String?
-  lastCommitAt    DateTime?
-  deletedAt       DateTime? // soft-delete on disconnect; retained for undo/audit
-  createdAt       DateTime       @default(now())
+  providerRepoId String?
+  name           String
+  description    String?
+  lang           String // TypeScript | HCL | YAML | Python | …
+  kind           RepoKind
+  defaultBranch  String         @default("main")
+  visibility     RepoVisibility @default(private)
+  openIssues     Int            @default(0)
+  openPrs        Int            @default(0)
+  lastCommitSha  String?
+  lastCommitAt   DateTime?
+  deletedAt      DateTime? // soft-delete on disconnect; retained for undo/audit
+  createdAt      DateTime       @default(now())
 
   owner           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   oauthAccount    OAuthAccount?    @relation(fields: [oauthAccountId], references: [id], onDelete: SetNull)
@@ -926,51 +928,53 @@ model EnvRepo {
 // Environments — each env picks a cloud provider, maps repos, keeps deploy history
 // ---------------------------------------------------------------------------
 model Env {
-  id                  String   @id @default(uuid(7)) @db.Uuid
-  projectId           String   @db.Uuid
-  cloudProviderId     String?  @db.Uuid // the cloud this env is deployed to (chosen at create)
-  key                 String // "alpha" | "beta" | "release" | custom (no longer a fixed enum)
-  name                String
-  url                 String?
-  isProduction        Boolean  @default(false)
-  autoDeploy          Boolean  @default(false)
-  region              String? // default cloud region for this env
-  terraformWorkspace  String? // IaC workspace backing this env
+  id                           String   @id @default(uuid(7)) @db.Uuid
+  projectId                    String   @db.Uuid
+  cloudProviderId              String?  @db.Uuid // the cloud this env is deployed to (chosen at create)
+  key                          String // "alpha" | "beta" | "release" | custom (no longer a fixed enum)
+  name                         String
+  url                          String?
+  isProduction                 Boolean  @default(false)
+  autoDeploy                   Boolean  @default(false)
+  region                       String? // default cloud region for this env
+  terraformWorkspace           String? // IaC workspace backing this env
   /**
    * Encrypted kubeconfig YAML the executor writes to disk before running
    * helm/kubectl. Null means "no cluster wired yet" — pipelines that need
    * Kubernetes will fail-fast with `env_missing_kubeconfig`.
    */
-  kubeconfigRef       String?
-  /** Namespace to deploy app workloads into. Created if absent. */
-  namespace           String   @default("default")
+  kubeconfigRef                String?
+  /**
+   * Namespace to deploy app workloads into. Created if absent.
+   */
+  namespace                    String   @default("default")
   /**
    * Terraform remote-state backend bootstrap. On first Terraform use we
    * provision a per-project S3 bucket + DynamoDB lock table; the values are
    * recorded here so subsequent runs reference the same backend in their
    * HCL. Null means "Terraform not yet initialized for this env".
    */
-  tfBackendBucket     String?
-  tfBackendRegion     String?
-  tfBackendTable      String?
+  tfBackendBucket              String?
+  tfBackendRegion              String?
+  tfBackendTable               String?
   /**
    * GCP remote-state backend: single GCS bucket per env. GCS uses object
    * generations for locking, so no separate lock table is needed. Null means
    * "no GCS backend configured yet" — the tool falls back to local state.
    */
-  tfBackendGcsBucket  String?
+  tfBackendGcsBucket           String?
   /**
    * Azure remote-state backend: resource group + storage account + blob
    * container. Azure uses blob leases for locking natively (no separate lock
    * table needed). All three nullable — populated together or not at all.
    */
-  tfBackendAzureResourceGroup   String?
-  tfBackendAzureStorageAccount  String?
-  tfBackendAzureContainer       String?
-  promotionRank       Int      @default(0) // ordering: alpha(0) -> beta(1) -> release(2)
-  currentDeploymentId String?  @unique @db.Uuid // active deployment; re-point to roll back
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  tfBackendAzureResourceGroup  String?
+  tfBackendAzureStorageAccount String?
+  tfBackendAzureContainer      String?
+  promotionRank                Int      @default(0) // ordering: alpha(0) -> beta(1) -> release(2)
+  currentDeploymentId          String?  @unique @db.Uuid // active deployment; re-point to roll back
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
 
   project           Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
   cloudProvider     CloudProvider?       @relation(fields: [cloudProviderId], references: [id])
@@ -1197,8 +1201,10 @@ model PipelineStage {
    */
   startedAt  DateTime?
   finishedAt DateTime?
-  /** Last ~32KB of stdout/stderr from the runner. Newer log lines win when
-   *  the buffer fills. For long runs, move to S3 in a later phase. */
+  /**
+   * Last ~32KB of stdout/stderr from the runner. Newer log lines win when
+   * the buffer fills. For long runs, move to S3 in a later phase.
+   */
   logs       String      @default("")
   exitCode   Int?
 
@@ -1353,27 +1359,27 @@ model ChatOpsWebhook {
 // alert on downtime or slow response. Alerts flow through the normal pipeline
 // (banner + email + Slack).
 model UptimeMonitor {
-  id             String    @id @default(uuid(7)) @db.Uuid
-  projectId      String    @db.Uuid
-  name           String
-  url            String
-  method         String    @default("GET")
-  expectedStatus Int       @default(200)
-  intervalSec    Int       @default(300)
-  enabled        Boolean   @default(true)
+  id               String    @id @default(uuid(7)) @db.Uuid
+  projectId        String    @db.Uuid
+  name             String
+  url              String
+  method           String    @default("GET")
+  expectedStatus   Int       @default(200)
+  intervalSec      Int       @default(300)
+  enabled          Boolean   @default(true)
   // current state (updated each check)
-  lastOk         Boolean?
-  lastStatus     Int?
-  lastLatencyMs  Int?
-  lastCheckedAt  DateTime?
-  consecutiveFails Int     @default(0)
-  alertOpen      Boolean   @default(false)
+  lastOk           Boolean?
+  lastStatus       Int?
+  lastLatencyMs    Int?
+  lastCheckedAt    DateTime?
+  consecutiveFails Int       @default(0)
+  alertOpen        Boolean   @default(false)
   // TLS certificate expiry monitoring (https URLs).
-  certExpiresAt  DateTime?
-  certDaysWarn   Int       @default(21) // warn when the cert expires within this many days
-  certAlertOpen  Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  certExpiresAt    DateTime?
+  certDaysWarn     Int       @default(21) // warn when the cert expires within this many days
+  certAlertOpen    Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   checks  UptimeCheck[]
@@ -1690,15 +1696,15 @@ model Task {
 // Cloud providers + security scopes
 // ---------------------------------------------------------------------------
 model CloudProvider {
-  id         String       @id @default(uuid(7)) @db.Uuid
-  userId     String       @db.Uuid // who connected it
-  projectId  String?      @db.Uuid // ISOLATION: a provider belongs to ONE project. The same cloud account reused in another project is a separate row.
-  kind       CloudKind
-  name       String
-  accountRef String // "northwind-prod · 461298145672"
-  accountId  String?
-  roleArn    String? // scoped IAM role the agent assumes (no long-lived keys)
-  externalId String? // STS AssumeRole ExternalId for cross-account trust
+  id                    String       @id @default(uuid(7)) @db.Uuid
+  userId                String       @db.Uuid // who connected it
+  projectId             String?      @db.Uuid // ISOLATION: a provider belongs to ONE project. The same cloud account reused in another project is a separate row.
+  kind                  CloudKind
+  name                  String
+  accountRef            String // "northwind-prod · 461298145672"
+  accountId             String?
+  roleArn               String? // scoped IAM role the agent assumes (no long-lived keys)
+  externalId            String? // STS AssumeRole ExternalId for cross-account trust
   // Long-lived AWS access key + secret, same AES-256-GCM-at-rest pattern as
   // Azure's spClientSecretEnc — no external secret store required. Null = no
   // long-lived keys stored (the provider relies on roleArn/externalId AssumeRole
@@ -1715,16 +1721,16 @@ model CloudProvider {
   // Null on OAuth providers where auto-provisioning failed (permission consent
   // missing or the signed-in user isn't subscription Owner) and on legacy full-
   // SP connections (which still use roleArn + externalId for backward compat).
-  spClientId        String?
-  spClientSecretEnc String?
-  region     String
+  spClientId            String?
+  spClientSecretEnc     String?
+  region                String
   // Azure active context (the agent remembers the user's picks per project):
-  resourceGroup    String? // active Azure resource group
-  cloudEnvironment String  @default("AzurePublic") // AzurePublic | AzureUSGovernment | AzureChina
+  resourceGroup         String? // active Azure resource group
+  cloudEnvironment      String       @default("AzurePublic") // AzurePublic | AzureUSGovernment | AzureChina
   // GCP Cloud Billing → BigQuery export dataset id (for cost queries). Null = not set up.
-  costDatasetId    String?
-  status     HealthStatus @default(ok)
-  createdAt  DateTime     @default(now())
+  costDatasetId         String?
+  status                HealthStatus @default(ok)
+  createdAt             DateTime     @default(now())
 
   user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   project        Project?             @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -2058,6 +2064,55 @@ model ProjectMcpConnection {
 // ---------------------------------------------------------------------------
 // Platform settings (admin) — small singleton-ish config tables
 // ---------------------------------------------------------------------------
+/// Recipients of the scheduled application report, scoped to ONE namespace.
+///
+/// Reports are addressed per NAMESPACE rather than per project or per env,
+/// because a namespace is what the user actually recognises as "an app" —
+/// it's the title they see on the Reports tab and the unit the deploy flow
+/// asks them to pick. A project may span several namespaces across clouds,
+/// and each can have a different audience (the payments team shouldn't get
+/// the marketing site's pod restarts).
+model ReportRecipient {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  projectId String   @db.Uuid
+  /// Kubernetes namespace this recipient receives reports for.
+  namespace String
+  email     String
+  /// Set false to pause delivery without losing the address.
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// One row per (project, namespace, email) — re-adding an existing address
+  /// is an update, never a duplicate that mails someone twice.
+  @@unique([projectId, namespace, email])
+  @@index([projectId, namespace])
+}
+
+/// Audit trail of report deliveries, so the scheduler can tell "already sent
+/// today" from "never ran" after a restart, and the UI can show when a
+/// namespace last received its report.
+model ReportRun {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  projectId  String   @db.Uuid
+  namespace  String
+  /// Local calendar day the report covers, as YYYY-MM-DD. Used for the
+  /// once-per-day guard — a timestamp alone would re-send after a restart.
+  reportDate String
+  status     String // "sent" | "failed" | "skipped"
+  /// Addresses actually mailed, comma-joined. Empty when status != "sent".
+  recipients String   @default("")
+  /// Failure reason, or a short summary on success.
+  detail     String   @default("")
+  createdAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, namespace, reportDate])
+  @@index([projectId, createdAt])
+}
+
 model PlatformSetting {
   id              String    @id @default(uuid(7)) @db.Uuid
   siteTitle       String
@@ -2146,9 +2201,9 @@ model AuditLog {
 // authenticated download endpoint.
 // =============================================================================
 model VpnUserCert {
-  id         String   @id @default(uuid(7)) @db.Uuid
-  projectId  String   @db.Uuid
-  approvalId String   @db.Uuid // The Client VPN approval (identifies the endpoint + CA)
+  id         String @id @default(uuid(7)) @db.Uuid
+  projectId  String @db.Uuid
+  approvalId String @db.Uuid // The Client VPN approval (identifies the endpoint + CA)
   userName   String // The CN on this cert — shows in AWS Connection Log
   serial     String // Hex serial number of the X.509 cert (for revocation)
 
@@ -2156,7 +2211,7 @@ model VpnUserCert {
   certPemEnc    String // client X.509 cert
   privateKeyEnc String // client private key
   caPemEnc      String // shared CA cert (snapshot at issue time, so re-download is
-                       // consistent even if the VPN's CA is later replaced)
+  // consistent even if the VPN's CA is later replaced)
 
   // Optional embedded .ovpn base config for one-click re-download. When
   // omitted we can still re-download the raw cert/key/ca — the .ovpn just
@@ -2171,15 +2226,15 @@ model VpnUserCert {
   endpointDns String?
   region      String?
 
-  issuedAt   DateTime  @default(now())
-  issuedById String?   @db.Uuid
-  revokedAt  DateTime?
-  revokedById String?  @db.Uuid
+  issuedAt     DateTime  @default(now())
+  issuedById   String?   @db.Uuid
+  revokedAt    DateTime?
+  revokedById  String?   @db.Uuid
   // Days of validity used when signing — informational; the real expiry is
   // baked into the cert bytes.
   validityDays Int?
 
-  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId, approvalId, revokedAt])
   @@index([approvalId, issuedAt])
