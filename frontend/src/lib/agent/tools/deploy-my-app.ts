@@ -803,7 +803,8 @@ export const deployMyAppTool: Tool<Input, Output> = {
     // GCP/GKE will follow the same shape when the matching generators land.
     const useCombinedEksMode = multi && cloud === "aws" && !!eksRef;
     const useCombinedAksMode = multi && cloud === "azure" && !!aksRef;
-    const useCombinedMode = useCombinedEksMode || useCombinedAksMode;
+    const useCombinedGkeMode = multi && cloud === "gcp" && !!gkeRef;
+    const useCombinedMode = useCombinedEksMode || useCombinedAksMode || useCombinedGkeMode;
     const combinedCiServices: Array<{ name: string; ecrRepositoryUri: string; context?: string }> = [];
     const combinedCdServices: Array<{ name: string; appName: string; manifestDir: string }> = [];
     // Azure-specific combined collector. Kept separate from combinedCiServices
@@ -815,6 +816,14 @@ export const deployMyAppTool: Tool<Input, Output> = {
       secretPrefix: string;
       context?: string;
     }> = [];
+    // GCP collector. WIF provider + service account are the same across
+    // services (one identity for the repo), so only the image and build
+    // context differ per matrix row.
+    const combinedGarServices: Array<{ name: string; imageBase: string; context?: string }> = [];
+    let combinedGarWif = "";
+    let combinedGarSa = "";
+    let combinedGarLocation = "";
+    let combinedGarProject = "";
     let combinedCiRoleArn = "";
     let combinedCiRegion = "";
     // Combined-mode: call setup_github_oidc_ecr ONCE upfront with the primary
@@ -981,15 +990,30 @@ export const deployMyAppTool: Tool<Input, Output> = {
           cdNotes.push(
             `${label}Granted the CI service account GKE deploy access (keyless CD ready).`,
           );
-        workflowFile = multi ? `build-and-push-${svc.name}-gar.yml` : "build-and-push-gar.yml";
+        registryUri = `${location}-docker.pkg.dev/${gcp.data.projectId}/${imageName}/${appName}`;
+        // Combined mode: collect for the single ci.yml/cd.yml emitted after
+        // the loop, and suppress this service's own workflow files.
+        if (useCombinedGkeMode) {
+          combinedGarServices.push({ name: svc.name, imageBase: registryUri, context: svc.path });
+          combinedCdServices.push({ name: svc.name, appName, manifestDir });
+          combinedGarWif = gcp.data.workloadIdentityProvider;
+          combinedGarSa = gcp.data.serviceAccount;
+          combinedGarLocation = location;
+          combinedGarProject = gcp.data.projectId;
+        }
+        workflowFile = useCombinedGkeMode
+          ? "ci.yml"
+          : multi ? `build-and-push-${svc.name}-gar.yml` : "build-and-push-gar.yml";
         const ciWorkflowName = multi
           ? `Build and push ${svc.name} to Artifact Registry`
           : "Build and push to Artifact Registry";
-        registryUri = `${location}-docker.pkg.dev/${gcp.data.projectId}/${imageName}/${appName}`;
         built = buildCicdArtifacts({
           ...commonSpec,
           ciWorkflowName,
           ciFileName: workflowFile,
+          include: useCombinedGkeMode
+            ? { ...commonSpec.include, ciWorkflow: false, cdWorkflow: false }
+            : commonSpec.include,
           registryUseVars: false,
           registry: {
             cloud: "gcp",
@@ -1309,6 +1333,37 @@ export const deployMyAppTool: Tool<Input, Output> = {
       allFiles.push(combinedCd);
       registrySteps.push(
         `Emitted ONE combined CI workflow (ci.yml — matrix over ${combinedCiServices.length} services, parallel builds) + ONE combined CD workflow (cd.yml — workflow_run gated on CI success, parallel deploys) instead of ${combinedCiServices.length * 2} per-service files.`,
+      );
+    }
+
+    // GCP/GKE mirror of the AWS + Azure combined-mode emissions. Simpler than
+    // Azure's because GCP auth is keyless: one WIF identity serves every
+    // matrix row, so there are no per-service secrets to select between.
+    if (useCombinedGkeMode && combinedGarServices.length > 0 && gkeRef) {
+      const { generateCombinedGarCiWorkflow, generateCombinedGkeCdWorkflow } = await import(
+        "@/lib/ci/templates"
+      );
+      const combinedCi = generateCombinedGarCiWorkflow({
+        workloadIdentityProvider: combinedGarWif,
+        serviceAccount: combinedGarSa,
+        location: combinedGarLocation,
+        branch,
+        scanGate: true,
+        services: combinedGarServices,
+      });
+      const combinedCd = generateCombinedGkeCdWorkflow({
+        workloadIdentityProvider: combinedGarWif,
+        serviceAccount: combinedGarSa,
+        projectId: combinedGarProject,
+        location: gkeRef.location,
+        clusterName: gkeRef.clusterName,
+        namespace,
+        services: combinedCdServices,
+      });
+      allFiles.push(combinedCi);
+      allFiles.push(combinedCd);
+      registrySteps.push(
+        `Emitted ONE combined CI workflow (ci.yml — matrix over ${combinedGarServices.length} services, parallel builds) + ONE combined CD workflow (cd.yml — workflow_run gated on CI success, keyless GKE access) instead of ${combinedGarServices.length * 2} per-service files.`,
       );
     }
 

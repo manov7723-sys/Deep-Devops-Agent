@@ -74,6 +74,7 @@ export type AuditAction =
   | "aks.terraform_generated"
   | "azure.tfstate_provisioned"
   | "azure.db_connected"
+  | "gcp.db_connected"
   | "terraform.run_started"
   | "terraform.run_rerun"
   | "terraform.state_deleted"

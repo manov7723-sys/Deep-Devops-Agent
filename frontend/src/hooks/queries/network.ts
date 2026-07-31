@@ -1111,3 +1111,90 @@ export function useSubmitAzureDbConnect(slug: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug] }),
   });
 }
+
+// ── Cloud SQL (GCP) via the Cloud SQL Auth Proxy ─────────────────────────
+// Unlike AWS/Azure there is no firewall step: access is granted to an IAM
+// identity through Workload Identity, and a proxy sidecar brokers the
+// connection on 127.0.0.1. Nothing to leave stale after a cluster rebuild.
+
+export type CloudSqlInstanceRow = {
+  name: string;
+  connectionName: string;
+  region: string;
+  databaseVersion: string;
+  engine: "postgres" | "mysql";
+  state: string;
+  publicIp?: string;
+  privateIp?: string;
+  requireSsl: boolean;
+};
+
+export type CloudSqlListResult = {
+  ok: boolean;
+  connected?: boolean;
+  instances?: CloudSqlInstanceRow[];
+  databases?: string[];
+  note?: string;
+};
+
+/** Cloud SQL instances in the connected GCP project. */
+export function useCloudSqlInstances(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: ["p", slug, "gcp-databases"],
+    queryFn: () => api.get<CloudSqlListResult>(`/projects/${slug}/gcp/databases`),
+    enabled: enabled && !!slug,
+    staleTime: 60_000,
+  });
+}
+
+/** Databases inside one instance — enabled only once an instance is picked. */
+export function useCloudSqlDatabases(slug: string, instance: string | null) {
+  return useQuery({
+    queryKey: ["p", slug, "gcp-databases", instance],
+    queryFn: () =>
+      api.get<CloudSqlListResult>(`/projects/${slug}/gcp/databases`, { instance: instance ?? "" }),
+    enabled: !!slug && !!instance,
+    staleTime: 60_000,
+  });
+}
+
+export type CloudSqlConnectInput = {
+  envKey: string;
+  namespace: string;
+  secretName?: string;
+  instanceName: string;
+  database: string;
+  username: string;
+  password: string;
+  createDatabase?: boolean;
+  runMigrations?: boolean;
+};
+
+export type CloudSqlConnectResult = {
+  ok: boolean;
+  instance?: { name: string; engine: string; connectionName: string };
+  namespace?: string;
+  secretName?: string;
+  keysWritten?: string[];
+  /** Workload Identity steps — service account, IAM roles, KSA binding. */
+  identity?: string[];
+  sidecars?: { deployment: string; status: "patched" | "already" | "failed"; message?: string }[];
+  sidecarError?: string;
+  bootstrap?: { step: "create-database" | "migrate"; status: "done" | "skipped" | "failed"; message: string }[];
+  summary?: string;
+  message?: string;
+  code?: string;
+};
+
+/** Connect a Cloud SQL instance to a GKE namespace via the Auth Proxy. */
+export function useSubmitCloudSqlConnect(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: CloudSqlConnectInput) => {
+      const res = await api.post<CloudSqlConnectResult>(`/projects/${slug}/gcp/db-connect`, input);
+      if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not connect Cloud SQL.");
+      return res;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p", slug] }),
+  });
+}

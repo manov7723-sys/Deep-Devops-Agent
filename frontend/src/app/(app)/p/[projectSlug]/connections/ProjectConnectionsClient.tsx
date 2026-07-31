@@ -19,7 +19,11 @@ import {
   useSubmitAppSecrets,
   useSubmitAzureDbConnect,
   useSubmitRdsConnect,
+  useCloudSqlInstances,
+  useCloudSqlDatabases,
+  useSubmitCloudSqlConnect,
   type AzureDbConnectResult,
+  type CloudSqlConnectResult,
 } from "@/hooks/queries/network";
 // Shared with the chat wizards + Network page — see lib/aws-regions.ts.
 import { AWS_REGIONS as COMMON_REGIONS } from "@/lib/aws-regions";
@@ -66,6 +70,7 @@ export function ProjectConnectionsClient({ slug }: { slug: string }) {
       />
       <ClusterRdsConnectPanel slug={slug} />
       <AzureDbConnectPanel slug={slug} />
+      <CloudSqlConnectPanel slug={slug} />
       <AppSecretsPanel slug={slug} />
     </div>
   );
@@ -1072,6 +1077,262 @@ function AzureDbConnectPanel({ slug }: { slug: string }) {
                   onChange={(e) => setRunMigrations(e.target.checked)}
                 />
                 <span>Run schema migrations after connecting (Prisma / Alembic / Django)</span>
+              </label>
+            </div>
+
+            {error && (
+              <div className="row gap-2" style={{ alignItems: "center", fontSize: 12.5 }}>
+                <Badge tone="warn">error</Badge>
+                <span className="muted">{error}</span>
+              </div>
+            )}
+
+            <div className="row gap-2" style={{ alignItems: "center" }}>
+              <Btn onClick={handleConnect} disabled={!ready || submit.isPending}>
+                {submit.isPending ? "Connecting…" : "Connect"}
+              </Btn>
+              {!ready && (
+                <span className="muted" style={{ fontSize: 12.5 }}>
+                  Need: {missing.join(", ")}.
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </Block.Body>
+    </Block>
+  );
+}
+
+// ── Cloud SQL (GCP) ↔ GKE namespace ─────────────────────────────────────
+//
+// Deliberately NOT a mirror of the AWS/Azure panels, because GCP's
+// recommended access path isn't a firewall rule. Connect performs:
+//   1. identity — Google service account + roles/cloudsql.client + a
+//      Workload Identity binding for the namespace's Kubernetes SA.
+//   2. database — created through the Cloud SQL Admin API when asked.
+//   3. secret + sidecar — DATABASE_URL pointing at 127.0.0.1, then the
+//      cloud-sql-proxy container injected into every Deployment.
+//   4. migrations — optional, shared with the other clouds.
+//
+// No IP allow-list means nothing to leave stale after a cluster rebuild —
+// the failure mode that makes the AWS path need a network-repair step.
+
+function CloudSqlConnectPanel({ slug }: { slug: string }) {
+  const { data: envs } = useProjectEnvs(slug);
+  const instQuery = useCloudSqlInstances(slug);
+  const submit = useSubmitCloudSqlConnect(slug);
+
+  const [envKey, setEnvKey] = useState<string>("");
+  const [namespace, setNamespace] = useState<string>("default");
+  const [secretName, setSecretName] = useState<string>("app-db");
+  const [instanceName, setInstanceName] = useState<string>("");
+  const [database, setDatabase] = useState<string>("");
+  const [username, setUsername] = useState<string>("postgres");
+  const [password, setPassword] = useState<string>("");
+  const [createDatabase, setCreateDatabase] = useState<boolean>(true);
+  const [runMigrations, setRunMigrations] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CloudSqlConnectResult | null>(null);
+
+  const dbQuery = useCloudSqlDatabases(slug, instanceName || null);
+
+  useEffect(() => {
+    if (envKey || !envs?.length) return;
+    const nonProd = envs.find((e) => !e.isProduction);
+    setEnvKey((nonProd ?? envs[0]!).key);
+  }, [envs, envKey]);
+
+  const instances = instQuery.data?.instances ?? [];
+  const picked = instances.find((i) => i.name === instanceName);
+
+  // Cloud SQL's built-in superuser differs per engine; default to the right
+  // one so the common case needs no typing.
+  useEffect(() => {
+    if (picked) setUsername((u) => (u === "postgres" || u === "root" ? (picked.engine === "mysql" ? "root" : "postgres") : u));
+  }, [picked]);
+
+  const envOptions: SelectOption[] = (envs ?? []).map((e) => ({
+    value: e.key,
+    label: e.isProduction ? `${e.name} (prod)` : e.name || e.key,
+  }));
+  const instanceOptions: SelectOption[] = instances.map((i) => ({
+    value: i.name,
+    label: `${i.name} · ${i.databaseVersion} · ${i.region}${i.state !== "RUNNABLE" ? ` (${i.state})` : ""}`,
+  }));
+
+  const missing: string[] = [];
+  if (!envKey) missing.push("environment");
+  if (!namespace.trim()) missing.push("namespace");
+  if (!instanceName) missing.push("Cloud SQL instance");
+  if (!database.trim()) missing.push("database name");
+  if (!username.trim()) missing.push("username");
+  if (!password) missing.push("password");
+  const ready = missing.length === 0;
+
+  async function handleConnect() {
+    if (!ready) return;
+    setError(null);
+    try {
+      const res = await submit.mutateAsync({
+        envKey,
+        namespace: namespace.trim(),
+        secretName: secretName.trim() || "app-db",
+        instanceName,
+        database: database.trim(),
+        username: username.trim(),
+        password,
+        createDatabase,
+        runMigrations,
+      });
+      setResult(res);
+      setPassword("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not connect Cloud SQL.");
+    }
+  }
+
+  return (
+    <Block>
+      <Block.Header>
+        <Block.Title sub="Wire a Cloud SQL instance into a GKE namespace using the Cloud SQL Auth Proxy — Google's recommended path. Grants an IAM identity via Workload Identity and injects a proxy sidecar, so there is no IP allow-list to maintain or leave stale.">
+          Cloud SQL connection
+        </Block.Title>
+      </Block.Header>
+      <Block.Body>
+        {instQuery.data && instQuery.data.connected === false ? (
+          <span className="muted" style={{ fontSize: 13 }}>
+            {instQuery.data.note ?? "Connect a GCP project on the Cloud providers page first."}
+          </span>
+        ) : result ? (
+          <div className="col gap-2" style={{ fontSize: 12.5 }}>
+            <div className="row gap-2" style={{ alignItems: "center" }}>
+              <Badge tone="ok">connected</Badge>
+              <span className="muted">{result.summary}</span>
+            </div>
+            {!!result.identity?.length && (
+              <div className="col gap-1">
+                {result.identity.map((s, i) => (
+                  <span key={i} className="muted">
+                    identity: {s}
+                  </span>
+                ))}
+              </div>
+            )}
+            {!!result.keysWritten?.length && (
+              <div className="row gap-1 wrap">
+                {result.keysWritten.map((k) => (
+                  <Badge key={k}>{k}</Badge>
+                ))}
+              </div>
+            )}
+            {!!result.sidecars?.length && (
+              <div className="col gap-1">
+                {result.sidecars.map((sc) => (
+                  <span key={sc.deployment} className="muted">
+                    {sc.status}: {sc.deployment}
+                    {sc.message ? ` — ${sc.message}` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+            {result.sidecarError && (
+              <span style={{ color: "var(--warn, #f5a524)" }}>{result.sidecarError}</span>
+            )}
+            {!!result.bootstrap?.length &&
+              result.bootstrap.map((b, i) => (
+                <span
+                  key={i}
+                  style={{
+                    color: b.status === "failed" ? "var(--danger, #e5484d)" : "var(--muted, #888)",
+                  }}
+                >
+                  {b.step}: {b.status} — {b.message}
+                </span>
+              ))}
+            <div>
+              <Btn variant="outline" size="sm" onClick={() => setResult(null)}>
+                Connect another
+              </Btn>
+            </div>
+          </div>
+        ) : (
+          <div className="col gap-3">
+            <div className="row gap-3 wrap">
+              <Field label="Environment" required>
+                <Select value={envKey} onValueChange={setEnvKey} ariaLabel="Environment" options={envOptions} />
+              </Field>
+              <Field label="Namespace" required>
+                <Input value={namespace} onChange={(e) => setNamespace(e.target.value)} className="mono" />
+              </Field>
+              <Field label="Secret name" required>
+                <Input value={secretName} onChange={(e) => setSecretName(e.target.value)} className="mono" />
+              </Field>
+            </div>
+
+            <div className="row gap-3 wrap">
+              <Field
+                label="Cloud SQL instance"
+                hint={instQuery.isLoading ? "Loading…" : `${instances.length} found in the project.`}
+                required
+              >
+                <Select
+                  value={instanceName}
+                  onValueChange={setInstanceName}
+                  ariaLabel="Cloud SQL instance"
+                  options={instanceOptions}
+                />
+              </Field>
+              <Field
+                label="Database name"
+                hint={
+                  dbQuery.data?.databases?.length
+                    ? `Existing: ${dbQuery.data.databases.join(", ")}`
+                    : "The database inside the instance."
+                }
+                required
+              >
+                <Input
+                  value={database}
+                  onChange={(e) => setDatabase(e.target.value)}
+                  className="mono"
+                  placeholder="appdb"
+                />
+              </Field>
+            </div>
+
+            <div className="row gap-3 wrap">
+              <Field label="Database user" required>
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} className="mono" />
+              </Field>
+              <Field label="Password" hint="The Cloud SQL user's password — Google never returns it." required>
+                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </Field>
+            </div>
+
+            {picked && (
+              <span className="muted" style={{ fontSize: 12.5 }}>
+                Connects through the proxy as <span className="mono">{picked.connectionName}</span>. The app
+                reaches it on <span className="mono">127.0.0.1</span> — no public IP or firewall rule involved.
+              </span>
+            )}
+
+            <div className="col gap-1" style={{ fontSize: 12.5 }}>
+              <label className="row gap-2" style={{ alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={createDatabase}
+                  onChange={(e) => setCreateDatabase(e.target.checked)}
+                />
+                <span>Create the database if it doesn&apos;t exist</span>
+              </label>
+              <label className="row gap-2" style={{ alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={runMigrations}
+                  onChange={(e) => setRunMigrations(e.target.checked)}
+                />
+                <span>Run schema migrations after connecting</span>
               </label>
             </div>
 

@@ -958,6 +958,210 @@ ${nsStep}
   return { path: `.github/workflows/cd.yml`, content };
 }
 
+/**
+ * Combined CI workflow for a GCP monorepo — ONE `ci.yml` matrixed over
+ * services, replacing N per-service files. GCP counterpart of
+ * `generateCombinedEcrCiWorkflow` / `generateCombinedAcrCiWorkflow`.
+ *
+ * Simpler than the Azure version because GCP auth is genuinely keyless: a
+ * single `google-github-actions/auth` step with Workload Identity Federation
+ * covers every matrix row, so there are no per-service secrets to select
+ * between. Azure needed a `docker/login-action` per row because each ACR has
+ * its own admin credential.
+ */
+export function generateCombinedGarCiWorkflow(args: {
+  /** WIF provider resource name — from setup_gcp_github_wif. */
+  workloadIdentityProvider: string;
+  /** Service account the workflow impersonates. */
+  serviceAccount: string;
+  /** Artifact Registry location, e.g. "us-central1". */
+  location: string;
+  branch: string;
+  scanGate?: boolean;
+  services: Array<{
+    name: string;
+    /** Full image ref sans tag: <loc>-docker.pkg.dev/<project>/<repo>/<image>. */
+    imageBase: string;
+    /** Build context subdir. "" = repo root. */
+    context?: string;
+  }>;
+}): GeneratedFile {
+  const gate = args.scanGate !== false;
+  const matrix = args.services
+    .map((s) => {
+      const ctx = (s.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "") || ".";
+      return `          - service: ${s.name}
+            image: ${s.imageBase}
+            context: ${ctx}`;
+    })
+    .join("\n");
+  const scanStep = gate
+    ? `
+      - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy)
+        continue-on-error: true
+        env:
+          IMAGE: \${{ matrix.image }}
+          TAG: \${{ github.sha }}
+        run: |
+          docker run --rm \\
+            -v /var/run/docker.sock:/var/run/docker.sock \\
+            aquasec/trivy:0.65.0 image \\
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \\
+            "$IMAGE:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+`
+    : "";
+  const content = `name: CI (build all services)
+
+# Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
+# When this workflow succeeds, the CD workflow fires automatically via workflow_run.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required to request the GitHub OIDC token
+  contents: read
+
+jobs:
+  build:
+    name: build \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (keyless WIF — no stored key)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${args.workloadIdentityProvider}
+          service_account: ${args.serviceAccount}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${args.location}-docker.pkg.dev --quiet
+
+      - name: Build and tag \${{ matrix.service }} image
+        env:
+          IMAGE: \${{ matrix.image }}
+          TAG: \${{ github.sha }}
+        run: |
+          if [ "\${{ matrix.context }}" = "." ]; then
+            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          else
+            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "\${{ matrix.context }}/Dockerfile" "\${{ matrix.context }}"
+          fi
+${scanStep}
+      - name: Push \${{ matrix.service }} image
+        env:
+          IMAGE: \${{ matrix.image }}
+          TAG: \${{ github.sha }}
+        run: |
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
+`;
+  return { path: `.github/workflows/ci.yml`, content };
+}
+
+/**
+ * Combined CD workflow for a GKE monorepo — single `cd.yml`, matrix deploy,
+ * fired by the combined CI's success. Cluster access is keyless via
+ * `get-gke-credentials`, so no KUBECONFIG_B64 secret is involved (and none
+ * can go stale — the Azure/AWS secret-based paths both had to grow repair
+ * tooling for exactly that).
+ */
+export function generateCombinedGkeCdWorkflow(args: {
+  ciWorkflowName?: string;
+  workloadIdentityProvider: string;
+  serviceAccount: string;
+  projectId: string;
+  /** Cluster location — zone or region. */
+  location: string;
+  clusterName: string;
+  namespace: string;
+  services: Array<{ name: string; appName: string; manifestDir: string }>;
+}): GeneratedFile {
+  const ciName = args.ciWorkflowName || "CI (build all services)";
+  const ns = args.namespace || "default";
+  const matrix = args.services
+    .map(
+      (s) => `          - service: ${s.name}
+            app: ${s.appName}
+            manifestDir: ${s.manifestDir}`,
+    )
+    .join("\n");
+  const nsStep =
+    ns !== "default"
+      ? `
+      - name: Ensure namespace exists
+        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+`
+      : "";
+  const content = `name: CD (deploy all services)
+
+# Runs automatically after the CI workflow ("${ciName}") completes successfully.
+# Also supports manual dispatch for redeploying without a fresh build.
+on:
+  workflow_run:
+    workflows: ["${ciName}"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required to request the GitHub OIDC token
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy \${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+${matrix}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (keyless WIF — no stored key)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${args.workloadIdentityProvider}
+          service_account: ${args.serviceAccount}
+
+      - name: Get GKE credentials (keyless — no KUBECONFIG secret)
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${args.clusterName}
+          location: ${args.location}
+          project_id: ${args.projectId}
+${nsStep}
+      - name: Apply \${{ matrix.service }} manifests
+        run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/
+
+      - name: Restart \${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
+        run: kubectl rollout restart deployment/\${{ matrix.app }} -n ${ns}
+
+      - name: Wait for \${{ matrix.service }} rollout
+        run: kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=180s
+
+      - name: Rollback \${{ matrix.service }} on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of \${{ matrix.app }} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/\${{ matrix.app }} -n ${ns}
+          kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=120s
+`;
+  return { path: `.github/workflows/cd.yml`, content };
+}
+
 export function generateEcrWorkflow(args: {
   roleArn: string;
   region: string;

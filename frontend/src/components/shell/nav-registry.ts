@@ -86,6 +86,7 @@ export const NAV: Record<LayoutArea, NavEntry[]> = {
       icon: "server",
       hrefSegment: "provisioned",
     },
+    { kind: "link", id: "reports", label: "Reports", icon: "stats", hrefSegment: "reports" },
     { kind: "link", id: "network", label: "Network", icon: "link", hrefSegment: "network" },
     { kind: "link", id: "connections", label: "Connections", icon: "link", hrefSegment: "connections" },
     { kind: "link", id: "client-vpn", label: "Client VPN", icon: "download", hrefSegment: "client-vpn" },
