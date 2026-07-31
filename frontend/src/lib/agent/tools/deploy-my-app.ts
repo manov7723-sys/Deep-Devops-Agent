@@ -693,7 +693,16 @@ export const deployMyAppTool: Tool<Input, Output> = {
     }
 
     const anyNeedsAutoExpose = plans.some((p) => p.expose && !p.exposeMode);
-    if (anyNeedsAutoExpose) {
+    // Detection must ALSO run when the user EXPLICITLY chose 'alb' on AWS
+    // (2026-07 incident). The wizard offers "ALB (recommended)" as the default
+    // answer, and an explicit answer previously bypassed this whole block — so
+    // a cluster with no AWS Load Balancer Controller got an Ingress that
+    // nothing watches. No controller means no event, no error and no timeout:
+    // the ADDRESS column simply stays empty forever and the app is
+    // unreachable. Auto-detection knew better and never got to speak.
+    const anyWantsAlbOnAws =
+      cloud === "aws" && plans.some((p) => p.expose && p.exposeMode === "alb");
+    if (anyNeedsAutoExpose || anyWantsAlbOnAws) {
       // Cloud-aware default. "alb" emits an Ingress with
       // `ingressClassName: alb`, which ONLY the AWS Load Balancer Controller
       // watches — it is meaningless on AKS/GKE. Defaulting every cloud to
@@ -708,6 +717,11 @@ export const deployMyAppTool: Tool<Input, Output> = {
       // No add-on controller required, works on a bare cluster. AWS keeps its
       // richer detection below (real ALB when the controller is installed).
       let auto: ExposeMode = cloud === "aws" ? "alb" : "classic";
+      // Lifted out of the AWS branch so the explicit-'alb' guard below can read
+      // them. Default true/false means "unknown" is treated as "controller
+      // present" — we never downgrade a choice we could not verify.
+      let albControllerPresent = true;
+      let albNodesPublic = false;
       if (cloud !== "aws") {
         cdNotes.push(
           `[expose] Cloud is "${cloud}" — auto exposeMode='classic' (Service type=LoadBalancer). ` +
@@ -719,6 +733,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
       }
       if (cloud === "aws" && eksRef) {
         let hasController = false;
+        // eslint-disable-next-line prefer-const
         if (envRow?.kubeconfigRef) {
           let kc: string | null = null;
           try {
@@ -746,6 +761,8 @@ export const deployMyAppTool: Tool<Input, Output> = {
           eksRef.clusterName,
         );
         const allPublic = subnets.ok && subnets.kind === "all_public";
+        albControllerPresent = hasController;
+        albNodesPublic = allPublic;
         auto = hasController ? "alb" : allPublic ? "classic" : "alb";
         cdNotes.push(
           `[expose] Cluster "${eksRef.clusterName}": AWS Load Balancer Controller ` +
@@ -764,6 +781,39 @@ export const deployMyAppTool: Tool<Input, Output> = {
       }
       for (const p of plans) {
         if (p.expose && !p.exposeMode) p.exposeMode = auto;
+      }
+
+      // HARD GUARD for an EXPLICIT 'alb' choice on AWS.
+      //
+      // Respecting the user's pick is normally right, but 'alb' without the
+      // controller is not a trade-off — it produces nothing at all. Substitute
+      // when the nodes are public (a Classic ELB reaches them, so the app
+      // works); keep 'alb' and warn loudly when they are private, because
+      // there a Classic ELB is equally unreachable and the honest answer is
+      // "install the controller", not a silent downgrade that also fails.
+      if (cloud === "aws" && !albControllerPresent) {
+        for (const p of plans) {
+          if (p.expose && p.exposeMode === "alb") {
+            if (albNodesPublic) {
+              p.exposeMode = "classic";
+              cdNotes.push(
+                `[expose] "${p.svc.name}": exposeMode 'alb' requires the AWS Load Balancer ` +
+                  `Controller, which is NOT installed on this cluster — an 'alb' Ingress would ` +
+                  `never receive an address. Substituted 'classic' (Service type=LoadBalancer); ` +
+                  `the nodes are in public subnets, so the in-tree controller provisions a ` +
+                  `reachable Classic ELB.`,
+              );
+            } else {
+              cdNotes.push(
+                `[expose] WARNING for "${p.svc.name}": exposeMode 'alb' was kept, but the AWS ` +
+                  `Load Balancer Controller is NOT installed, so the Ingress will not receive an ` +
+                  `address. The nodes are in private subnets, so 'classic' would be unreachable ` +
+                  `too — install the controller (the EKS blueprint does this via IRSA + Helm) ` +
+                  `or move the app to a cluster that has it.`,
+              );
+            }
+          }
+        }
       }
     }
 
