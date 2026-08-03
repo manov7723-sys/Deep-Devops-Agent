@@ -68,9 +68,25 @@ async function request<T>(
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    // Prefer the SERVER's message over the HTTP status text.
+    //
+    // Every route in this app returns { ok:false, message } explaining what
+    // actually went wrong — "SMTP host must be a hostname, not an email
+    // address", "No AKS clusters exist in this subscription", and so on.
+    // Using res.statusText discarded all of it and surfaced a bare "Bad
+    // Request" for every 400, which tells the user nothing and sends them
+    // to us to decode it. The status text is only the fallback for a
+    // response with no parseable body (a proxy error, an HTML error page).
+    let message = "";
+    try {
+      const parsed = JSON.parse(body) as { message?: string; error?: string; code?: string };
+      message = parsed.message || parsed.error || parsed.code || "";
+    } catch {
+      /* non-JSON body — fall through to the status text */
+    }
     throw new ApiRequestError({
       status: res.status,
-      message: res.statusText || "Request failed",
+      message: message || res.statusText || "Request failed",
       details: body,
     });
   }

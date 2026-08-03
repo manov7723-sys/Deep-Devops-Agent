@@ -11,7 +11,15 @@ const PATH = [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/u
   .filter(Boolean)
   .join(":");
 
-export type EksCluster = { name: string; status?: string; version?: string };
+export type EksCluster = {
+  name: string;
+  status?: string;
+  version?: string;
+  /** The cluster's VPC — lets callers scope a subnet picker without a second lookup. */
+  vpcId?: string;
+  /** Subnets the control plane's ENIs live in. */
+  subnetIds?: string[];
+};
 
 export async function listEksClusters(
   credEnv: Record<string, string>,
@@ -58,8 +66,18 @@ export async function listEksClusters(
       });
       if (d.exitCode !== 0) return { name };
       try {
-        const c = JSON.parse(d.stdout).cluster as { status?: string; version?: string };
-        return { name, status: c?.status, version: c?.version };
+        const c = JSON.parse(d.stdout).cluster as {
+          status?: string;
+          version?: string;
+          resourcesVpcConfig?: { vpcId?: string; subnetIds?: string[] };
+        };
+        return {
+          name,
+          status: c?.status,
+          version: c?.version,
+          vpcId: c?.resourcesVpcConfig?.vpcId,
+          subnetIds: c?.resourcesVpcConfig?.subnetIds,
+        };
       } catch {
         return { name };
       }

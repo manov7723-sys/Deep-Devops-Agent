@@ -35,3 +35,7 @@ frontend/dynamic-react-app/
 # Playwright / test output
 **/test-results/
 **/playwright-report/
+frontend/deepagent/
+frontend/tets-rule02/
+frontend/iam_policy.json
+frontend/iam_policy_latest.json

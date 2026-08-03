@@ -19,6 +19,14 @@ const OAUTH_ERROR_COPY: Record<string, string> = {
   provider_mismatch: "The sign-in state didn't match the provider. Start over.",
   already_linked: "That account is already linked to a different DeepAgent user.",
   unverified_email: "Your provider account doesn't have a verified email. Verify it and retry.",
+  // `no_email` used to fall through to the generic copy, which told the user
+  // nothing and sent them looking in the wrong place entirely.
+  no_email:
+    "The provider completed sign-in but sent no email address, so there's no account to sign you into. Make your email public on the provider, or use the email + password form below.",
+  email_scope_denied:
+    "The provider wouldn't let us read your email address. For a GitHub App, enable Account permissions \u2192 Email addresses (Read-only) and re-authorise; for a classic OAuth App, add the `user:email` scope.",
+  no_verified_email:
+    "Your provider account has no VERIFIED email address. Verify one with the provider, then sign in again.",
   incorrect_client_credentials:
     "The OAuth client ID or secret in the admin settings is wrong. Ask an admin to re-paste them in Admin → OAuth providers.",
   redirect_uri_mismatch:

@@ -110,9 +110,13 @@ export class GitlabRepoClient implements GitRepoClient {
   }): Promise<{ commitSha: string }> {
     const { branch, message, files } = args;
     // GitLab has no upsert action, so classify each path as create vs update.
+    // `delete: true` entries map directly to GitLab's 'delete' action.
     const actions = await Promise.all(
       files.map(async (f) => {
         const path = f.path.replace(/^\/+/, "");
+        if (f.delete) {
+          return { action: "delete", file_path: path };
+        }
         const exists = await this.fileExists(path, branch);
         return { action: exists ? "update" : "create", file_path: path, content: f.content };
       }),

@@ -21,6 +21,7 @@ import { JenkinsProvisionBox } from "@/components/domain/JenkinsProvisionBox";
 import { S3CreateBox } from "@/components/domain/S3CreateBox";
 import { GkeChatBox } from "@/components/domain/GkeChatBox";
 import { AksChatBox } from "@/components/domain/AksChatBox";
+import { RdsChatBox } from "@/components/domain/RdsChatBox";
 import { ClusterConnectBox } from "@/components/domain/ClusterConnectBox";
 import { CloudConnectBox } from "@/components/domain/CloudConnectBox";
 import { SecretEntryBox } from "@/components/domain/SecretEntryBox";
@@ -51,6 +52,7 @@ type Segment =
   | { type: "eks-create" }
   | { type: "gke-create" }
   | { type: "aks-create" }
+  | { type: "rds-create" }
   | { type: "ec2-create" }
   | { type: "vpc-create" }
   | { type: "client-vpn-create" }
@@ -76,6 +78,7 @@ const BARE_FENCES = [
   "eks-create",
   "gke-create",
   "aks-create",
+  "rds-create",
   "ec2-create",
   "vpc-create",
   "client-vpn-create",
@@ -109,6 +112,8 @@ function bareSegment(name: BareFence): Segment {
       return { type: "gke-create" };
     case "aks-create":
       return { type: "aks-create" };
+    case "rds-create":
+      return { type: "rds-create" };
     case "ec2-create":
       return { type: "ec2-create" };
     case "vpc-create":
@@ -235,7 +240,7 @@ function dedupeOptions(segs: Segment[]): Segment[] {
 function parseSegments(text: string): Segment[] {
   const segs: Segment[] = [];
   const re =
-    /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|ec2-create|vpc-create|client-vpn-create|vpn-certificates-create|issue-vpn-user-cert|azure-vnet-create|azure-vm-create|azure-vpn-create|gcp-vpc-create|gcp-vm-create|gcp-vpn-create|jenkins-provision|s3-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
+    /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|rds-create|ec2-create|vpc-create|client-vpn-create|vpn-certificates-create|issue-vpn-user-cert|azure-vnet-create|azure-vm-create|azure-vpn-create|gcp-vpc-create|gcp-vm-create|gcp-vpn-create|jenkins-provision|s3-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
@@ -385,6 +390,10 @@ export function ChatMsg({
             ) : seg.type === "aks-create" ? (
               slug ? (
                 <AksChatBox key={`aks-${i}`} slug={slug} />
+              ) : null
+            ) : seg.type === "rds-create" ? (
+              slug ? (
+                <RdsChatBox key={`rds-${i}`} slug={slug} />
               ) : null
             ) : seg.type === "ec2-create" ? (
               slug ? (

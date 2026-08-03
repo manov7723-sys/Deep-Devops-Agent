@@ -154,9 +154,14 @@ export class GithubRepoClient implements GitRepoClient {
 
     // Blobs FIRST, once. Git blobs are content-addressed, so uploading them is
     // independent of which commit ends up referencing them — they survive a
-    // retry below without being re-sent.
+    // retry below without being re-sent. DELETE entries skip the blob upload
+    // and go into the tree with `sha: null`, which GitHub interprets as "remove
+    // this path from the tree" (git's own deletion semantic).
     const tree = await Promise.all(
       files.map(async (f) => {
+        if (f.delete) {
+          return { path: f.path.replace(/^\/+/, ""), mode: "100644", type: "blob", sha: null };
+        }
         const blob = await this.post(`/repos/${this.fullName}/git/blobs`, {
           content: f.content,
           encoding: "utf-8",

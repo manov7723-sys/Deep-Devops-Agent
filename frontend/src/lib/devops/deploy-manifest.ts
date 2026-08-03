@@ -146,6 +146,27 @@ export type DeploySpec = {
   metricsPort?: string;
   /** Metrics path. Defaults to "/metrics". */
   metricsPath?: string;
+  /**
+   * HTTP path to probe on the container port for readiness (and startup once
+   * TCP is up). When set, the readiness probe emits `httpGet` on this path
+   * instead of the default `tcpSocket`. `tcpSocket` marks the pod ready as
+   * soon as the port is accepting connections — often before the app is
+   * actually serving traffic; an HTTP probe on a real health endpoint is
+   * accurate and cheap. Auto-detected by `detectHealthProbePath` (see
+   * lib/automation/pre-deploy-analyze.ts) or overridden via `deepagent.yaml`.
+   * Liveness stays on `tcpSocket` regardless — deliberately more forgiving so
+   * a transient HTTP stall never kills a serving container.
+   */
+  probePath?: string;
+  /**
+   * K8s resource requests/limits, sourced from `deepagent.yaml` overrides.
+   * Omitted values leave K8s defaults in place (no explicit requests → best-
+   * effort scheduling; no limits → no throttling ceiling).
+   */
+  resources?: {
+    requests?: { cpu?: string; memory?: string };
+    limits?: { cpu?: string; memory?: string };
+  };
 };
 
 /** RFC-1123 label: lowercase alphanumerics + hyphens, ≤63 chars. */
@@ -159,7 +180,19 @@ export function sanitizeAppName(raw: string): string {
   return s || "app";
 }
 
-const q = (s: string) => (/^[A-Za-z0-9_\-./:]+$/.test(s) ? s : JSON.stringify(s));
+// YAML scalars that LOOK like plain strings but get parsed as bool/null/int/
+// float when unquoted. Kubernetes fields declared as `string` (env.value,
+// annotation values, label values, image tag) REJECT non-string types with
+// "cannot unmarshal bool into Go struct field ... of type string" — which is
+// how a bare `SESSION_COOKIE_SECURE: false` broke a deploy in the 2026-08
+// incident. Quote every value that YAML 1.1 would coerce to a non-string,
+// and every value that isn't a plain identifier.
+const YAML_BOOLISH = /^(?:true|false|yes|no|on|off|y|n|null|~)$/i;
+const YAML_NUMBERISH = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?$|^0x[0-9a-fA-F]+$|^0o?[0-7]+$/;
+const q = (s: string) => {
+  if (YAML_BOOLISH.test(s) || YAML_NUMBERISH.test(s)) return JSON.stringify(s);
+  return /^[A-Za-z0-9_\-./:]+$/.test(s) ? s : JSON.stringify(s);
+};
 
 function labels(app: string, indentSpaces: number): string {
   const pad = " ".repeat(indentSpaces);
@@ -230,13 +263,16 @@ function deployment(spec: DeploySpec, app: string): string {
     `          imagePullPolicy: Always`,
     `          ports:`,
     `            - containerPort: ${spec.containerPort}`,
+    // Resources — the built-in defaults are conservative-but-generous for a
+    // typical Node/Python service. When `deepagent.yaml` provides overrides,
+    // they replace the requests/limits blocks below (see spec.resources).
     `          resources:`,
     `            requests:`,
-    `              cpu: 50m`,
-    `              memory: 64Mi`,
+    `              cpu: ${spec.resources?.requests?.cpu ?? "50m"}`,
+    `              memory: ${spec.resources?.requests?.memory ?? "64Mi"}`,
     `            limits:`,
-    `              cpu: 500m`,
-    `              memory: 512Mi`,
+    `              cpu: ${spec.resources?.limits?.cpu ?? "500m"}`,
+    `              memory: ${spec.resources?.limits?.memory ?? "512Mi"}`,
     // startupProbe gives the container up to ~150s (30 × 5s) to first accept a
     // TCP connection before readiness/liveness even begin. Without it, a
     // container that boots slower than initialDelaySeconds gets killed by
@@ -247,9 +283,19 @@ function deployment(spec: DeploySpec, app: string): string {
     `              port: ${spec.containerPort}`,
     `            periodSeconds: 5`,
     `            failureThreshold: 30`,
+    // Readiness probe: when the app exposes a real health endpoint (auto-
+    // detected or set via deepagent.yaml), use httpGet on that path — the pod
+    // is only marked Ready when the app actually responds 2xx, not just when
+    // TCP accepts. Fall back to tcpSocket for apps with no discoverable
+    // endpoint; that mirrors the pre-2026-08 behaviour.
     `          readinessProbe:`,
-    `            tcpSocket:`,
-    `              port: ${spec.containerPort}`,
+    ...(spec.probePath
+      ? [
+          `            httpGet:`,
+          `              path: ${q(spec.probePath)}`,
+          `              port: ${spec.containerPort}`,
+        ]
+      : [`            tcpSocket:`, `              port: ${spec.containerPort}`]),
     `            initialDelaySeconds: 3`,
     `            periodSeconds: 10`,
     `            failureThreshold: 3`,

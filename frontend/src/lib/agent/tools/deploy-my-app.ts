@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/db/prisma";
 import { decryptSecret } from "@/lib/auth/crypto";
 import { analyzeAppServices, type AppService } from "@/lib/automation/repo-analyze";
+import {
+  detectHealthProbePath,
+  listStaleManifestFiles,
+  readDeepAgentConfig,
+  type DeepAgentServiceOverrides,
+} from "@/lib/automation/pre-deploy-analyze";
+import { resolveRepoClient } from "@/lib/git";
 import { getAzureAccessToken } from "@/lib/cloud/azure";
 import { parseAksClusterRef, setupAzureDeployRegistry } from "@/lib/cloud/azure-acr";
 import { grantAksAccessTool } from "./grant-aks-access";
@@ -693,7 +700,16 @@ export const deployMyAppTool: Tool<Input, Output> = {
     }
 
     const anyNeedsAutoExpose = plans.some((p) => p.expose && !p.exposeMode);
-    if (anyNeedsAutoExpose) {
+    // Detection must ALSO run when the user EXPLICITLY chose 'alb' on AWS
+    // (2026-07 incident). The wizard offers "ALB (recommended)" as the default
+    // answer, and an explicit answer previously bypassed this whole block — so
+    // a cluster with no AWS Load Balancer Controller got an Ingress that
+    // nothing watches. No controller means no event, no error and no timeout:
+    // the ADDRESS column simply stays empty forever and the app is
+    // unreachable. Auto-detection knew better and never got to speak.
+    const anyWantsAlbOnAws =
+      cloud === "aws" && plans.some((p) => p.expose && p.exposeMode === "alb");
+    if (anyNeedsAutoExpose || anyWantsAlbOnAws) {
       // Cloud-aware default. "alb" emits an Ingress with
       // `ingressClassName: alb`, which ONLY the AWS Load Balancer Controller
       // watches — it is meaningless on AKS/GKE. Defaulting every cloud to
@@ -708,6 +724,11 @@ export const deployMyAppTool: Tool<Input, Output> = {
       // No add-on controller required, works on a bare cluster. AWS keeps its
       // richer detection below (real ALB when the controller is installed).
       let auto: ExposeMode = cloud === "aws" ? "alb" : "classic";
+      // Lifted out of the AWS branch so the explicit-'alb' guard below can read
+      // them. Default true/false means "unknown" is treated as "controller
+      // present" — we never downgrade a choice we could not verify.
+      let albControllerPresent = true;
+      let albNodesPublic = false;
       if (cloud !== "aws") {
         cdNotes.push(
           `[expose] Cloud is "${cloud}" — auto exposeMode='classic' (Service type=LoadBalancer). ` +
@@ -719,6 +740,7 @@ export const deployMyAppTool: Tool<Input, Output> = {
       }
       if (cloud === "aws" && eksRef) {
         let hasController = false;
+        // eslint-disable-next-line prefer-const
         if (envRow?.kubeconfigRef) {
           let kc: string | null = null;
           try {
@@ -746,6 +768,8 @@ export const deployMyAppTool: Tool<Input, Output> = {
           eksRef.clusterName,
         );
         const allPublic = subnets.ok && subnets.kind === "all_public";
+        albControllerPresent = hasController;
+        albNodesPublic = allPublic;
         auto = hasController ? "alb" : allPublic ? "classic" : "alb";
         cdNotes.push(
           `[expose] Cluster "${eksRef.clusterName}": AWS Load Balancer Controller ` +
@@ -764,6 +788,144 @@ export const deployMyAppTool: Tool<Input, Output> = {
       }
       for (const p of plans) {
         if (p.expose && !p.exposeMode) p.exposeMode = auto;
+      }
+
+      // HARD GUARD for an EXPLICIT 'alb' choice on AWS.
+      //
+      // Respecting the user's pick is normally right, but 'alb' without the
+      // controller is not a trade-off — it produces nothing at all. Substitute
+      // when the nodes are public (a Classic ELB reaches them, so the app
+      // works); keep 'alb' and warn loudly when they are private, because
+      // there a Classic ELB is equally unreachable and the honest answer is
+      // "install the controller", not a silent downgrade that also fails.
+      if (cloud === "aws" && !albControllerPresent) {
+        for (const p of plans) {
+          if (p.expose && p.exposeMode === "alb") {
+            if (albNodesPublic) {
+              p.exposeMode = "classic";
+              cdNotes.push(
+                `[expose] "${p.svc.name}": exposeMode 'alb' requires the AWS Load Balancer ` +
+                  `Controller, which is NOT installed on this cluster — an 'alb' Ingress would ` +
+                  `never receive an address. Substituted 'classic' (Service type=LoadBalancer); ` +
+                  `the nodes are in public subnets, so the in-tree controller provisions a ` +
+                  `reachable Classic ELB.`,
+              );
+            } else {
+              cdNotes.push(
+                `[expose] WARNING for "${p.svc.name}": exposeMode 'alb' was kept, but the AWS ` +
+                  `Load Balancer Controller is NOT installed, so the Ingress will not receive an ` +
+                  `address. The nodes are in private subnets, so 'classic' would be unreachable ` +
+                  `too — install the controller (the EKS blueprint does this via IRSA + Helm) ` +
+                  `or move the app to a cluster that has it.`,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // ── Ensure APP_SECRET_KEY exists in the app-env Secret ─────────────────
+    //
+    // Almost every production-hardened Node/Next.js app has an AES-GCM
+    // encryption key it uses for session signing, TOTP secret storage,
+    // encrypted OAuth tokens, and stored cloud credentials. Standard names:
+    // APP_SECRET_KEY (this codebase), NEXTAUTH_SECRET, SESSION_SECRET,
+    // JWT_SECRET. Without it, code paths that try to encrypt throw at
+    // runtime ("a key for X is required in production") and the client sees
+    // a generic 500 that names none of that.
+    //
+    // Auto-generate a random 32-byte base64 key on FIRST deploy, store it in
+    // app-env, and never touch it on subsequent deploys — rotating this key
+    // invalidates every previously-encrypted value (sessions, TOTP secrets,
+    // OAuth tokens, cloud creds). ensureAppEnvKey handles all three cases:
+    //   • Secret doesn't exist    → create with just this key
+    //   • Secret exists, key set  → leave it alone (persistence is critical)
+    //   • Secret exists, key not  → strategic-merge patch adds the one key
+    if (envRow?.kubeconfigRef && plans.some((p) => p.expose)) {
+      try {
+        const kubeconfigPlaintext = decryptSecret(envRow.kubeconfigRef);
+        const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        const { tmpdir } = await import("node:os");
+        const { randomBytes } = await import("node:crypto");
+        const { ensureAppEnvKey } = await import("@/lib/devops/app-secrets");
+        const dir = await mkdtemp(join(tmpdir(), "dda-appkey-"));
+        try {
+          const kcPath = join(dir, "config");
+          await writeFile(kcPath, kubeconfigPlaintext, { mode: 0o600 });
+          const execEnv = await kubeExecEnv(kcPath, cloudProviderId);
+          const genKey = randomBytes(32).toString("base64");
+          const ensured = await ensureAppEnvKey({
+            kubeconfigPath: kcPath,
+            execEnv,
+            namespace,
+            secretName: "app-env",
+            key: "APP_SECRET_KEY",
+            value: genKey,
+          });
+          if (ensured.ok) {
+            cdNotes.push(
+              ensured.changed
+                ? `[secrets] Auto-generated APP_SECRET_KEY (32 random bytes, base64) and wrote it to Secret app-env in namespace "${namespace}" — required for AES-GCM encryption of TOTP secrets, OAuth tokens, and stored credentials. Save the value if you need to migrate to another cluster (rotating it invalidates every previously encrypted value).`
+                : `[secrets] ${ensured.message}`,
+            );
+          } else {
+            cdNotes.push(
+              `[secrets] WARNING: could not ensure APP_SECRET_KEY in app-env — ${ensured.error}. Auth flows depending on encryption (TOTP setup, OAuth) will 500 at runtime. Add it manually via apply_app_env_secret.`,
+            );
+          }
+        } finally {
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+      } catch (err) {
+        cdNotes.push(
+          `[secrets] Skipped APP_SECRET_KEY auto-generation (${err instanceof Error ? err.message : String(err)}).`,
+        );
+      }
+    }
+
+    // ── Open the pod's containerPort on the cluster's node SGs ────────────
+    //
+    // The AWS Load Balancer Controller registers pod IPs as NLB/ALB targets
+    // when `target-type: ip` is set (which the generated manifests always do
+    // via `nlb-target-type: ip` / `alb.ingress.kubernetes.io/target-type: ip`).
+    // Traffic then flows LB → pod IP:containerPort, bypassing the node's
+    // NodePort. If the node SG doesn't admit that port from 0.0.0.0/0, every
+    // request from the internet times out silently: pod is Ready, target
+    // group is healthy (LB health checks originate INSIDE the VPC, so they
+    // succeed even with the SG closed), and no event or error surfaces
+    // anywhere. The user sees ERR_CONNECTION_TIMED_OUT with no diagnostic.
+    //
+    // Neither the AWS LB Controller nor the in-tree cloud controller manages
+    // this rule for `target-type: ip`. Historically the operator had to
+    // authorize it by hand — the 2026-08 incident is what forced this.
+    //
+    // Runs ONLY on AWS with a resolved EKS ref, for plans that actually
+    // expose an LB (ClusterIP-only backends need nothing). Idempotent — the
+    // helper skips SGs that already admit the port. Non-fatal on failure so
+    // a deploy still proceeds; the note tells the user what to widen if AWS
+    // rejects our call (usually IAM missing ec2:AuthorizeSecurityGroupIngress).
+    if (cloud === "aws" && eksRef) {
+      const { ensureNodeSgAllowsWorkloadPort } = await import("@/lib/cloud/eks-node-sg");
+      const openedPorts = new Set<number>();
+      for (const p of plans) {
+        if (!p.expose) continue;
+        if (p.exposeMode === "nodeport") continue; // NodePort uses the node's ephemeral range, not the pod port.
+        const port = p.svc.port;
+        if (openedPorts.has(port)) continue;
+        openedPorts.add(port);
+        const sg = await ensureNodeSgAllowsWorkloadPort({
+          cloudProviderId,
+          region: eksRef.region,
+          clusterName: eksRef.clusterName,
+          port,
+        });
+        cdNotes.push(
+          sg.ok
+            ? `[network] ${sg.message}`
+            : `[network] WARNING: could not open port ${port} on node SG(s) — ${sg.error} ` +
+                `The app will time out from the internet until this rule is added.`,
+        );
       }
     }
 
@@ -785,11 +947,114 @@ export const deployMyAppTool: Tool<Input, Output> = {
       );
     }
 
+    // ── Pre-flight repo intelligence (Plan-B upgrades, 2026-08) ───────────
+    //
+    // 1) List stale hand-scaffolded YAML files under each service's k8s dir
+    //    so they can be DELETED in the same commit that writes the fresh
+    //    manifest.yaml — kills the "kubectl apply -f dir/" shadowing bug at
+    //    its source instead of only papering over it in the workflow.
+    //
+    // 2) Detect a real HTTP health endpoint per service so the manifest can
+    //    emit an httpGet readinessProbe instead of the loose tcpSocket one.
+    //
+    // 3) Read the optional deepagent.yaml at repo root for per-service
+    //    overrides (probePath / containerPort / env / resources).
+    //
+    // 4) Emit [analyzed] notes describing every decision — the deploy output
+    //    stops being a black box.
+    //
+    // All of these are best-effort: a failure to reach GitHub is quietly
+    // logged and the deploy continues with the safe defaults. Overrides
+    // NEVER silently break the flow — every source of divergence is called
+    // out in `analysisNotes` and threaded into `registrySteps` below.
+    const analysisNotes: string[] = [];
+    const stalePathsBySvc = new Map<string, string[]>();
+    const probeBySvc = new Map<string, string | null>();
+    const overridesBySvc = new Map<string, DeepAgentServiceOverrides>();
+
+    const deepAgentCfg = await readDeepAgentConfig(ctx.projectId, input.repoFullName);
+    if (deepAgentCfg.present) {
+      analysisNotes.push(
+        deepAgentCfg.config?.services
+          ? `[analyzed] Read deepagent.yaml — overrides declared for: ${Object.keys(deepAgentCfg.config.services).join(", ")}.`
+          : "[analyzed] Read deepagent.yaml — no per-service overrides declared (using defaults).",
+      );
+      for (const w of deepAgentCfg.warnings) analysisNotes.push(`[analyzed] deepagent.yaml warning: ${w}`);
+    }
+
+    for (const p of plans) {
+      const svcName = p.svc.name;
+      const overrides = deepAgentCfg.config?.services?.[svcName];
+      if (overrides) overridesBySvc.set(svcName, overrides);
+
+      // Probe detection — user override wins; otherwise scan source.
+      if (overrides?.probePath) {
+        probeBySvc.set(svcName, overrides.probePath);
+        analysisNotes.push(
+          `[analyzed] "${svcName}": readiness probe path = ${overrides.probePath} (from deepagent.yaml).`,
+        );
+      } else if (p.expose) {
+        const probe = await detectHealthProbePath({
+          projectId: ctx.projectId,
+          fullName: input.repoFullName,
+          servicePath: p.svc.path,
+          stack: p.svc.stack,
+        });
+        probeBySvc.set(svcName, probe.probePath);
+        if (probe.probePath) {
+          analysisNotes.push(
+            `[analyzed] "${svcName}": readiness probe path = ${probe.probePath} (${probe.hint}). Using httpGet probe.`,
+          );
+        } else {
+          analysisNotes.push(
+            `[analyzed] "${svcName}": no health endpoint detected — using tcpSocket readiness probe (pod marked Ready as soon as the port accepts). Add \`services.${svcName}.probePath\` to deepagent.yaml to override.`,
+          );
+        }
+      } else {
+        probeBySvc.set(svcName, null);
+      }
+
+      // Note the HTTP-only auto-inject up front so the [analyzed] section
+      // explains why SESSION_COOKIE_SECURE=false appears in the generated
+      // manifest. Only emit the note for exposed services (internal-only
+      // services don't receive it).
+      const userPinnedSecure = "SESSION_COOKIE_SECURE" in (overrides?.env ?? {});
+      if (p.expose && !userPinnedSecure) {
+        analysisNotes.push(
+          `[analyzed] "${svcName}": auto-injecting SESSION_COOKIE_SECURE=false into the Deployment env — the generated Ingress/Service serves plain HTTP (no ACM cert wired), and cookie-based auth libraries default to Secure=true in production which browsers silently reject over HTTP (the "sign in again" loop, 2026-08 incident). Override via services.${svcName}.env.SESSION_COOKIE_SECURE in deepagent.yaml or by adding an ACM cert to the ALB.`,
+        );
+      }
+
+      // Stale-file scan — only meaningful for the manifestDir the deploy
+      // will write into. Same path computation as the file-generation loop
+      // uses (kept in sync at line ~991).
+      const manifestDir = multi
+        ? `k8s/${input.envKey}/${svcName}`
+        : `k8s/${input.envKey}`;
+      const scan = await listStaleManifestFiles(
+        ctx.projectId,
+        input.repoFullName,
+        manifestDir,
+      );
+      if (scan.stalePaths.length) {
+        stalePathsBySvc.set(svcName, scan.stalePaths);
+        analysisNotes.push(
+          `[analyzed] "${svcName}": found ${scan.stalePaths.length} stale scaffold file(s) in ${manifestDir}/ — will delete in the same commit: ${scan.stalePaths.join(", ")}.`,
+        );
+      }
+    }
+
     // 2+3 — per service: ensure the registry + keyless auth, then generate files.
     const allFiles: { path: string; content: string }[] = [];
+    /** Files to REMOVE from the repo in the same commit as the writes. */
+    const filesToDelete: string[] = [];
+    for (const paths of stalePathsBySvc.values()) filesToDelete.push(...paths);
     const deployed: DeployedService[] = [];
     const pipelineFilesByService: { path: string; content: string }[][] = [];
     const registrySteps: string[] = [];
+    // Prepend the analysis notes so the [analyzed] section shows up FIRST in
+    // the report — it's the reasoning behind everything that follows.
+    registrySteps.push(...analysisNotes);
 
     // Combined-mode collector — when a monorepo targets ECR + EKS, we emit ONE
     // ci.yml (matrix over services) + ONE cd.yml (workflow_run, matrix deploy)
@@ -919,8 +1184,38 @@ export const deployMyAppTool: Tool<Input, Output> = {
           appName,
           namespace,
           replicas: Math.max(1, input.replicas ?? 1),
-          containerPort: svc.port,
-          env: [],
+          // deepagent.yaml can override the framework-default container port
+          // when the app really listens on something else (e.g. legacy Java
+          // service pinned to 9000). Fallback is the analyzer's per-stack
+          // default, which is right ~95% of the time.
+          containerPort: overridesBySvc.get(svc.name)?.containerPort ?? svc.port,
+          // Extra env vars from deepagent.yaml become inline `env:` entries
+          // on the Deployment — same shape as the CI/CD-tab env editor. These
+          // WIN over anything in envFromSecrets (K8s precedence), so a value
+          // pinned in deepagent.yaml can't be overridden by a stray Secret.
+          //
+          // AUTO-INJECT SESSION_COOKIE_SECURE=false FOR HTTP-ONLY DEPLOYS
+          // (2026-08 incident): every exposeMode this tool emits serves
+          // plain HTTP (there's no TLS-termination wiring yet — no ACM cert,
+          // no cert-manager). Cookie-based auth libraries default to setting
+          // the `Secure` flag when NODE_ENV=production, which browsers
+          // silently reject over HTTP. The user then sees an infinite "sign
+          // in again" loop with no error surface. Auto-injecting turns off
+          // Secure cookies at the app level so login flows work end-to-end
+          // on the URL the deploy actually produces.
+          //
+          // Skipped when the user's deepagent.yaml already pins the value —
+          // their choice wins. Safe on HTTPS deploys once TLS is added:
+          // just remove the auto-inject or override to `true` via
+          // deepagent.yaml. Harmless on apps that don't use this env var.
+          env: (() => {
+            const overrideEnv = overridesBySvc.get(svc.name)?.env ?? {};
+            const merged: Record<string, string> = { ...overrideEnv };
+            if (expose && !("SESSION_COOKIE_SECURE" in merged)) {
+              merged.SESSION_COOKIE_SECURE = "false";
+            }
+            return Object.entries(merged).map(([key, value]) => ({ key, value }));
+          })(),
           // Declare the conventional config secrets in the MANIFEST rather than
           // patching them onto the live Deployment afterwards.
           //
@@ -967,6 +1262,12 @@ export const deployMyAppTool: Tool<Input, Output> = {
                 ? ("NodePort" as const)
                 : ("LoadBalancer" as const),
           cloud,
+          // Auto-detected HTTP health endpoint (or deepagent.yaml override)
+          // — undefined means the manifest emits a tcpSocket readiness probe.
+          probePath: probeBySvc.get(svc.name) ?? undefined,
+          // deepagent.yaml resource overrides. Undefined means the manifest
+          // uses the built-in requests/limits defaults.
+          resources: overridesBySvc.get(svc.name)?.resources,
         },
         manifestDir,
       };
@@ -1429,6 +1730,52 @@ export const deployMyAppTool: Tool<Input, Output> = {
     const committed: string[] = [];
     let pullRequest: { number: number; url: string } | undefined;
     let lastCommitSha: string | undefined;
+
+    // ── Pre-write sweep: delete stale hand-scaffolded manifest files ──────
+    //
+    // These were surfaced by `listStaleManifestFiles` above. Deleting them in
+    // a dedicated commit (before the write loop) means:
+    //   (a) the deletion is atomic — no window where old service.yaml and
+    //       new manifest.yaml coexist and race the CD workflow's kubectl apply
+    //   (b) if the delete fails (e.g. protected path), the writes still
+    //       proceed; the CD workflow's fallback (apply -f dir/manifest.yaml
+    //       when it exists) handles the coexistence gracefully
+    //   (c) the diff surfaces the removals in git history so a human can see
+    //       what the agent cleaned up.
+    if (filesToDelete.length && direct) {
+      try {
+        const repoRow = await prisma.repo.findFirst({
+          where: {
+            fullName: input.repoFullName,
+            deletedAt: null,
+            projectRepos: { some: { projectId: ctx.projectId } },
+          },
+          select: { id: true },
+        });
+        if (repoRow) {
+          const resolved = await resolveRepoClient(repoRow.id);
+          if (resolved.ok) {
+            await resolved.client.ensureBranch(pushBranch);
+            const del = await resolved.client.commitFiles({
+              branch: pushBranch,
+              message: `Remove stale scaffold manifests before regenerating (DeepAgent)`,
+              files: filesToDelete.map((path) => ({ path, delete: true as const })),
+            });
+            lastCommitSha = del.commitSha;
+            registrySteps.push(
+              `[cleanup] Removed ${filesToDelete.length} stale scaffold file(s) from ${input.repoFullName}: ${filesToDelete.join(", ")}. These would have shadowed the fresh manifest.yaml under \`kubectl apply -f <dir>/\`.`,
+            );
+          }
+        }
+      } catch (err) {
+        // Non-fatal: the CD workflow's fallback still lets the deploy work,
+        // and the next deploy attempt will retry the cleanup.
+        registrySteps.push(
+          `[cleanup] Could not delete stale scaffold files (${err instanceof Error ? err.message : String(err)}). The CD workflow will fall back to \`apply -f <dir>/\`; delete the stale files by hand if the deploy misbehaves.`,
+        );
+      }
+    }
+
     for (let i = 0; i < allFiles.length; i++) {
       const f = allFiles[i];
       const isLast = i === allFiles.length - 1;
