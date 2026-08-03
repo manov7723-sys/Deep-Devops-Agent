@@ -72,6 +72,7 @@ export type AuditAction =
   | "gke.terraform_generated"
   | "gke.cluster_deleted"
   | "aks.terraform_generated"
+  | "rds.terraform_generated"
   | "azure.tfstate_provisioned"
   | "azure.db_connected"
   | "gcp.db_connected"

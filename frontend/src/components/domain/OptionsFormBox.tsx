@@ -17,10 +17,12 @@
  *       "question": "Database name", "kind": "text", "default": "myapp-db"}`
  *     `kind` is "text" or "number"; omit `options` entirely for these.
  *
- * The submitted message text is a compact "key: value, key: value" string the
- * LLM reads back and threads directly into the next tool call. Format kept
- * agent-friendly (comma-separated key: value pairs) so no additional parsing
- * playbook rule is needed on the agent side.
+ * The submitted message text is one line per answer, `key: value`, joined by
+ * newlines. Newline is the ONLY separator that never appears inside an option
+ * label — comma-joining was ambiguous because several labels contain internal
+ * commas (e.g. the "Application Load Balancer (ALB) — Layer-7 path routing,
+ * WAF + ACM TLS…" pick), and the LLM occasionally sliced at the wrong comma
+ * and mapped an ALB pick to exposeMode='nlb'. See the 2026-08 incident.
  *
  * JSON shape inside the fence:
  *   {
@@ -110,11 +112,16 @@ export function OptionsFormBox({
 
   function handleSubmit() {
     if (!allAnswered || !interactive || submitted) return;
-    // Serialize as "namespace: default, name: myapp-db" — stable ordering
-    // (question order), one-line, comma-separated.
+    // Serialize as one line per answer, joined by NEWLINES (not `, `).
+    // Several option labels contain internal commas — "Application Load
+    // Balancer (ALB) — Layer-7 path routing, WAF + ACM TLS…" is the worst
+    // offender — so a comma-joined string is genuinely ambiguous and the LLM
+    // occasionally sliced at the wrong comma and mis-mapped ALB → NLB (the
+    // 2026-08 incident). Newline is the ONE separator that no label contains,
+    // so each `key: value` line is unambiguous end-to-end.
     const parts = data.questions.map((q) => `${q.key}: ${answers[q.key]}`);
     setSubmitted(true);
-    onSubmit?.(parts.join(", "));
+    onSubmit?.(parts.join("\n"));
   }
 
   return (

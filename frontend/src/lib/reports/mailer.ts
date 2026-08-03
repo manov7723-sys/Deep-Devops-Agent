@@ -36,24 +36,53 @@ export type MailConfigResult =
  */
 export async function resolveMailConfig(): Promise<MailConfigResult> {
   const setting = await prisma.platformSetting.findFirst({
-    select: { smtpHost: true, smtpPort: true, fromAddress: true },
+    select: {
+      smtpHost: true,
+      smtpPort: true,
+      fromAddress: true,
+      smtpPasswordRef: true,
+      smtpUser: true,
+    },
   });
 
   const host = setting?.smtpHost?.trim() || process.env.SMTP_HOST?.trim() || "";
   const port = setting?.smtpPort ?? Number(process.env.SMTP_PORT ?? 587);
   const from = setting?.fromAddress?.trim() || process.env.SMTP_FROM?.trim() || "";
-  const password = process.env.SMTP_PASSWORD ?? "";
-  const user = process.env.SMTP_USER?.trim() || from;
 
+  // Password: stored encrypted in the settings row, with the environment
+  // variable as a fallback for deployments that prefer to inject it. Settings
+  // win, so a value saved through the UI takes effect without a restart —
+  // which is the whole point of having the UI.
+  let password = "";
+  if (setting?.smtpPasswordRef) {
+    try {
+      const { decryptSecret } = await import("@/lib/auth/crypto");
+      password = decryptSecret(setting.smtpPasswordRef);
+    } catch {
+      // A stored value we can't decrypt is worse than none — it would fail
+      // authentication with a message blaming the provider. Fall through to
+      // the env var and, failing that, report it as missing.
+    }
+  }
+  if (!password) password = process.env.SMTP_PASSWORD ?? "";
+
+  const user = setting?.smtpUser?.trim() || process.env.SMTP_USER?.trim() || from;
+
+  // Lead with the environment-variable path, not the admin console.
+  //
+  // Host and from-address CAN be set in Admin → Settings, but that page is
+  // gated on the platform super-admin role, so for most users it is a dead
+  // end — and the password is environment-only regardless. Naming .env.local
+  // first gives every user one place to fix all three.
   const missing: string[] = [];
-  if (!host) missing.push("SMTP host (Admin → Settings, or SMTP_HOST)");
-  if (!from) missing.push("From address (Admin → Settings, or SMTP_FROM)");
-  if (!password) missing.push("SMTP_PASSWORD (environment variable)");
+  if (!host) missing.push("SMTP host");
+  if (!from) missing.push("From address");
+  if (!password) missing.push("Password");
   if (missing.length > 0) {
     return {
       ok: false,
       missing,
-      error: `SMTP is not configured — missing: ${missing.join("; ")}.`,
+      error: `Email is not configured — missing: ${missing.join(", ")}. Set it up in Email delivery at the top of the Reports tab.`,
     };
   }
 
@@ -104,7 +133,9 @@ export async function sendReportEmail(args: {
     // The three failures that account for nearly every first-run problem, each
     // with an opaque default message.
     const hint = /EAUTH|535/i.test(msg)
-      ? " — authentication rejected. For Gmail this must be an App Password, not the account password."
+      ? ` — authentication rejected. Two things cause this: the USERNAME must be the full email address ` +
+        `(currently "${config.user}")${config.user.includes("@") ? "" : " — yours has no @, which is almost certainly the problem"}, ` +
+        `and for Gmail the PASSWORD must be an App Password, not your account password.`
       : /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH/i.test(msg)
         ? " — could not reach the SMTP host. Check the host/port and that outbound SMTP isn't blocked."
         : /self.signed|certificate/i.test(msg)

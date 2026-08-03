@@ -28,6 +28,10 @@ import { grantEksAccessTool } from "./grant-eks-access";
 import { grantAksAccessTool } from "./grant-aks-access";
 import { applyAppEnvSecretTool } from "./apply-app-env-secret";
 import { attachAcrToAksTool } from "./attach-acr-to-aks";
+import { ensureWorkloadReachableTool } from "./ensure-workload-reachable";
+import { unstickTerminatingNamespaceTool } from "./unstick-terminating-namespace";
+import { inspectPodEnvTool } from "./inspect-pod-env";
+import { diagnoseDeployedAppTool } from "./diagnose-deployed-app";
 import { listEcrReposTool } from "./list-ecr-repos";
 import { analyzeAppServicesTool } from "./analyze-app-services";
 import { listRepoBranchesTool } from "./list-repo-branches";
@@ -273,6 +277,19 @@ export const ALL_TOOLS: Tool[] = [
   applyAppEnvSecretTool,
   // Attach ACRs to AKS (kubelet AcrPull) — fixes ImagePullBackOff
   attachAcrToAksTool,
+  // EKS node SG heal — opens pod containerPort inbound so an NLB/ALB (target-type: ip)
+  // can actually reach the pod. Fixes silent ERR_CONNECTION_TIMED_OUT on Ready pods.
+  ensureWorkloadReachableTool,
+  // Force-delete a stuck Terminating namespace — clears finalizers on Services/PVCs
+  // then, if still stuck, removes the namespace's own finalizer via /finalize.
+  // Fixes "unable to create new content in namespace X because it is being terminated".
+  unstickTerminatingNamespaceTool,
+  // Read a pod's actual env vars — answers "what is DATABASE_URL/SESSION_COOKIE_SECURE/etc
+  // set to on the deployed pod?" without asking the user to run kubectl exec.
+  inspectPodEnvTool,
+  // Composite health check: pod ready + env vars present + URL reachable + DB reachable + log tail.
+  // Use whenever the user says "the app isn't working" instead of asking them to open DevTools.
+  diagnoseDeployedAppTool,
   // Registry + service analysis for the deploy flow (list ECR repos, detect frontend/backend)
   listEcrReposTool,
   analyzeAppServicesTool,

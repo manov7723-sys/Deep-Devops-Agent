@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Block, Btn, Field, Input, PageHead } from "@/components/ui";
 import { api } from "@/lib/api/client";
@@ -86,25 +86,11 @@ export function ReportsClient({ slug }: { slug: string }) {
         sub={`Every application deployed by the agent, grouped by namespace. A health + metrics report is emailed to each namespace's recipients daily at ${data?.reportHour ?? 10}:00.`}
       />
 
-      {/* SMTP is a hard prerequisite — surface it once at the top rather than
-          letting every "Send now" fail with the same message. */}
-      {data && !data.smtp.configured && (
-        <Block>
-          <Block.Body>
-            <div className="col gap-1" style={{ fontSize: 12.5 }}>
-              <div className="row gap-2" style={{ alignItems: "center" }}>
-                <Badge tone="warn">email not configured</Badge>
-                <span className="muted">Reports can be viewed here but not delivered yet.</span>
-              </div>
-              {data.smtp.missing?.map((m) => (
-                <span key={m} className="muted">
-                  · {m}
-                </span>
-              ))}
-            </div>
-          </Block.Body>
-        </Block>
-      )}
+      {/* Email delivery is a hard prerequisite for every namespace below, so it
+          sits at the top and is EDITABLE here. It used to be a read-only
+          warning pointing at the platform admin console — which is gated on
+          the super-admin role, so a project developer had no way to act on it. */}
+      <SmtpPanel slug={slug} />
 
       {isLoading ? (
         <Block>
@@ -447,6 +433,236 @@ function ManualNamespaceBlock({
           )}
         </div>
       </Block.Body>
+    </Block>
+  );
+}
+
+/**
+ * Email delivery settings.
+ *
+ * These are platform-wide (one relay, one from-address) but are edited here,
+ * where they're used. The alternative — the platform admin console — is gated
+ * on the super-admin role, so a project developer configuring their own
+ * reports would hit a 404 with no route forward.
+ *
+ * The password is written to the database as AES-256-GCM ciphertext and is
+ * never sent back to the browser. The form shows only whether one is stored,
+ * and an empty password field means "keep the existing one" so that editing
+ * the host doesn't silently wipe the credential.
+ */
+type SmtpSettings = {
+  host: string;
+  port: number;
+  from: string;
+  user: string;
+  hasPassword: boolean;
+  passwordFromEnv: boolean;
+  verifiedAt: string | null;
+};
+
+type SmtpResponse = {
+  ok: boolean;
+  settings: SmtpSettings;
+  configured: boolean;
+  missing: string[];
+};
+
+/** Presets for the relays people actually use, so nobody guesses a port. */
+const PRESETS: Array<{ label: string; host: string; port: number; note: string }> = [
+  { label: "Gmail", host: "smtp.gmail.com", port: 587, note: "Requires an App Password, not your account password." },
+  { label: "Outlook / Office 365", host: "smtp.office365.com", port: 587, note: "Use the full mailbox address as the username." },
+  { label: "AWS SES", host: "email-smtp.us-east-1.amazonaws.com", port: 587, note: "Use SES SMTP credentials — not your AWS access key." },
+  { label: "SendGrid", host: "smtp.sendgrid.net", port: 587, note: "Username is literally 'apikey'; the password is the API key." },
+];
+
+function SmtpPanel({ slug }: { slug: string }) {
+  const qc = useQueryClient();
+  const { data } = useQuery<SmtpResponse>({
+    queryKey: ["p", slug, "reports", "smtp"],
+    queryFn: () => api.get<SmtpResponse>(`/projects/${slug}/reports/smtp`),
+    staleTime: 30_000,
+  });
+
+  const [open, setOpen] = useState(false);
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("587");
+  const [from, setFrom] = useState("");
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Seed the form once from the server, then leave the user's edits alone.
+  useEffect(() => {
+    if (hydrated || !data?.settings) return;
+    setHost(data.settings.host);
+    setPort(String(data.settings.port || 587));
+    setFrom(data.settings.from);
+    setUser(data.settings.user);
+    setHydrated(true);
+    // Open automatically when there's nothing configured — that's the case
+    // where the user needs to act, and a collapsed panel would hide it.
+    if (!data.configured) setOpen(true);
+  }, [data, hydrated]);
+
+  const act = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<{ ok: boolean; message?: string }>(`/projects/${slug}/reports/smtp`, body),
+    onSuccess: (res) => {
+      setMsg({ ok: res.ok, text: res.message ?? (res.ok ? "Saved." : "Failed.") });
+      setPassword("");
+      qc.invalidateQueries({ queryKey: ["p", slug, "reports"] });
+    },
+    onError: (e) => setMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." }),
+  });
+
+  const configured = data?.configured ?? false;
+  const canSave = !!host.trim() && !!from.trim();
+
+  return (
+    <Block>
+      <Block.Header>
+        <div
+          className="row gap-2"
+          style={{ alignItems: "center", justifyContent: "space-between", width: "100%" }}
+        >
+          <Block.Title
+            sub={
+              configured
+                ? `Sending as ${data?.settings.from} via ${data?.settings.host}.`
+                : "Reports are generated but cannot be delivered until this is set."
+            }
+          >
+            <span className="row gap-2" style={{ alignItems: "center" }}>
+              Email delivery
+              {configured ? (
+                <Badge tone="ok" withDot>
+                  configured
+                </Badge>
+              ) : (
+                <Badge tone="warn">not configured</Badge>
+              )}
+            </span>
+          </Block.Title>
+          <div className="row gap-2">
+            {configured && (
+              <Btn
+                size="sm"
+                variant="outline"
+                disabled={act.isPending}
+                onClick={() => act.mutate({ action: "test" })}
+              >
+                Test connection
+              </Btn>
+            )}
+            <Btn size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>
+              {open ? "Hide" : configured ? "Edit" : "Set up"}
+            </Btn>
+          </div>
+        </div>
+      </Block.Header>
+
+      {open && (
+        <Block.Body>
+          <div className="col gap-3">
+            <div className="row gap-2 wrap" style={{ alignItems: "center" }}>
+              <span className="muted" style={{ fontSize: 12.5 }}>
+                Quick fill:
+              </span>
+              {PRESETS.map((p) => (
+                <Btn
+                  key={p.label}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setHost(p.host);
+                    setPort(String(p.port));
+                    setMsg({ ok: true, text: p.note });
+                  }}
+                >
+                  {p.label}
+                </Btn>
+              ))}
+            </div>
+
+            <div className="row gap-3 wrap">
+              <Field label="SMTP host" required>
+                <Input value={host} onChange={(e) => setHost(e.target.value)} className="mono" placeholder="smtp.gmail.com" />
+              </Field>
+              <Field label="Port" hint="587 = STARTTLS · 465 = implicit TLS">
+                <Input value={port} onChange={(e) => setPort(e.target.value)} className="mono" />
+              </Field>
+            </div>
+
+            <div className="row gap-3 wrap">
+              <Field label="From address" required>
+                <Input value={from} onChange={(e) => setFrom(e.target.value)} className="mono" placeholder="reports@yourcompany.com" />
+              </Field>
+              <Field label="Username" hint="Leave blank to use the from address.">
+                <Input value={user} onChange={(e) => setUser(e.target.value)} className="mono" />
+              </Field>
+            </div>
+
+            <Field
+              label="Password"
+              hint={
+                data?.settings.hasPassword
+                  ? data.settings.passwordFromEnv
+                    ? "Currently taken from the SMTP_PASSWORD environment variable. Entering one here overrides it."
+                    : "A password is saved. Leave blank to keep it, or enter a new one to replace it."
+                  : "Stored encrypted. For Gmail this must be an App Password, not your account password."
+              }
+            >
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={data?.settings.hasPassword ? "•••••••• (unchanged)" : ""}
+              />
+            </Field>
+
+            {!configured && !!data?.missing?.length && (
+              <span style={{ fontSize: 12.5, color: "var(--warn, #f5a524)" }}>
+                Still missing: {data.missing.join(", ")}.
+              </span>
+            )}
+
+            {msg && (
+              <span
+                style={{
+                  fontSize: 12.5,
+                  color: msg.ok ? "var(--ok, #30a46c)" : "var(--danger, #e5484d)",
+                }}
+              >
+                {msg.text}
+              </span>
+            )}
+
+            <div className="row gap-2" style={{ alignItems: "center" }}>
+              <Btn
+                disabled={!canSave || act.isPending}
+                onClick={() =>
+                  act.mutate({
+                    action: "save",
+                    host: host.trim(),
+                    port: Number(port) || 587,
+                    from: from.trim(),
+                    user: user.trim(),
+                    password,
+                  })
+                }
+              >
+                {act.isPending ? "Saving…" : "Save"}
+              </Btn>
+              {data?.settings.verifiedAt && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Last verified {new Date(data.settings.verifiedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+          </div>
+        </Block.Body>
+      )}
     </Block>
   );
 }

@@ -20,6 +20,139 @@
 export type ParsedEnv = { key: string; value: string };
 
 /**
+ * Ensure a specific key exists in an app config Secret WITHOUT wiping the rest
+ * of it. Used by `deploy_my_app` to auto-inject required-in-production keys
+ * (e.g. APP_SECRET_KEY for AES-GCM encryption of TOTP/OAuth/DB credentials)
+ * on first deploy, then leave them alone on every subsequent deploy so the
+ * generated key stays stable — rotating APP_SECRET_KEY invalidates every
+ * encrypted value the app has ever stored.
+ *
+ * Uses `kubectl patch` with a strategic-merge payload so ONLY this key is
+ * added/updated. Existing keys in the Secret survive untouched. Creates the
+ * Secret from scratch when it doesn't exist yet.
+ *
+ * Returns changed=true only when a write actually happened. Idempotent: safe
+ * to call on every deploy.
+ */
+export async function ensureAppEnvKey(args: {
+  kubeconfigPath: string;
+  execEnv: Record<string, string>;
+  namespace: string;
+  secretName: string;
+  /** Env-var name to set. Must be a valid Secret data key. */
+  key: string;
+  /** Plaintext value — this helper base64-encodes for the Secret payload. */
+  value: string;
+  /**
+   * When true, overwrite an existing value for the same key. Default false —
+   * meaning "only add if missing". Persistence is the whole point for keys
+   * like APP_SECRET_KEY, so the default is safe.
+   */
+  overwrite?: boolean;
+}): Promise<
+  | { ok: true; changed: boolean; message: string }
+  | { ok: false; error: string }
+> {
+  const { kubeconfigPath, execEnv, namespace, secretName, key, value } = args;
+  const overwrite = args.overwrite === true;
+  const { runStage } = await import("@/lib/runner/exec");
+  const env = { ...execEnv, KUBECONFIG: kubeconfigPath };
+
+  // 1 — Does the Secret exist? Read the current data map.
+  const get = await runStage({
+    command: "kubectl",
+    args: ["get", "secret", secretName, "-n", namespace, "-o", "jsonpath={.data}"],
+    cwd: process.cwd(),
+    env,
+    timeoutMs: 30_000,
+  });
+  const b64 = Buffer.from(value, "utf8").toString("base64");
+
+  if (get.exitCode !== 0) {
+    // Secret doesn't exist — create it with just this key. The manifest is
+    // fully declared so kubectl-apply can pick it up on the next deploy_my_app
+    // run without conflict (labels + type match what applyAppSecret writes).
+    const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "dda-ensurekey-"));
+    try {
+      // The Deployment references `app-env` with envFrom, and the namespace
+      // may not exist yet on a first-ever deploy — but this helper runs AFTER
+      // the CD workflow's namespace-heal step, so we assume namespace is Active.
+      // Silently create the namespace as a safety belt anyway.
+      await runStage({
+        command: "kubectl",
+        args: ["create", "namespace", namespace],
+        cwd: dir,
+        env,
+        timeoutMs: 15_000,
+      });
+      const yaml = `apiVersion: v1
+kind: Secret
+metadata:
+  name: ${secretName}
+  namespace: ${namespace}
+  labels:
+    app.kubernetes.io/managed-by: deepagent
+type: Opaque
+data:
+  ${key}: ${b64}
+`;
+      const file = join(dir, "secret.yaml");
+      await writeFile(file, yaml, { mode: 0o600 });
+      const apply = await runStage({
+        command: "kubectl",
+        args: ["apply", "-f", file],
+        cwd: dir,
+        env,
+        timeoutMs: 30_000,
+      });
+      if (apply.exitCode !== 0) {
+        return { ok: false, error: `Could not create Secret "${secretName}": ${apply.stderr.slice(-200)}` };
+      }
+      return { ok: true, changed: true, message: `Created Secret "${secretName}" with key "${key}".` };
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  // 2 — Secret exists. Is the key already there? kubectl's -o jsonpath={.data}
+  //     returns a Go-style map literal (e.g. `map[APP_SECRET_KEY:<b64> DATABASE_URL:<b64>]`)
+  //     rather than JSON, so parse loosely by looking for the key name.
+  const dataDump = get.stdout;
+  const alreadyPresent = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}:`).test(dataDump);
+  if (alreadyPresent && !overwrite) {
+    return {
+      ok: true,
+      changed: false,
+      message: `Secret "${secretName}" already has key "${key}" — not overwritten (rotation would invalidate all previously encrypted values).`,
+    };
+  }
+
+  // 3 — Patch to add or overwrite this one key. Strategic-merge preserves
+  //     every other data field in the Secret.
+  const patchPayload = JSON.stringify({ data: { [key]: b64 } });
+  const patch = await runStage({
+    command: "kubectl",
+    args: ["patch", "secret", secretName, "-n", namespace, "--type=merge", "-p", patchPayload],
+    cwd: process.cwd(),
+    env,
+    timeoutMs: 30_000,
+  });
+  if (patch.exitCode !== 0) {
+    return { ok: false, error: `Could not patch Secret "${secretName}": ${patch.stderr.slice(-200)}` };
+  }
+  return {
+    ok: true,
+    changed: true,
+    message: alreadyPresent
+      ? `Overwrote key "${key}" in Secret "${secretName}".`
+      : `Added key "${key}" to Secret "${secretName}".`,
+  };
+}
+
+/**
  * Find values that point at the developer's own machine.
  *
  * WHY (2026-07 incident): app config is almost always pasted straight out of a

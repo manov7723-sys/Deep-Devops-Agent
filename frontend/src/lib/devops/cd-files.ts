@@ -64,7 +64,19 @@ jobs:
           kubectl config current-context
 
       - name: Apply manifests
-        run: kubectl apply -n ${ns} -f ${dir}/
+        # Prefer manifest.yaml — deploy_my_app writes exactly that file, and
+        # applying the whole dir picks up any stale *.yaml (e.g. a
+        # hand-committed service.yaml from an older scaffold) that
+        # alphabetically-sorts AFTER it and silently overrides the freshly
+        # generated resource (that's how a ClusterIP + ALB deploy became a
+        # LoadBalancer + NLB in the 2026-08 incident). Fall back to the dir
+        # for repos whose manifests are still split across multiple files.
+        run: |
+          if [ -f "${dir}/manifest.yaml" ]; then
+            kubectl apply -n ${ns} -f "${dir}/manifest.yaml"
+          else
+            kubectl apply -n ${ns} -f "${dir}/"
+          fi
 
       - name: Wait for rollout
         run: kubectl rollout status deployment/${app} -n ${ns} --timeout=180s

@@ -532,28 +532,31 @@ export function generateCombinedEcrCiWorkflow(args: {
   }>;
 }): GeneratedFile {
   const gate = args.scanGate !== false;
-  const matrix = args.services
+  // Sequential single-job shape — build & push each service back-to-back in
+  // ONE `build-and-push` job (not a matrix). Reason: users asked for a single
+  // job box in the GitHub Actions UI instead of two parallel matrix rows.
+  // Trade-off: no parallelism, and if service #1 fails, service #2 doesn't
+  // build. Acceptable because a monorepo's services usually deploy together
+  // anyway; the log staying linear beats the matrix's isolation.
+  const perServiceSteps = args.services
     .map((s) => {
       const ctx = (s.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "") || ".";
-      return `          - service: ${s.name}
-            ecr: ${s.ecrRepositoryUri}
-            context: ${ctx}`;
-    })
-    .join("\n");
-  // Trivy scan via the official CONTAINER (aquasec/trivy) instead of the
-  // trivy-action. The action pulls in aquasecurity/setup-trivy, which
-  // downloads the Trivy binary from GitHub's rate-limited API and fails
-  // intermittently with a bare "exit code 1" at INSTALL time (not a real
-  // finding). Running the container skips that entirely — the runner already
-  // has Docker, and the image pulls from Docker Hub reliably. continue-on-error
-  // keeps a scan hiccup (or a finding) from blocking the deploy; the "|| echo"
-  // surfaces a warning. Flip continue-on-error off to make it a hard gate.
-  const scanStep = gate
-    ? `
-      - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy)
+      const svc = s.name;
+      const buildBlock =
+        ctx === "."
+          ? `docker build -t "$ECR:$TAG" -t "$ECR:latest" .`
+          : `docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "${ctx}/Dockerfile" "${ctx}"`;
+      // Trivy scan via the official CONTAINER (aquasec/trivy) instead of the
+      // trivy-action. The action pulls in aquasecurity/setup-trivy, which
+      // downloads Trivy from GitHub's rate-limited API and fails intermittently
+      // with a bare "exit code 1" at INSTALL time. Running the container skips
+      // that entirely; the runner already has Docker. continue-on-error keeps
+      // a scan hiccup from blocking the deploy — flip it off for a hard gate.
+      const scanStep = gate
+        ? `      - name: Scan ${svc} image for vulnerabilities (Trivy)
         continue-on-error: true
         env:
-          ECR: \${{ matrix.ecr }}
+          ECR: ${s.ecrRepositoryUri}
           TAG: \${{ github.sha }}
         run: |
           docker run --rm \\
@@ -562,7 +565,24 @@ export function generateCombinedEcrCiWorkflow(args: {
             --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \\
             "$ECR:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
 `
-    : "";
+        : "";
+      return `      - name: Build and tag ${svc} image
+        env:
+          ECR: ${s.ecrRepositoryUri}
+          TAG: \${{ github.sha }}
+        run: |
+          ${buildBlock}
+
+${scanStep}      - name: Push ${svc} image
+        env:
+          ECR: ${s.ecrRepositoryUri}
+          TAG: \${{ github.sha }}
+        run: |
+          docker push "$ECR:$TAG"
+          docker push "$ECR:latest"
+`;
+    })
+    .join("\n");
   const content = `name: CI (build all services)
 
 # Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
@@ -575,14 +595,9 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: build \${{ matrix.service }}
+  build-and-push:
+    name: Build and push all services
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-${matrix}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -596,25 +611,7 @@ ${matrix}
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and tag \${{ matrix.service }} image
-        env:
-          ECR: \${{ matrix.ecr }}
-          TAG: \${{ github.sha }}
-        run: |
-          if [ "\${{ matrix.context }}" = "." ]; then
-            docker build -t "$ECR:$TAG" -t "$ECR:latest" .
-          else
-            docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "\${{ matrix.context }}/Dockerfile" "\${{ matrix.context }}"
-          fi
-${scanStep}
-      - name: Push \${{ matrix.service }} image
-        env:
-          ECR: \${{ matrix.ecr }}
-          TAG: \${{ github.sha }}
-        run: |
-          docker push "$ECR:$TAG"
-          docker push "$ECR:latest"
-`;
+${perServiceSteps}`;
   return { path: `.github/workflows/ci.yml`, content };
 }
 
@@ -640,18 +637,57 @@ export function generateCombinedEksCdWorkflow(args: {
 }): GeneratedFile {
   const ciName = args.ciWorkflowName || "CI (build all services)";
   const ns = args.namespace || "default";
-  const matrix = args.services
-    .map(
-      (s) => `          - service: ${s.name}
-            app: ${s.appName}
-            manifestDir: ${s.manifestDir}`,
-    )
-    .join("\n");
   const nsStep =
     ns !== "default"
       ? `
-      - name: Ensure namespace exists
-        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+      - name: Ensure namespace ${ns} is Active (auto-heal if stuck Terminating)
+        # Three-stage self-heal — see cicd-pipeline.ts for the full rationale.
+        # Stage 1: wait 60s for natural termination.
+        # Stage 2: force-clear finalizers on Services + PVCs, wait 30s.
+        # Stage 3: nuke the namespace's own finalizer via /finalize subresource.
+        run: |
+          set -eu
+          NS="${ns}"
+          ns_phase() { kubectl get namespace "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo ""; }
+          for i in $(seq 1 30); do
+            p=$(ns_phase)
+            { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+            echo "namespace $NS is $p — waiting for natural termination ($i/30)"
+            sleep 2
+          done
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating after 60s — auto-clearing finalizers on Services and PVCs."
+            for kind in svc pvc; do
+              for res in $(kubectl get "$kind" -n "$NS" -o name 2>/dev/null); do
+                echo "  clearing finalizers on $res"
+                kubectl patch "$res" -n "$NS" -p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1 || true
+              done
+            done
+            for i in $(seq 1 15); do
+              p=$(ns_phase)
+              { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+              sleep 2
+            done
+          fi
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating — force-clearing its own finalizer via /finalize subresource."
+            if command -v jq >/dev/null 2>&1; then
+              kubectl get namespace "$NS" -o json | jq '.spec.finalizers = []' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            else
+              printf '%s' '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"'"$NS"'"},"spec":{"finalizers":[]}}' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            fi
+            sleep 3
+          fi
+          p=$(ns_phase)
+          [ -z "$p" ] && kubectl create namespace "$NS"
+          p=$(ns_phase)
+          if [ "$p" != "Active" ]; then
+            echo "::error::Namespace $NS auto-heal exhausted; still $p. Ask the agent to run unstick_terminating_namespace for deep diagnosis."
+            exit 1
+          fi
+          echo "namespace $NS is Active — proceeding with apply."
 `
       : "";
   const content = `name: CD (deploy all services)
@@ -670,14 +706,9 @@ permissions:
 
 jobs:
   deploy:
-    name: deploy \${{ matrix.service }}
+    name: Deploy all services
     runs-on: ubuntu-latest
     if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-${matrix}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -694,23 +725,75 @@ ${matrix}
       - name: Configure cluster access (keyless)
         run: aws eks update-kubeconfig --name "${args.clusterName}" --region ${args.region}
 ${nsStep}
-      - name: Apply \${{ matrix.service }} manifests
-        run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/
-
-      - name: Restart \${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
-        run: kubectl rollout restart deployment/\${{ matrix.app }} -n ${ns}
-
-      - name: Wait for \${{ matrix.service }} rollout
-        run: kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=180s
-
-      - name: Rollback \${{ matrix.service }} on failed rollout
-        if: failure()
-        run: |
-          echo "::warning::Rollout of \${{ matrix.app }} failed its health check — rolling back to the previous revision."
-          kubectl rollout undo deployment/\${{ matrix.app }} -n ${ns}
-          kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=120s
-`;
+${sequentialDeploySteps(args.services, ns)}`;
   return { path: `.github/workflows/cd.yml`, content };
+}
+
+/**
+ * Emit the per-service deploy blocks as sequential steps in ONE job (instead
+ * of a matrix). For each service, four steps:
+ *
+ *   1. Apply manifests   — `kubectl apply` (prefers manifest.yaml, falls back
+ *                          to the dir).
+ *   2. Restart rollout   — force pods onto the newly-tagged image.
+ *   3. Wait for rollout  — `kubectl rollout status`, 180s timeout.
+ *   4. Rollback on fail  — SCOPED to THIS service's own steps via
+ *                          `steps.<id>.outcome`. Without this scoping, a
+ *                          later service's rollback would trigger on an
+ *                          earlier service's failure (because `failure()`
+ *                          is JOB-scoped in GitHub Actions), and try to
+ *                          undo a deployment that never rolled this run.
+ *
+ * If service N fails, service N+1's steps are default-skipped (job status is
+ * already failure), and their rollback also skips because it conditions on
+ * their own step outcomes — which are 'skipped', not 'failure'.
+ */
+function sequentialDeploySteps(
+  services: Array<{ name: string; appName: string; manifestDir: string }>,
+  ns: string,
+): string {
+  return services
+    .map((s) => {
+      const svc = s.name;
+      const applyId = `apply_${svc}`.replace(/[^a-zA-Z0-9_]/g, "_");
+      const restartId = `restart_${svc}`.replace(/[^a-zA-Z0-9_]/g, "_");
+      const waitId = `wait_${svc}`.replace(/[^a-zA-Z0-9_]/g, "_");
+      return `      - name: Apply ${svc} manifests
+        id: ${applyId}
+        # Prefer manifest.yaml — deploy_my_app writes exactly that file, and
+        # applying the whole dir picks up any stale *.yaml (e.g. a
+        # hand-committed service.yaml from an older scaffold) that
+        # alphabetically-sorts AFTER it and silently overrides the freshly
+        # generated resource (2026-08 incident). Fall back to the dir for
+        # repos whose manifests are still split across multiple files.
+        run: |
+          if [ -f "${s.manifestDir}/manifest.yaml" ]; then
+            kubectl apply -n ${ns} -f "${s.manifestDir}/manifest.yaml"
+          else
+            kubectl apply -n ${ns} -f "${s.manifestDir}/"
+          fi
+
+      - name: Restart ${svc} rollout (image tag "latest" — force pods onto the new build)
+        id: ${restartId}
+        run: kubectl rollout restart deployment/${s.appName} -n ${ns}
+
+      - name: Wait for ${svc} rollout
+        id: ${waitId}
+        run: kubectl rollout status deployment/${s.appName} -n ${ns} --timeout=180s
+
+      - name: Rollback ${svc} on failed rollout
+        # Scoped to THIS service's own step outcomes (see sequentialDeploySteps
+        # comment). \`always()\` lets the step evaluate even when the job status
+        # is failure; the inner condition prevents rollback firing for a
+        # service whose steps were skipped because an earlier service failed.
+        if: \${{ always() && (steps.${applyId}.outcome == 'failure' || steps.${restartId}.outcome == 'failure' || steps.${waitId}.outcome == 'failure') }}
+        run: |
+          echo "::warning::Rollout of ${s.appName} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/${s.appName} -n ${ns}
+          kubectl rollout status deployment/${s.appName} -n ${ns} --timeout=120s
+`;
+    })
+    .join("\n");
 }
 
 /**
@@ -753,22 +836,24 @@ export function generateCombinedAcrCiWorkflow(args: {
   }>;
 }): GeneratedFile {
   const gate = args.scanGate !== false;
-  const matrix = args.services
+  // Sequential single-job shape (see the AWS ECR generator for rationale).
+  // ACR auth is per-service — different registries have different admin creds
+  // — so each service block: reads its own secrets → validates → logs in →
+  // builds → (optionally scans) → pushes → logs out (implicitly, docker's
+  // credential file only holds the most recent login per host).
+  const perServiceSteps = args.services
     .map((s) => {
       const ctx = (s.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "") || ".";
-      return `          - service: ${s.name}
-            image: ${s.imageBase}
-            context: ${ctx}
-            secretPrefix: ${s.secretPrefix}
-            loginServer: ${s.loginServer}`;
-    })
-    .join("\n");
-  const scanStep = gate
-    ? `
-      - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy)
+      const svc = s.name;
+      const buildBlock =
+        ctx === "."
+          ? `docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .`
+          : `docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "${ctx}/Dockerfile" "${ctx}"`;
+      const scanStep = gate
+        ? `      - name: Scan ${svc} image for vulnerabilities (Trivy)
         continue-on-error: true
         env:
-          IMAGE: \${{ matrix.image }}
+          IMAGE: ${s.imageBase}
           TAG: \${{ github.sha }}
         run: |
           docker run --rm \\
@@ -777,14 +862,46 @@ export function generateCombinedAcrCiWorkflow(args: {
             --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \\
             "$IMAGE:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
 `
-    : "";
-  // ACR auth uses secretName indirection — GitHub secrets are only resolvable
-  // literally in `${{ secrets.<NAME> }}` (not `${{ secrets[matrix.x] }}`), so
-  // we mirror the AWS pattern by using bash env to move the value through.
-  // The `verify secrets present` step surfaces DEEPAGENT_ACR_SECRETS_MISSING
-  // so wait_for_workflow_run's classifier can route to
-  // `repair_azure_acr_push_auth` — same failureKind='acr_secrets_missing'
-  // regardless of whether it's per-service or combined mode.
+        : "";
+      return `      - name: Verify ${svc} ACR secrets present
+        env:
+          ACR_LOGIN_SERVER: \${{ secrets.${s.secretPrefix}_LOGIN_SERVER }}
+          ACR_USERNAME: \${{ secrets.${s.secretPrefix}_USERNAME }}
+          ACR_PASSWORD: \${{ secrets.${s.secretPrefix}_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ${s.secretPrefix}_LOGIN_SERVER"
+          [ -z "$ACR_USERNAME" ] && missing="$missing ${s.secretPrefix}_USERNAME"
+          [ -z "$ACR_PASSWORD" ] && missing="$missing ${s.secretPrefix}_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=\${{ github.repository }} service=${svc} missing=$missing"
+            exit 1
+          fi
+
+      - name: Log in to ACR for ${svc}
+        uses: docker/login-action@v3
+        with:
+          registry: ${s.loginServer}
+          username: \${{ secrets.${s.secretPrefix}_USERNAME }}
+          password: \${{ secrets.${s.secretPrefix}_PASSWORD }}
+
+      - name: Build and tag ${svc} image
+        env:
+          IMAGE: ${s.imageBase}
+          TAG: \${{ github.sha }}
+        run: |
+          ${buildBlock}
+
+${scanStep}      - name: Push ${svc} image
+        env:
+          IMAGE: ${s.imageBase}
+          TAG: \${{ github.sha }}
+        run: |
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
+`;
+    })
+    .join("\n");
   const content = `name: CI (build all services)
 
 # Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
@@ -796,73 +913,14 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: build \${{ matrix.service }}
+  build-and-push:
+    name: Build and push all services
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-${matrix}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Read the three ACR secrets for THIS matrix row by matrix.secretPrefix.
-      # We can't index secrets by variable, so we read every registry's set
-      # into env and pick at runtime. Each service block references only its
-      # own prefix; unused ones are silently unread.
-${args.services
-  .map(
-    (s) => `      - name: Read ${s.name} ACR secrets
-        if: matrix.service == '${s.name}'
-        env:
-          ACR_LOGIN_SERVER: \${{ secrets.${s.secretPrefix}_LOGIN_SERVER }}
-          ACR_USERNAME: \${{ secrets.${s.secretPrefix}_USERNAME }}
-          ACR_PASSWORD: \${{ secrets.${s.secretPrefix}_PASSWORD }}
-        run: |
-          missing=""
-          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ${s.secretPrefix}_LOGIN_SERVER"
-          [ -z "$ACR_USERNAME" ] && missing="$missing ${s.secretPrefix}_USERNAME"
-          [ -z "$ACR_PASSWORD" ] && missing="$missing ${s.secretPrefix}_PASSWORD"
-          if [ -n "$missing" ]; then
-            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=\${{ github.repository }} service=${s.name} missing=$missing"
-            exit 1
-          fi
-          # Emit for the login step below.
-          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> "$GITHUB_ENV"
-          echo "ACR_USERNAME=$ACR_USERNAME" >> "$GITHUB_ENV"
-          echo "ACR_PASSWORD=$ACR_PASSWORD" >> "$GITHUB_ENV"
-
-      - name: Log in to ACR (${s.name})
-        if: matrix.service == '${s.name}'
-        uses: docker/login-action@v3
-        with:
-          registry: \${{ env.ACR_LOGIN_SERVER }}
-          username: \${{ env.ACR_USERNAME }}
-          password: \${{ env.ACR_PASSWORD }}
-`,
-  )
-  .join("")}
-      - name: Build and tag \${{ matrix.service }} image
-        env:
-          IMAGE: \${{ matrix.image }}
-          TAG: \${{ github.sha }}
-        run: |
-          if [ "\${{ matrix.context }}" = "." ]; then
-            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
-          else
-            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "\${{ matrix.context }}/Dockerfile" "\${{ matrix.context }}"
-          fi
-${scanStep}
-      - name: Push \${{ matrix.service }} image
-        env:
-          IMAGE: \${{ matrix.image }}
-          TAG: \${{ github.sha }}
-        run: |
-          docker push "$IMAGE:$TAG"
-          docker push "$IMAGE:latest"
-`;
+${perServiceSteps}`;
   return { path: `.github/workflows/ci.yml`, content };
 }
 
@@ -884,18 +942,57 @@ export function generateCombinedAksCdWorkflow(args: {
 }): GeneratedFile {
   const ciName = args.ciWorkflowName || "CI (build all services)";
   const ns = args.namespace || "default";
-  const matrix = args.services
-    .map(
-      (s) => `          - service: ${s.name}
-            app: ${s.appName}
-            manifestDir: ${s.manifestDir}`,
-    )
-    .join("\n");
   const nsStep =
     ns !== "default"
       ? `
-      - name: Ensure namespace exists
-        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+      - name: Ensure namespace ${ns} is Active (auto-heal if stuck Terminating)
+        # Three-stage self-heal — see cicd-pipeline.ts for the full rationale.
+        # Stage 1: wait 60s for natural termination.
+        # Stage 2: force-clear finalizers on Services + PVCs, wait 30s.
+        # Stage 3: nuke the namespace's own finalizer via /finalize subresource.
+        run: |
+          set -eu
+          NS="${ns}"
+          ns_phase() { kubectl get namespace "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo ""; }
+          for i in $(seq 1 30); do
+            p=$(ns_phase)
+            { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+            echo "namespace $NS is $p — waiting for natural termination ($i/30)"
+            sleep 2
+          done
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating after 60s — auto-clearing finalizers on Services and PVCs."
+            for kind in svc pvc; do
+              for res in $(kubectl get "$kind" -n "$NS" -o name 2>/dev/null); do
+                echo "  clearing finalizers on $res"
+                kubectl patch "$res" -n "$NS" -p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1 || true
+              done
+            done
+            for i in $(seq 1 15); do
+              p=$(ns_phase)
+              { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+              sleep 2
+            done
+          fi
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating — force-clearing its own finalizer via /finalize subresource."
+            if command -v jq >/dev/null 2>&1; then
+              kubectl get namespace "$NS" -o json | jq '.spec.finalizers = []' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            else
+              printf '%s' '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"'"$NS"'"},"spec":{"finalizers":[]}}' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            fi
+            sleep 3
+          fi
+          p=$(ns_phase)
+          [ -z "$p" ] && kubectl create namespace "$NS"
+          p=$(ns_phase)
+          if [ "$p" != "Active" ]; then
+            echo "::error::Namespace $NS auto-heal exhausted; still $p. Ask the agent to run unstick_terminating_namespace for deep diagnosis."
+            exit 1
+          fi
+          echo "namespace $NS is Active — proceeding with apply."
 `
       : "";
   const content = `name: CD (deploy all services)
@@ -913,14 +1010,9 @@ permissions:
 
 jobs:
   deploy:
-    name: deploy \${{ matrix.service }}
+    name: Deploy all services
     runs-on: ubuntu-latest
     if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-${matrix}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -939,22 +1031,7 @@ ${matrix}
           fi
           echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
 ${nsStep}
-      - name: Apply \${{ matrix.service }} manifests
-        run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/
-
-      - name: Restart \${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
-        run: kubectl rollout restart deployment/\${{ matrix.app }} -n ${ns}
-
-      - name: Wait for \${{ matrix.service }} rollout
-        run: kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=180s
-
-      - name: Rollback \${{ matrix.service }} on failed rollout
-        if: failure()
-        run: |
-          echo "::warning::Rollout of \${{ matrix.app }} failed its health check — rolling back to the previous revision."
-          kubectl rollout undo deployment/\${{ matrix.app }} -n ${ns}
-          kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=120s
-`;
+${sequentialDeploySteps(args.services, ns)}`;
   return { path: `.github/workflows/cd.yml`, content };
 }
 
@@ -987,20 +1064,22 @@ export function generateCombinedGarCiWorkflow(args: {
   }>;
 }): GeneratedFile {
   const gate = args.scanGate !== false;
-  const matrix = args.services
+  // Sequential single-job shape (see AWS ECR / Azure ACR for rationale). GCP
+  // WIF auth is truly one-per-workflow (single service account impersonated
+  // once at job start), so only the build+scan+push steps repeat per service.
+  const perServiceSteps = args.services
     .map((s) => {
       const ctx = (s.context || "").replace(/^\.?\/*/, "").replace(/\/+$/, "") || ".";
-      return `          - service: ${s.name}
-            image: ${s.imageBase}
-            context: ${ctx}`;
-    })
-    .join("\n");
-  const scanStep = gate
-    ? `
-      - name: Scan \${{ matrix.service }} image for vulnerabilities (Trivy)
+      const svc = s.name;
+      const buildBlock =
+        ctx === "."
+          ? `docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .`
+          : `docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "${ctx}/Dockerfile" "${ctx}"`;
+      const scanStep = gate
+        ? `      - name: Scan ${svc} image for vulnerabilities (Trivy)
         continue-on-error: true
         env:
-          IMAGE: \${{ matrix.image }}
+          IMAGE: ${s.imageBase}
           TAG: \${{ github.sha }}
         run: |
           docker run --rm \\
@@ -1009,7 +1088,24 @@ export function generateCombinedGarCiWorkflow(args: {
             --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \\
             "$IMAGE:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
 `
-    : "";
+        : "";
+      return `      - name: Build and tag ${svc} image
+        env:
+          IMAGE: ${s.imageBase}
+          TAG: \${{ github.sha }}
+        run: |
+          ${buildBlock}
+
+${scanStep}      - name: Push ${svc} image
+        env:
+          IMAGE: ${s.imageBase}
+          TAG: \${{ github.sha }}
+        run: |
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
+`;
+    })
+    .join("\n");
   const content = `name: CI (build all services)
 
 # Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
@@ -1022,14 +1118,9 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: build \${{ matrix.service }}
+  build-and-push:
+    name: Build and push all services
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-${matrix}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1046,25 +1137,7 @@ ${matrix}
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${args.location}-docker.pkg.dev --quiet
 
-      - name: Build and tag \${{ matrix.service }} image
-        env:
-          IMAGE: \${{ matrix.image }}
-          TAG: \${{ github.sha }}
-        run: |
-          if [ "\${{ matrix.context }}" = "." ]; then
-            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
-          else
-            docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "\${{ matrix.context }}/Dockerfile" "\${{ matrix.context }}"
-          fi
-${scanStep}
-      - name: Push \${{ matrix.service }} image
-        env:
-          IMAGE: \${{ matrix.image }}
-          TAG: \${{ github.sha }}
-        run: |
-          docker push "$IMAGE:$TAG"
-          docker push "$IMAGE:latest"
-`;
+${perServiceSteps}`;
   return { path: `.github/workflows/ci.yml`, content };
 }
 
@@ -1088,18 +1161,57 @@ export function generateCombinedGkeCdWorkflow(args: {
 }): GeneratedFile {
   const ciName = args.ciWorkflowName || "CI (build all services)";
   const ns = args.namespace || "default";
-  const matrix = args.services
-    .map(
-      (s) => `          - service: ${s.name}
-            app: ${s.appName}
-            manifestDir: ${s.manifestDir}`,
-    )
-    .join("\n");
   const nsStep =
     ns !== "default"
       ? `
-      - name: Ensure namespace exists
-        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+      - name: Ensure namespace ${ns} is Active (auto-heal if stuck Terminating)
+        # Three-stage self-heal — see cicd-pipeline.ts for the full rationale.
+        # Stage 1: wait 60s for natural termination.
+        # Stage 2: force-clear finalizers on Services + PVCs, wait 30s.
+        # Stage 3: nuke the namespace's own finalizer via /finalize subresource.
+        run: |
+          set -eu
+          NS="${ns}"
+          ns_phase() { kubectl get namespace "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo ""; }
+          for i in $(seq 1 30); do
+            p=$(ns_phase)
+            { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+            echo "namespace $NS is $p — waiting for natural termination ($i/30)"
+            sleep 2
+          done
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating after 60s — auto-clearing finalizers on Services and PVCs."
+            for kind in svc pvc; do
+              for res in $(kubectl get "$kind" -n "$NS" -o name 2>/dev/null); do
+                echo "  clearing finalizers on $res"
+                kubectl patch "$res" -n "$NS" -p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1 || true
+              done
+            done
+            for i in $(seq 1 15); do
+              p=$(ns_phase)
+              { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+              sleep 2
+            done
+          fi
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating — force-clearing its own finalizer via /finalize subresource."
+            if command -v jq >/dev/null 2>&1; then
+              kubectl get namespace "$NS" -o json | jq '.spec.finalizers = []' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            else
+              printf '%s' '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"'"$NS"'"},"spec":{"finalizers":[]}}' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            fi
+            sleep 3
+          fi
+          p=$(ns_phase)
+          [ -z "$p" ] && kubectl create namespace "$NS"
+          p=$(ns_phase)
+          if [ "$p" != "Active" ]; then
+            echo "::error::Namespace $NS auto-heal exhausted; still $p. Ask the agent to run unstick_terminating_namespace for deep diagnosis."
+            exit 1
+          fi
+          echo "namespace $NS is Active — proceeding with apply."
 `
       : "";
   const content = `name: CD (deploy all services)
@@ -1118,14 +1230,9 @@ permissions:
 
 jobs:
   deploy:
-    name: deploy \${{ matrix.service }}
+    name: Deploy all services
     runs-on: ubuntu-latest
     if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-${matrix}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1143,22 +1250,7 @@ ${matrix}
           location: ${args.location}
           project_id: ${args.projectId}
 ${nsStep}
-      - name: Apply \${{ matrix.service }} manifests
-        run: kubectl apply -n ${ns} -f \${{ matrix.manifestDir }}/
-
-      - name: Restart \${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
-        run: kubectl rollout restart deployment/\${{ matrix.app }} -n ${ns}
-
-      - name: Wait for \${{ matrix.service }} rollout
-        run: kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=180s
-
-      - name: Rollback \${{ matrix.service }} on failed rollout
-        if: failure()
-        run: |
-          echo "::warning::Rollout of \${{ matrix.app }} failed its health check — rolling back to the previous revision."
-          kubectl rollout undo deployment/\${{ matrix.app }} -n ${ns}
-          kubectl rollout status deployment/\${{ matrix.app }} -n ${ns} --timeout=120s
-`;
+${sequentialDeploySteps(args.services, ns)}`;
   return { path: `.github/workflows/cd.yml`, content };
 }
 

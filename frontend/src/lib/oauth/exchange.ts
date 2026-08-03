@@ -44,6 +44,10 @@ export type ExchangeError =
   | { ok: false; code: "exchange_failed"; message: string }
   | { ok: false; code: "userinfo_failed"; message: string }
   | { ok: false; code: "no_email"; message: string }
+  // Split out of the old catch-all `no_email`, which covered three unrelated
+  // causes with one message and left the operator nothing to act on.
+  | { ok: false; code: "email_scope_denied"; message: string }
+  | { ok: false; code: "no_verified_email"; message: string }
   | { ok: false; code: "mock_invalid"; message: string };
 
 export type ExchangeResult = { ok: true; profile: ProviderProfile } | ExchangeError;
@@ -151,17 +155,25 @@ export async function exchange(
 
   const profile = normaliseProfile(provider.id, raw, token.access_token);
 
+  // GitHub omits `email` from /user whenever the account keeps it private, so
+  // /user/emails is the normal path, not an edge case. Its outcome is kept
+  // because it is the ONLY thing that distinguishes "we were not allowed to
+  // read the address" from "the account has no verified address" — and those
+  // need opposite fixes.
+  let emailsStatus: number | null = null;
+  let emailCount = 0;
   if (provider.id === "github" && !profile.email) {
-    // GitHub may not surface email on /user; hit /user/emails.
     const emailsRes = await fetch("https://api.github.com/user/emails", {
       headers: { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" },
     });
+    emailsStatus = emailsRes.status;
     if (emailsRes.ok) {
       const list = (await emailsRes.json()) as Array<{
         email: string;
         primary?: boolean;
         verified?: boolean;
       }>;
+      emailCount = Array.isArray(list) ? list.length : 0;
       const primary = list.find((e) => e.primary && e.verified) ?? list.find((e) => e.verified);
       if (primary) {
         profile.email = primary.email;
@@ -171,10 +183,37 @@ export async function exchange(
   }
 
   if (!profile.email) {
+    if (provider.id === "github") {
+      // 403/404 here means the token carries no email permission. On a GitHub
+      // *App* that is not the `user:email` SCOPE at all — App user-to-server
+      // tokens ignore scopes and use the App's declared account permissions,
+      // so the fix is "Account permissions → Email addresses: Read-only" in
+      // the App settings, followed by re-authorising. A classic OAuth App
+      // needs the `user:email` scope instead.
+      if (emailsStatus === 403 || emailsStatus === 404) {
+        return {
+          ok: false,
+          code: "email_scope_denied",
+          message:
+            `GitHub refused the email lookup (HTTP ${emailsStatus}). The token has no permission ` +
+            `to read email addresses.`,
+        };
+      }
+      if (emailsStatus === 200) {
+        return {
+          ok: false,
+          code: "no_verified_email",
+          message: `GitHub returned ${emailCount} address(es), none of them verified.`,
+        };
+      }
+    }
     return {
       ok: false,
       code: "no_email",
-      message: "Provider did not return an email address.",
+      message:
+        `${provider.id} returned no email address` +
+        (emailsStatus ? ` (email lookup HTTP ${emailsStatus})` : "") +
+        ". Check that the sign-in grant includes email access.",
     };
   }
 

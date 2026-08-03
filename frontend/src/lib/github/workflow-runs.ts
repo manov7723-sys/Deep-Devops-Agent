@@ -28,6 +28,7 @@ export type WorkflowRun = {
     | "cd_role_missing_eks_describe"
     | "cd_aks_rbac_missing"
     | "ci_wif_binding_missing"
+    | "cd_namespace_stuck_terminating"
     | "unknown"
     | null;
   /** A short excerpt of the failing job's error annotations, for the agent's report. */
@@ -280,6 +281,28 @@ async function classifyFailure(
               hint:
                 "CI docker-push can't impersonate the GCP service account: the WIF binding for this repo is missing " +
                 "or IAM hasn't propagated. Call repair_gcp_wif_binding to re-run the WIF setup, wait for IAM, and rerun CI.",
+            };
+          }
+          // CD-workflow's namespace auto-heal exhausted, OR the CD is running
+          // against a Terminating namespace and got the raw kubectl error.
+          // The heal is embedded in every generated CD workflow (see the
+          // "Ensure namespace ... is Active" step in ci/templates.ts +
+          // cicd-pipeline.ts) but exhausts on niche cases — admission webhook
+          // finalizers, CRD finalizers we don't clear. Route the agent at the
+          // deeper standalone tool which does the same three stages via the
+          // app's own cluster access + can report exactly what's stuck.
+          if (
+            /Namespace .* auto-heal exhausted/i.test(text) ||
+            /unable to create new content in namespace .* because it is being terminated/i.test(text) ||
+            /Namespace .* is stuck in (Terminating|Deleting)/i.test(text)
+          ) {
+            return {
+              kind: "cd_namespace_stuck_terminating",
+              hint:
+                "CD workflow can't apply into the target namespace because it is stuck Terminating " +
+                "(a hanging finalizer on a Service/PVC whose cloud resource couldn't be released). " +
+                "The CD's own three-stage heal (natural wait → clear Service/PVC finalizers → force-clear ns /finalize) " +
+                "didn't finish it — call unstick_terminating_namespace(envKey, namespace) from the app's own cluster access, then rerun the failed CD workflow.",
             };
           }
         }

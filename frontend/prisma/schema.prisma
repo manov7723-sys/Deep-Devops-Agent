@@ -2121,6 +2121,12 @@ model PlatformSetting {
   smtpPort        Int?
   fromAddress     String?
   smtpVerifiedAt  DateTime? // when SMTP was last verified (NOT a user's email)
+  /// AES-256-GCM ciphertext of the SMTP password. Encrypted rather than
+  /// plaintext because this row is readable by any settings surface, and a
+  /// mail relay credential is a real secret — it can send as your domain.
+  /// Never returned to a client; the API reports only whether it is set.
+  smtpPasswordRef String?
+  smtpUser        String? // defaults to fromAddress when unset
   updatedAt       DateTime  @updatedAt
 }
 

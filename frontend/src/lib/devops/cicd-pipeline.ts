@@ -501,13 +501,87 @@ ${auth}
 ${
   ns !== "default"
     ? `
-      - name: Ensure namespace exists
-        run: kubectl get namespace ${ns} || kubectl create namespace ${ns}
+      - name: Ensure namespace ${ns} is Active (auto-heal if stuck Terminating)
+        # Three-stage self-heal — a namespace stuck Terminating rejects every
+        # kubectl apply with "unable to create new content in namespace X because
+        # it is being terminated". Stuck namespaces are usually a hanging
+        # LoadBalancer/PVC finalizer whose cloud resource couldn't be released
+        # (LB deleted out-of-band, IAM revoked mid-clean, controller crash).
+        #
+        # Stage 1: wait 60s for a natural deletion to finish.
+        # Stage 2: if still Terminating, force-clear finalizers on all Services +
+        #          PVCs in the namespace (safe — the underlying LB is typically
+        #          already gone by this point), wait another 30s.
+        # Stage 3: if STILL Terminating, remove the namespace's own finalizer via
+        #          the /finalize subresource (kubernetes' standard force-delete
+        #          for stuck namespaces).
+        # Finally: create the namespace if it's now gone (or was never there).
+        #
+        # Closes the 2026-08 incident where every deploy failed against a
+        # Terminating namespace and required an operator to hand-clear finalizers.
+        run: |
+          set -eu
+          NS="${ns}"
+          ns_phase() { kubectl get namespace "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo ""; }
+          # Stage 1 — natural wait
+          for i in $(seq 1 30); do
+            p=$(ns_phase)
+            { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+            echo "namespace $NS is $p — waiting for natural termination ($i/30)"
+            sleep 2
+          done
+          # Stage 2 — force-clear finalizers on Services + PVCs
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating after 60s — auto-clearing finalizers on Services and PVCs."
+            for kind in svc pvc; do
+              for res in $(kubectl get "$kind" -n "$NS" -o name 2>/dev/null); do
+                echo "  clearing finalizers on $res"
+                kubectl patch "$res" -n "$NS" -p '{"metadata":{"finalizers":null}}' --type=merge >/dev/null 2>&1 || true
+              done
+            done
+            for i in $(seq 1 15); do
+              p=$(ns_phase)
+              { [ -z "$p" ] || [ "$p" = "Active" ]; } && break
+              sleep 2
+            done
+          fi
+          # Stage 3 — nuke the namespace's own finalizer via /finalize
+          p=$(ns_phase)
+          if [ "$p" = "Terminating" ]; then
+            echo "::warning::Namespace $NS still Terminating — force-clearing its own finalizer via /finalize subresource."
+            if command -v jq >/dev/null 2>&1; then
+              kubectl get namespace "$NS" -o json | jq '.spec.finalizers = []' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            else
+              printf '%s' '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"'"$NS"'"},"spec":{"finalizers":[]}}' | kubectl replace --raw "/api/v1/namespaces/$NS/finalize" -f - >/dev/null 2>&1 || true
+            fi
+            sleep 3
+          fi
+          # Recreate if now gone
+          p=$(ns_phase)
+          [ -z "$p" ] && kubectl create namespace "$NS"
+          p=$(ns_phase)
+          if [ "$p" != "Active" ]; then
+            echo "::error::Namespace $NS auto-heal exhausted; still $p. Ask the agent to run unstick_terminating_namespace for deep diagnosis."
+            exit 1
+          fi
+          echo "namespace $NS is Active — proceeding with apply."
 `
     : ""
 }
       - name: Apply manifests
-        run: kubectl apply -n ${ns} -f ${dir}/
+        # Prefer manifest.yaml — deploy_my_app writes exactly that file, and
+        # applying the whole dir picks up any stale *.yaml (e.g. a
+        # hand-committed service.yaml from an older scaffold) that
+        # alphabetically-sorts AFTER it and silently overrides the freshly
+        # generated resource. Fall back to the dir for repos whose manifests
+        # are still split across multiple files.
+        run: |
+          if [ -f "${dir}/manifest.yaml" ]; then
+            kubectl apply -n ${ns} -f "${dir}/manifest.yaml"
+          else
+            kubectl apply -n ${ns} -f "${dir}/"
+          fi
 
       - name: Restart rollout (image tag "latest" — force pods onto the new build)
         run: kubectl rollout restart deployment/${app} -n ${ns}

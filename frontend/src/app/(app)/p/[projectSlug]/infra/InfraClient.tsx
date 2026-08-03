@@ -7,6 +7,7 @@ import { CloudCredentialsModal } from "@/components/modals/CloudCredentialsModal
 import { EksChatBox } from "@/components/domain/EksChatBox";
 import { GkeChatBox } from "@/components/domain/GkeChatBox";
 import { AksChatBox } from "@/components/domain/AksChatBox";
+import { RdsChatBox } from "@/components/domain/RdsChatBox";
 import { KubernetesManifestBuilder } from "@/components/domain/KubernetesManifestBuilder";
 import { HelmChartBuilder } from "@/components/domain/HelmChartBuilder";
 import { api } from "@/lib/api/client";
@@ -36,11 +37,12 @@ export function ProjectInfraClient({ slug }: { slug: string }) {
     <div className="col gap-5">
       <PageHead
         title="Infrastructure"
-        sub="Cloud credentials, Terraform state, and managed-Kubernetes cluster provisioning (EKS · GKE · AKS)."
+        sub="Cloud credentials, Terraform state, managed-Kubernetes provisioning (EKS · GKE · AKS), and managed databases."
       />
       <CredentialsSection slug={slug} />
       <StateSection slug={slug} />
       <ClusterCreateSection slug={slug} />
+      <DatabaseCreateSection slug={slug} />
       <GkeClusterUtilities slug={slug} />
       <KubernetesManifestBuilder slug={slug} />
       <HelmChartBuilder slug={slug} />
@@ -187,6 +189,22 @@ function ClusterCreateSection({ slug }: { slug: string }) {
   if (cloud === "gcp") return <GkeChatBox slug={slug} />;
   if (cloud === "azure") return <AksChatBox slug={slug} />;
   return <EksChatBox slug={slug} />;
+}
+
+/* ── Database creation — AWS only; RDS is the one managed DB with a blueprint ─ */
+function DatabaseCreateSection({ slug }: { slug: string }) {
+  const { data: projectInfo } = useQuery<{ project: { cloud: string | null } }>({
+    queryKey: ["p", slug, "project-cloud"],
+    queryFn: () => api.get<{ project: { cloud: string | null } }>(`/projects/${slug}`),
+    staleTime: 60_000,
+  });
+  const cloud = projectInfo?.project?.cloud ?? null;
+  // Azure and GCP databases are provisioned through their own flows
+  // (azure-postgres / Cloud SQL), which are not Terraform-blueprint based.
+  // Legacy projects with no cloud recorded default to AWS, matching the
+  // cluster section above.
+  if (cloud === "gcp" || cloud === "azure") return null;
+  return <RdsChatBox slug={slug} />;
 }
 
 /* ── Shared: render a Terraform run's stages + logs ─────────────────────────── */

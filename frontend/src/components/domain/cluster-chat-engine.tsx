@@ -102,6 +102,8 @@ export type Step =
       kind: "multiselect";
       options: (c: StepCtx) => Opt[];
       emptyNote?: string;
+      /** Rules beyond "at least one" — e.g. RDS wanting 2 subnets in 2 AZs. */
+      validate?: (chosen: string[], a: Answers, c: StepCtx) => string | null;
     })
   | (BaseStep & {
       // Read-only informational block — no input, no stored value.
@@ -133,6 +135,12 @@ export type ClusterChatConfig = {
   ghPathPrefix: string; // "terraform/eks"
   branchPrefix: string; // "eks"
   applyEta: string; // "~15–20 min"
+  /**
+   * What the thing being created is called, in commit messages and the Apply
+   * button's status line. Defaults to "cluster" — the engine also drives the
+   * RDS wizard, where "Add AWS cluster mydb" would be plainly wrong.
+   */
+  resourceNoun?: string;
   steps: Step[];
   /** Title shown above each page; index 0 = page 1. */
   pageTitles?: string[];
@@ -277,7 +285,8 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
       const chosen = String(v ?? "")
         .split(",")
         .filter(Boolean);
-      return chosen.length === 0 && !s.optional ? "Select at least one." : null;
+      if (chosen.length === 0 && !s.optional) return "Select at least one.";
+      return s.validate?.(chosen, values, ctx) ?? null;
     }
     if (s.kind === "choice") return v === undefined ? "Choose one." : null;
     if (s.kind === "info") return null;
@@ -385,7 +394,7 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
         basePath: ghPath,
         files: gen.files,
         branch: `infra/${config.branchPrefix}-${name}`,
-        message: `Add ${config.cloudLabel} cluster ${name} (Terraform)`,
+        message: `Add ${config.cloudLabel} ${config.resourceNoun ?? "cluster"} ${name} (Terraform)`,
         pullRequestBody: `Deterministic ${config.cloudLabel} blueprint for \`${name}\`.`,
       });
       setGenerated({ files: gen.files, clusterName: gen.clusterName });

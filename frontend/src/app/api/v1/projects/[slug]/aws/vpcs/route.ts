@@ -22,7 +22,19 @@ import { runStage } from "@/lib/runner/exec";
  * filters them by the selected VPC.
  */
 type Vpc = { vpcId: string; name: string | null; cidr: string; isDefault: boolean };
-type Subnet = { subnetId: string; vpcId: string; name: string | null; cidr: string; az: string };
+type Subnet = {
+  subnetId: string;
+  vpcId: string;
+  name: string | null;
+  cidr: string;
+  az: string;
+  /**
+   * True when the subnet's route table sends 0.0.0.0/0 to an internet
+   * gateway. Callers that must NOT place a resource on the internet (RDS,
+   * for one) need this: subnet names and tags are conventions, not facts.
+   */
+  public: boolean;
+};
 
 export async function GET(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
@@ -132,6 +144,34 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
     isDefault: !!v.IsDefault,
   }));
 
+  // Route tables decide whether a subnet is public. A subnet with no explicit
+  // association inherits its VPC's MAIN table, so both cases must be handled —
+  // treating "not explicitly associated" as private is how a public subnet
+  // ends up hosting a database.
+  const rtRes = await awsJson(["ec2", "describe-route-tables"]);
+  const publicSubnetIds = new Set<string>();
+  const mainTableIsPublic = new Map<string, boolean>();
+  const explicitlyAssociated = new Set<string>();
+  if (rtRes.ok) {
+    const tables = (((rtRes.data as { RouteTables?: unknown[] }).RouteTables ?? []) as Array<{
+      VpcId?: string;
+      Routes?: Array<{ GatewayId?: string; DestinationCidrBlock?: string }>;
+      Associations?: Array<{ SubnetId?: string; Main?: boolean }>;
+    }>);
+    for (const t of tables) {
+      const isPublic = (t.Routes ?? []).some(
+        (r) => r.DestinationCidrBlock === "0.0.0.0/0" && (r.GatewayId ?? "").startsWith("igw-"),
+      );
+      for (const a of t.Associations ?? []) {
+        if (a.Main && t.VpcId) mainTableIsPublic.set(t.VpcId, isPublic);
+        if (a.SubnetId) {
+          explicitlyAssociated.add(a.SubnetId);
+          if (isPublic) publicSubnetIds.add(a.SubnetId);
+        }
+      }
+    }
+  }
+
   const subnets: Subnet[] = subnetRes.ok
     ? (
         ((subnetRes.data as { Subnets?: unknown[] }).Subnets ?? []) as Array<{
@@ -139,15 +179,27 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
           VpcId?: string;
           CidrBlock?: string;
           AvailabilityZone?: string;
+          MapPublicIpOnLaunch?: boolean;
           Tags?: Array<{ Key?: string; Value?: string }>;
         }>
-      ).map((s) => ({
-        subnetId: s.SubnetId ?? "(unknown)",
-        vpcId: s.VpcId ?? "",
-        name: tagName(s.Tags),
-        cidr: s.CidrBlock ?? "",
-        az: s.AvailabilityZone ?? "",
-      }))
+      ).map((s) => {
+        const id = s.SubnetId ?? "(unknown)";
+        const vpcId = s.VpcId ?? "";
+        const isPublic = explicitlyAssociated.has(id)
+          ? publicSubnetIds.has(id)
+          : // No explicit association → the VPC's main table governs it. If we
+            // couldn't read route tables at all, fall back to the auto-assign
+            // public IP flag rather than silently claiming "private".
+            (mainTableIsPublic.get(vpcId) ?? !!s.MapPublicIpOnLaunch);
+        return {
+          subnetId: id,
+          vpcId,
+          name: tagName(s.Tags),
+          cidr: s.CidrBlock ?? "",
+          az: s.AvailabilityZone ?? "",
+          public: isPublic,
+        };
+      })
     : [];
 
   return NextResponse.json({ ok: true, connected: true, region, vpcs, subnets });

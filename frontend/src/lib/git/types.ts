@@ -18,7 +18,17 @@ export type GitEntry = {
   type: "file" | "dir";
 };
 
-export type CommitFile = { path: string; content: string };
+/**
+ * A single change in a `commitFiles` batch. Two shapes:
+ *   - Write:  `{ path, content }` — creates or overwrites the file.
+ *   - Delete: `{ path, delete: true }` — removes the file from the tree.
+ * Delete lets a caller sweep away stale scaffold files (e.g. an old
+ * `deployment.yaml` that would otherwise shadow a fresh `manifest.yaml`)
+ * atomically alongside the writes.
+ */
+export type CommitFile =
+  | { path: string; content: string; delete?: false }
+  | { path: string; delete: true; content?: undefined };
 
 /** A pull request (GitHub) or merge request (GitLab). `number` is the GitLab MR iid. */
 export type ChangeRequest = { number: number; url: string };
