@@ -1,0 +1,69 @@
+name: CD (deploy all services)
+
+# Runs automatically after the CI workflow ("CI (build all services)") completes successfully.
+# Also supports manual dispatch for redeploying without a fresh build.
+on:
+  workflow_run:
+    workflows: ["CI (build all services)"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            app: deep-devops-agent-backend
+            manifestDir: k8s/dev/backend
+          - service: frontend
+            app: deep-devops-agent-frontend
+            manifestDir: k8s/dev/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::985465459771:role/gha-manov7723-sys-deep-devops-agent-dynamic-app
+          aws-region: us-east-1
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure cluster access (keyless)
+        run: aws eks update-kubeconfig --name "dev" --region us-east-1
+
+      - name: Ensure namespace exists
+        run: kubectl get namespace dev || kubectl create namespace dev
+
+      - name: Apply ${{ matrix.service }} manifests
+        # Target manifest.yaml explicitly, not the directory. Applying the
+        # whole dir picks up stale/hand-committed *.yaml files (e.g. a
+        # scaffold's service.yaml) which alphabetically-sort AFTER the
+        # freshly-generated manifest and win the same-named resource. That's
+        # how a ClusterIP + ALB deploy silently became a LoadBalancer + NLB
+        # in the 2026-08 incident.
+        run: kubectl apply -n dev -f ${{ matrix.manifestDir }}/manifest.yaml
+
+      - name: Restart ${{ matrix.service }} rollout (image tag "latest" — force pods onto the new build)
+        run: kubectl rollout restart deployment/${{ matrix.app }} -n dev
+
+      - name: Wait for ${{ matrix.service }} rollout
+        run: kubectl rollout status deployment/${{ matrix.app }} -n dev --timeout=180s
+
+      - name: Rollback ${{ matrix.service }} on failed rollout
+        if: failure()
+        run: |
+          echo "::warning::Rollout of ${{ matrix.app }} failed its health check — rolling back to the previous revision."
+          kubectl rollout undo deployment/${{ matrix.app }} -n dev
+          kubectl rollout status deployment/${{ matrix.app }} -n dev --timeout=120s
