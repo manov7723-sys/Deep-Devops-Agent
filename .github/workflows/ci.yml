@@ -54,7 +54,7 @@ jobs:
 
       - name: Build and tag frontend image
         env:
-          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-app
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-react-app
           TAG: ${{ github.sha }}
         run: |
           docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "frontend/Dockerfile" "frontend"
@@ -62,7 +62,7 @@ jobs:
       - name: Scan frontend image for vulnerabilities (Trivy)
         continue-on-error: true
         env:
-          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-app
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-react-app
           TAG: ${{ github.sha }}
         run: |
           docker run --rm \
@@ -72,7 +72,7 @@ jobs:
             "$ECR:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
       - name: Push frontend image
         env:
-          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-app
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-react-app
           TAG: ${{ github.sha }}
         run: |
           docker push "$ECR:$TAG"
