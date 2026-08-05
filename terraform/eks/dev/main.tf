@@ -23,7 +23,7 @@ locals {
 # Reusing existing VPC vpc-0458a23d9cb5dfece with the given subnets.
 locals {
   vpc_id         = "vpc-0458a23d9cb5dfece"
-  subnet_ids     = ["subnet-0935fed30dcb57731", "subnet-02782cd78b5c1ae81", "subnet-0d133374462a08f71", "subnet-0d1f45b13d2362e5e", "subnet-0bd4864cc4f039463"]
+  subnet_ids     = ["subnet-0589bda4e647c5268", "subnet-0935fed30dcb57731", "subnet-02782cd78b5c1ae81", "subnet-0d133374462a08f71", "subnet-0d1f45b13d2362e5e", "subnet-0bd4864cc4f039463"]
   node_subnet_ids = ["subnet-02782cd78b5c1ae81", "subnet-0d133374462a08f71", "subnet-0bd4864cc4f039463"]
 }
 
