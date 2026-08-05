@@ -1,0 +1,19 @@
+# MODULE KB: Security Group — registry module. Wires to a VPC; can allow ingress from another SG.
+type: security_group
+title: Security Group
+source: terraform-aws-modules/security-group/aws
+version: "~> 5.0"
+config:
+  name: '"{{name}}-{{id}}"'
+  description: '"Security group {{id}}"'
+  egress_rules: '["all-all"]'
+provides:
+  security_group_id: "module.{{id}}.security_group_id"
+# Connection slots:
+wires:
+  vpc:                       # connect: {vpc: <vpc-id>}  → sets the SG's vpc_id
+    vpc_id: "{{source.vpc_id}}"
+  ingress_from:              # connect: {ingress_from: <other-sg-id>}  → allow that SG in
+    ingress_with_source_security_group_id: '[{ rule = "all-all", source_security_group_id = {{source.security_group_id}} }]'
+outputs:
+  security_group_id: "module.{{id}}.security_group_id"

@@ -1,0 +1,14 @@
+type: alb
+title: Application Load Balancer
+source: terraform-aws-modules/alb/aws
+version: "~> 9.0"
+config:
+  name: '"{{name}}-{{id}}"'
+provides:
+  dns_name: "module.{{id}}.dns_name"
+wires:
+  vpc:
+    vpc_id: "{{source.vpc_id}}"
+    subnets: "{{source.public_subnets}}"
+outputs:
+  dns_name: "module.{{id}}.dns_name"

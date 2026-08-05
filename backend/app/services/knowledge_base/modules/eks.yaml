@@ -1,0 +1,24 @@
+# MODULE KB: EKS cluster — registry module WITH managed node groups. Requires a VPC (wire it).
+type: eks
+title: EKS cluster
+source: terraform-aws-modules/eks/aws
+version: "~> 20.0"
+defaults:
+  node_instance_type: t3.medium
+  k8s_version: "1.30"
+config:
+  cluster_name: '"{{name}}-{{id}}"'
+  cluster_version: '"{{k8s_version}}"'
+  cluster_endpoint_public_access: "true"
+  enable_cluster_creator_admin_permissions: "true"
+  eks_managed_node_groups: '{ default = { instance_types = ["{{node_instance_type}}"], min_size = 1, max_size = 3, desired_size = 2 } }'
+provides:
+  cluster_name: "module.{{id}}.cluster_name"
+  cluster_endpoint: "module.{{id}}.cluster_endpoint"
+wires:
+  vpc:
+    vpc_id: "{{source.vpc_id}}"
+    subnet_ids: "{{source.private_subnets}}"
+outputs:
+  cluster_name: "module.{{id}}.cluster_name"
+  cluster_endpoint: "module.{{id}}.cluster_endpoint"

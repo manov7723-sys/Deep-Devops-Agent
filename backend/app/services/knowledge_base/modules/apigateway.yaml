@@ -1,0 +1,11 @@
+type: apigateway
+title: API Gateway (HTTP)
+source: terraform-aws-modules/apigateway-v2/aws
+version: "~> 5.0"
+config:
+  name: '"{{name}}-{{id}}"'
+  protocol_type: '"HTTP"'
+provides:
+  api_endpoint: "module.{{id}}.api_endpoint"
+outputs:
+  api_endpoint: "module.{{id}}.api_endpoint"

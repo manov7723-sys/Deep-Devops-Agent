@@ -1,0 +1,10 @@
+type: eventbridge
+title: EventBridge bus
+source: terraform-aws-modules/eventbridge/aws
+version: "~> 3.0"
+config:
+  bus_name: '"{{name}}-{{id}}"'
+provides:
+  bus_arn: "module.{{id}}.eventbridge_bus_arn"
+outputs:
+  bus_arn: "module.{{id}}.eventbridge_bus_arn"

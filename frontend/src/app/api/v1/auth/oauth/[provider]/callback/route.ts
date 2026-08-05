@@ -4,7 +4,7 @@ import type { OAuthProvider } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { encryptSecret } from "@/lib/auth/crypto";
 import { getProviderAsync, isMockMode } from "@/lib/oauth/providers";
-import { verifyState } from "@/lib/oauth/state";
+import { peekStatePopup, verifyState } from "@/lib/oauth/state";
 import { exchange } from "@/lib/oauth/exchange";
 import { resolveIdentity } from "@/lib/oauth/resolve";
 import { createPendingSession, getActiveSession } from "@/lib/auth/session";
@@ -57,45 +57,53 @@ function popupClose(
 /**
  * Return HTML that finishes the OAuth attach in the popup OR full-page tab.
  *
- * The old logic relied on `window.opener` to decide popup vs full-page, but
- * modern browsers sever `window.opener` on cross-origin navigation (COOP),
- * turning the popup into a "not a popup" from JS's POV. It then fell back to
- * `window.location.replace(next)` — but if `nextPath` was missing for any
- * reason it landed on the dashboard, silently breaking the wizard.
+ * The critical rule: **a popup MUST NOT navigate itself, ever, regardless of
+ * whether `window.close()` succeeds.** Old logic used a 300ms fallback that
+ * called `window.location.replace(next)` when close was refused — that's how
+ * the popup ended up rendering the app's Dashboard page, because in the
+ * popup context any navigation to an app route that gates on session state
+ * (or where `next` was null and defaulted) is one middleware hop away from
+ * `/u/dashboard`. The 300ms fallback was intended for real full-page tabs
+ * that entered this route by accident; conflating those with popups is the
+ * whole bug.
  *
- * New logic — ALWAYS do all of these:
- *   1. Broadcast the "connected" signal via BOTH postMessage AND localStorage
- *      (localStorage 'storage' event fires cross-tab even when opener is
- *      severed — the wizard listens for both). See CreateProjectWizard.tsx.
- *   2. Attempt `window.close()`. It's allowed because we (script) opened the
- *      window; browsers permit close even when opener is null.
- *   3. If the window is still alive after 300ms, do `window.location.replace`
- *      back to `nextPath` (or the wizard resume URL — never the dashboard,
- *      which throws away the user's in-progress work).
+ * Server already knows which one it is — the `popup` flag is signed into
+ * `state` at /start and comes back verified. We thread it through here.
+ *
+ *   isPopup=true  → broadcast success, attempt close, then sit on a
+ *                   "you can close this window" page. NEVER navigate.
+ *   isPopup=false → broadcast success, then navigate the tab back to next
+ *                   (or the wizard resume URL — never /u/dashboard).
+ *
+ * Broadcast goes on BOTH channels — postMessage + localStorage — because
+ * modern browsers (Chrome COOP) sever `window.opener` on cross-origin
+ * navigation, which silently swallows postMessage. The localStorage 'storage'
+ * event still fires cross-tab and gives the wizard a reliable signal.
  */
-function smartReturn(nextPath: string | null): NextResponse {
-  // NEVER default to /u/dashboard on a null next — that discards wizard state.
-  // A generic OAuth attach without a next path (e.g. from the account page)
-  // was originally the caller's responsibility to pass; when absent we send
-  // the user to the projects list, which is the safest continuation.
+function smartReturn(nextPath: string | null, isPopup: boolean): NextResponse {
   const safe = nextPath && nextPath.startsWith("/") ? nextPath : "/u/projects";
+  const bodyText = isPopup
+    ? "Connected. You can close this window."
+    : "Finishing GitHub connection…";
   const html = `<!doctype html><meta charset="utf-8"><title>GitHub</title>
-<body style="font:14px system-ui;padding:24px;color:#444">Finishing GitHub connection…</body>
+<body style="font:14px system-ui;padding:24px;color:#444">${bodyText}</body>
 <script>
 (function () {
+  var isPopup = ${JSON.stringify(isPopup)};
   var next = ${JSON.stringify(safe)};
   var msg = { source: "dda-oauth", status: "connected", ts: Date.now() };
-  // Broadcast on every channel we can — the wizard's listener handles both.
   try { if (window.opener) window.opener.postMessage(msg, window.location.origin); } catch (e) {}
   try { localStorage.setItem("dda_github_oauth_result", JSON.stringify(msg)); } catch (e) {}
-  // Try to close unconditionally. Windows opened via script can close even
-  // when their opener has been severed by COOP.
-  try { window.close(); } catch (e) {}
-  // If we're still here after 300ms, we're a full-page tab, not a popup — go
-  // to the wizard resume URL so the user picks up where they were.
-  setTimeout(function () {
-    try { window.location.replace(next); } catch (e) {}
-  }, 300);
+  if (isPopup) {
+    // Attempt to close, but if the browser refuses (COOP severed opener),
+    // just sit on the "you can close this window" page. Do NOT navigate —
+    // that's what used to land the popup on /u/dashboard.
+    try { window.close(); } catch (e) {}
+    return;
+  }
+  // Full-page tab: navigate to the wizard resume URL so the user picks up
+  // where they were.
+  try { window.location.replace(next); } catch (e) {}
 })();
 </script>`;
   return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -111,12 +119,18 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   // which is why the popup used to end up showing the home page.
   const jar = await cookies();
   const popupCookie = jar.get(POPUP_COOKIE)?.value === "1";
+  const state = url.searchParams.get("state");
+  // Peek at the popup flag from state WITHOUT verifying — safe pre-verify
+  // signal so `missing_nonce`, `bad_sig`, `expired`, etc. still know they
+  // must close the popup instead of redirecting the window. Cookies alone
+  // aren't reliable: any browser/proxy quirk that drops the popup cookie
+  // used to send the popup through /auth/login → (guest) → /u/dashboard.
+  const popupHint = popupCookie || (state ? peekStatePopup(state) : false);
   const provider = await getProviderAsync(providerId);
   if (!provider) {
-    return failureResponse("provider_unavailable", "OAuth provider isn't configured.", url, req.headers, undefined, popupCookie);
+    return failureResponse("provider_unavailable", "OAuth provider isn't configured.", url, req.headers, undefined, popupHint);
   }
   const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
   const providerError = url.searchParams.get("error");
   const meta = extractRequestMeta(req);
 
@@ -127,15 +141,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, providerError },
     });
-    return failureResponse("provider_error", "The provider rejected the sign-in.", url, req.headers, undefined, popupCookie);
+    return failureResponse("provider_error", "The provider rejected the sign-in.", url, req.headers, undefined, popupHint);
   }
   if (!code || !state) {
-    return failureResponse("missing_params", "Missing code or state.", url, req.headers, undefined, popupCookie);
+    return failureResponse("missing_params", "Missing code or state.", url, req.headers, undefined, popupHint);
   }
 
   const nonce = jar.get(NONCE_COOKIE)?.value;
   if (!nonce) {
-    return failureResponse("missing_nonce", "Sign-in state expired. Try again.", url, req.headers, undefined, popupCookie);
+    return failureResponse("missing_nonce", "Sign-in state expired. Try again.", url, req.headers, undefined, popupHint);
   }
   const verified = verifyState(state, nonce);
   if (!verified.ok) {
@@ -145,14 +159,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, reason: verified.code },
     });
-    return failureResponse(verified.code, "Sign-in state could not be verified.", url, req.headers, undefined, popupCookie);
+    return failureResponse(verified.code, "Sign-in state could not be verified.", url, req.headers, undefined, popupHint);
   }
   if (verified.provider !== providerId) {
-    return failureResponse("provider_mismatch", "Sign-in state is for a different provider.", url, req.headers, undefined, popupCookie);
+    return failureResponse("provider_mismatch", "Sign-in state is for a different provider.", url, req.headers, undefined, popupHint);
   }
-  // Popup mode is authoritative from the SIGNED state once verified; fall back
-  // to the cookie for the pre-verify failure paths above.
-  const isPopupFlow = verified.popup || popupCookie;
+  // Once verified, use the signed state as truth (popupHint was pre-verify).
+  const isPopupFlow = verified.popup || popupHint;
 
   // Single-use: clear the nonce as soon as it's been spent.
   jar.delete(NONCE_COOKIE);
@@ -293,13 +306,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     if (isMockMode()) {
       return NextResponse.json({ ok: true, mode: "attach", linkedProvider: providerId });
     }
-    // Return an HTML page that closes the popup (if we're in one) or redirects
-    // (if a normal tab). Detected client-side via window.opener, so it never
-    // bounces the main window to the home page. See smartReturn().
+    // Return an HTML page. Popup mode is authoritative from the SIGNED state
+    // (isPopup here); smartReturn refuses to navigate a popup so it can never
+    // fall through to /u/dashboard on a null next or a COOP-severed close.
     console.log(
       `[oauth-callback:attach] provider=${providerId} nextPath=${JSON.stringify(nextPath)} isPopup=${isPopup} user=${activeSess.userId}`,
     );
-    return smartReturn(nextPath);
+    return smartReturn(nextPath, isPopup);
   }
 
   const resolved = await resolveIdentity(

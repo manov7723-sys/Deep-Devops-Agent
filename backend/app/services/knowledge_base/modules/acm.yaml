@@ -1,0 +1,13 @@
+type: acm
+title: ACM certificate
+source: terraform-aws-modules/acm/aws
+version: "~> 5.0"
+config:
+  domain_name: '"{{name}}-{{id}}.example.com"'
+  validation_method: '"DNS"'
+  create_route53_records: "false"
+  validate_certificate: "false"
+provides:
+  certificate_arn: "module.{{id}}.acm_certificate_arn"
+outputs:
+  certificate_arn: "module.{{id}}.acm_certificate_arn"

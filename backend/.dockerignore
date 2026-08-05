@@ -1,0 +1,20 @@
+# Build context hygiene — keep images small & reproducible
+.git
+.gitignore
+node_modules
+npm-debug.log*
+yarn-error.log*
+.pnpm-store
+dist
+build
+out
+.next
+coverage
+.env
+.env.*
+*.md
+.vscode
+.idea
+Dockerfile
+docker-compose.yml
+.dockerignore

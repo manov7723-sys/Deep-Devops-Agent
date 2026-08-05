@@ -1,0 +1,826 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# KNOWLEDGE BASE ENTRY: Amazon EKS cluster (production module structure)
+# Edit this file to change questions, defaults, or the generated Terraform — no code.
+# ─────────────────────────────────────────────────────────────────────────────
+resource: eks
+aliases: [eks, kubernetes, k8s]
+title: Amazon EKS Kubernetes cluster
+description: Production EKS with a dedicated VPC, IAM role modules, and dev/staging/prod stacks.
+
+# EKS domain knowledge — injected ONLY into the EKS wizard prompt (token-cheap), so the agent
+# can explain choices and answer follow-ups. Edit here, no code change.
+knowledge: |
+  EKS cluster creation knowledge (use this to guide the user, like the AWS console wizard):
+  - A cluster needs subnets in at least 2 Availability Zones. A new VPC here creates N public + N
+    private subnets across N AZs, plus the Internet Gateway, NAT gateway(s), and route tables —
+    all automatically (subnet_count controls N; 3 = 3 public + 3 private).
+  - Two IAM roles are created and attached automatically: a CLUSTER role (trusts eks.amazonaws.com,
+    AmazonEKSClusterPolicy) and a NODE role (trusts ec2.amazonaws.com, with WorkerNode + CNI + ECR
+    read policies). The user is never asked to provide role ARNs.
+  - An OIDC provider is created and attached automatically (IRSA) so pods can assume IAM roles —
+    this is what lets the EBS CSI driver and add-ons work.
+  - Worker nodes belong in PRIVATE subnets for production (best practice); public is offered but
+    discouraged. The cluster API endpoint can be public (optionally CIDR-restricted) or private-only.
+  - Managed add-ons installed: vpc-cni, coredns, kube-proxy, aws-ebs-csi-driver (for PersistentVolumes).
+  - Secrets are KMS-encrypted, control-plane logging is on, nodes use gp3 disks with IMDSv2 enforced.
+  - To use an EXISTING VPC, the user supplies cluster + node subnet IDs (comma-separated, ≥2 AZs);
+    the VPC is inferred from the subnets, so no VPC ID is needed.
+
+# Keys that apply to ALL environments (vs per-environment customisation for the selected env).
+global_keys: [name, environment, k8s_version, region, folder, create_vpc, subnet_count,
+              node_subnet_type, existing_subnet_ids, existing_node_subnet_ids, node_disk_size,
+              create_cluster_role, existing_cluster_role_arn, create_node_role,
+              existing_node_role_arn, enabled_addons, endpoint_mode,
+              state_bucket, state_region]
+
+# Defaults for keys that may be unanswered, so every env's tfvars always renders valid HCL
+# (e.g. the existing-VPC fields stay empty strings when the user is creating a new VPC).
+constants:
+  folder: terraform
+  create_vpc: true
+  subnet_count: 2
+  node_subnet_type: private
+  existing_subnet_ids: ""
+  existing_node_subnet_ids: ""
+  node_disk_size: 50
+  create_cluster_role: true
+  existing_cluster_role_arn: ""
+  create_node_role: true
+  existing_node_role_arn: ""
+  enabled_addons: [vpc-cni, coredns, kube-proxy, aws-ebs-csi-driver]
+  endpoint_mode: public_and_private
+
+# The wizard. The agent asks these one at a time (generated straight from here).
+questions:
+  - key: name
+    prompt: "What base name for the EKS cluster? (created as <name>-<environment>)"
+    options: [my-eks, platform, app-cluster, Custom]
+  - key: environment
+    prompt: "Which environment should I create now? (a full dev/staging/prod tree is generated)"
+    options: [dev, staging, prod]
+  - key: region
+    prompt: "Which AWS region?"
+    options: [us-east-1, us-west-2, eu-west-1, ap-south-1]
+  - key: folder
+    prompt: "Which folder in the repo should I put the Terraform in?"
+    options: [terraform, infrastructure/eks, iac/aws/eks, Custom]
+
+  # ── Cluster IAM role (console: Configure cluster → Cluster service role) ──
+  - key: create_cluster_role
+    prompt: "Cluster IAM role — create a new one, or use an existing role?"
+    options: ["Create a new cluster role", "Use an existing cluster role"]
+    map:
+      "Create a new cluster role": true
+      "Use an existing cluster role": false
+  - key: existing_cluster_role_arn
+    prompt: "Existing cluster role ARN? (e.g. arn:aws:iam::<acct>:role/<name>)"
+    options: [Custom]
+    ask_if: "the user chose to use an existing cluster role"
+    show_if: { key: create_cluster_role, equals: false }
+  - key: create_node_role
+    prompt: "Worker-node IAM role — create a new one, or use an existing role?"
+    options: ["Create a new node role", "Use an existing node role"]
+    map:
+      "Create a new node role": true
+      "Use an existing node role": false
+  - key: existing_node_role_arn
+    prompt: "Existing node role ARN? (e.g. arn:aws:iam::<acct>:role/<name>)"
+    options: [Custom]
+    ask_if: "the user chose to use an existing node role"
+    show_if: { key: create_node_role, equals: false }
+
+  - key: k8s_version
+    prompt: "Which Kubernetes version?"
+    options: ["1.30", "1.29", "1.28"]
+
+  # ── Networking (AWS-console-style: new VPC or existing) ──
+  - key: create_vpc
+    prompt: "Should I create a new VPC for the cluster, or use an existing one?"
+    options: ["Create a new VPC", "Use an existing VPC"]
+    map:
+      "Create a new VPC": true
+      "Use an existing VPC": false
+  - key: subnet_count
+    prompt: "How many subnets per type? (e.g. 3 = 3 public + 3 private across 3 AZs, with IGW/NAT/route tables created automatically)"
+    options: ["2", "3", "Custom"]
+    ask_if: "the user chose to create a NEW VPC"
+    show_if: { key: create_vpc, equals: true }
+  - key: node_subnet_type
+    prompt: "Place the worker nodes in which subnets?"
+    options: ["Private (recommended)", "Public"]
+    ask_if: "the user chose to create a NEW VPC"
+    show_if: { key: create_vpc, equals: true }
+    map:
+      "Private (recommended)": private
+      "Public": public
+  - key: existing_subnet_ids
+    prompt: "Existing CLUSTER subnet IDs? (comma-separated, across ≥2 AZs — e.g. subnet-aaa,subnet-bbb)"
+    options: [Custom]
+    ask_if: "the user chose to use an EXISTING VPC"
+    show_if: { key: create_vpc, equals: false }
+  - key: existing_node_subnet_ids
+    prompt: "Existing NODE subnet IDs for the worker nodes? (comma-separated; usually private subnets)"
+    options: [Custom]
+    ask_if: "the user chose to use an EXISTING VPC"
+    show_if: { key: create_vpc, equals: false }
+
+  # ── Compute ──
+  - key: instance_type
+    prompt: "What EC2 instance type for the worker nodes?"
+    options: [t3.medium, t3.large, m5.large, m5.xlarge]
+  - key: desired
+    prompt: "How many worker nodes (desired)?"
+    options: ["2", "3", "5", "Custom"]
+  - key: node_disk_size
+    prompt: "Worker node root disk size (GiB)?"
+    options: ["50", "100", "20", "Custom"]
+
+  # ── Access (console: Cluster endpoint access) ──
+  - key: endpoint_mode
+    prompt: "How should the cluster API endpoint be reachable?"
+    options: ["Public and private (recommended)", "Public only", "Private only"]
+    map:
+      "Public and private (recommended)": public_and_private
+      "Public only": public
+      "Private only": private
+
+  # ── Add-ons (console: Select add-ons — multi-select) ──
+  - key: enabled_addons
+    prompt: "Which managed add-ons should I install? (select all you need)"
+    options: [vpc-cni, coredns, kube-proxy, aws-ebs-csi-driver]
+    multi: true
+
+# Per-environment default sizing. The SELECTED env uses the wizard answers; others use these.
+environments:
+  list: [dev, staging, prod]
+  defaults:
+    dev:     { instance_type: t3.medium, desired: 2, min: 1, max: 3, single_nat: true }
+    staging: { instance_type: t3.large,  desired: 2, min: 2, max: 4, single_nat: true }
+    prod:    { instance_type: m5.large,  desired: 3, min: 3, max: 6, single_nat: false }
+
+# How to apply (rendered with the answers).
+apply:
+  run_dir: "{{folder}}/environments/{{environment}}"
+  state_key: "eks/{{name}}-{{environment}}"
+  name: "{{name}}-{{environment}}"
+  background: true
+
+# Output file manifest. Static files have no {{placeholders}}; tfvars/backend are templated.
+# foreach: env  → rendered once per environment.  when: state_bucket → only if remote state set.
+files:
+  - path: "{{folder}}/modules/vpc/main.tf"
+    content: |
+      data "aws_availability_zones" "available" {
+        state = "available"
+      }
+
+      # Generate N public + N private subnet CIDRs across N AZs from the subnet_count.
+      # The registry VPC module then creates the subnets, Internet Gateway, NAT gateway(s),
+      # route tables, and all associations automatically.
+      locals {
+        azs             = slice(data.aws_availability_zones.available.names, 0, var.subnet_count)
+        private_subnets = [for i in range(var.subnet_count) : cidrsubnet(var.cidr, 4, i)]
+        public_subnets  = [for i in range(var.subnet_count) : cidrsubnet(var.cidr, 4, i + 8)]
+      }
+
+      module "vpc" {
+        source  = "terraform-aws-modules/vpc/aws"
+        version = "~> 5.0"
+
+        name = var.name
+        cidr = var.cidr
+
+        azs             = local.azs
+        private_subnets = local.private_subnets
+        public_subnets  = local.public_subnets
+
+        enable_nat_gateway   = true
+        single_nat_gateway   = var.single_nat_gateway
+        enable_dns_hostnames = true
+
+        public_subnet_tags  = { "kubernetes.io/role/elb" = 1 }
+        private_subnet_tags = { "kubernetes.io/role/internal-elb" = 1 }
+
+        tags = var.tags
+      }
+
+  - path: "{{folder}}/modules/vpc/variables.tf"
+    content: |
+      variable "name" { type = string }
+      variable "cidr" {
+        type    = string
+        default = "10.0.0.0/16"
+      }
+      variable "subnet_count" {
+        type    = number
+        default = 2
+      }
+      variable "single_nat_gateway" {
+        type    = bool
+        default = true
+      }
+      variable "tags" {
+        type    = map(string)
+        default = {}
+      }
+
+  - path: "{{folder}}/modules/vpc/outputs.tf"
+    content: |
+      output "vpc_id" { value = module.vpc.vpc_id }
+      output "private_subnets" { value = module.vpc.private_subnets }
+      output "public_subnets" { value = module.vpc.public_subnets }
+
+  - path: "{{folder}}/modules/iam/main.tf"
+    content: |
+      data "aws_iam_policy_document" "cluster_assume" {
+        statement {
+          actions = ["sts:AssumeRole"]
+          principals {
+            type        = "Service"
+            identifiers = ["eks.amazonaws.com"]
+          }
+        }
+      }
+
+      # Cluster role is created only when create_cluster_role = true; otherwise the user's
+      # existing role ARN is passed straight through (see outputs.tf).
+      resource "aws_iam_role" "cluster" {
+        count              = var.create_cluster_role ? 1 : 0
+        name               = "${var.name}-cluster-role"
+        assume_role_policy = data.aws_iam_policy_document.cluster_assume.json
+        tags               = var.tags
+      }
+
+      resource "aws_iam_role_policy_attachment" "cluster" {
+        count      = var.create_cluster_role ? 1 : 0
+        role       = aws_iam_role.cluster[0].name
+        policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+      }
+
+      data "aws_iam_policy_document" "node_assume" {
+        statement {
+          actions = ["sts:AssumeRole"]
+          principals {
+            type        = "Service"
+            identifiers = ["ec2.amazonaws.com"]
+          }
+        }
+      }
+
+      resource "aws_iam_role" "node" {
+        count              = var.create_node_role ? 1 : 0
+        name               = "${var.name}-node-role"
+        assume_role_policy = data.aws_iam_policy_document.node_assume.json
+        tags               = var.tags
+      }
+
+      resource "aws_iam_role_policy_attachment" "node" {
+        for_each = var.create_node_role ? toset([
+          "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+          "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+          "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+        ]) : toset([])
+        role       = aws_iam_role.node[0].name
+        policy_arn = each.value
+      }
+
+  - path: "{{folder}}/modules/iam/variables.tf"
+    content: |
+      variable "name" { type = string }
+      variable "create_cluster_role" {
+        type    = bool
+        default = true
+      }
+      variable "existing_cluster_role_arn" {
+        type    = string
+        default = ""
+      }
+      variable "create_node_role" {
+        type    = bool
+        default = true
+      }
+      variable "existing_node_role_arn" {
+        type    = string
+        default = ""
+      }
+      variable "tags" {
+        type    = map(string)
+        default = {}
+      }
+
+  - path: "{{folder}}/modules/iam/outputs.tf"
+    content: |
+      output "cluster_role_arn" {
+        value = var.create_cluster_role ? one(aws_iam_role.cluster[*].arn) : var.existing_cluster_role_arn
+      }
+      output "node_role_arn" {
+        value = var.create_node_role ? one(aws_iam_role.node[*].arn) : var.existing_node_role_arn
+      }
+
+  - path: "{{folder}}/modules/eks/main.tf"
+    content: |
+      data "aws_partition" "current" {}
+
+      # Envelope-encrypt Kubernetes secrets in etcd with a dedicated KMS key (CIS EKS).
+      resource "aws_kms_key" "eks" {
+        description             = "EKS secrets encryption (${var.name})"
+        deletion_window_in_days = 7
+        enable_key_rotation     = true
+        tags                    = var.tags
+      }
+
+      resource "aws_kms_alias" "eks" {
+        name          = "alias/${var.name}-eks-secrets"
+        target_key_id = aws_kms_key.eks.key_id
+      }
+
+      # Control-plane audit/diagnostic logs.
+      resource "aws_cloudwatch_log_group" "eks" {
+        name              = "/aws/eks/${var.name}/cluster"
+        retention_in_days = var.log_retention_days
+        tags              = var.tags
+      }
+
+      resource "aws_eks_cluster" "this" {
+        name     = var.name
+        version  = var.k8s_version
+        role_arn = var.cluster_role_arn
+
+        enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+        vpc_config {
+          subnet_ids              = var.subnet_ids
+          endpoint_public_access  = var.endpoint_mode != "private"
+          endpoint_private_access = var.endpoint_mode != "public"
+          public_access_cidrs     = var.endpoint_mode == "private" ? [] : var.public_access_cidrs
+        }
+
+        encryption_config {
+          provider {
+            key_arn = aws_kms_key.eks.arn
+          }
+          resources = ["secrets"]
+        }
+
+        access_config {
+          authentication_mode                         = "API_AND_CONFIG_MAP"
+          bootstrap_cluster_creator_admin_permissions = true
+        }
+
+        tags = var.tags
+
+        depends_on = [aws_cloudwatch_log_group.eks]
+      }
+
+      # OIDC provider — lets pods assume IAM roles (IRSA). Required by the EBS CSI
+      # driver and add-ons like the load balancer controller / cluster autoscaler.
+      data "tls_certificate" "oidc" {
+        url = aws_eks_cluster.this.identity[0].oidc[0].issuer
+      }
+
+      resource "aws_iam_openid_connect_provider" "oidc" {
+        url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
+        client_id_list  = ["sts.amazonaws.com"]
+        thumbprint_list = [data.tls_certificate.oidc.certificates[0].sha1_fingerprint]
+        tags            = var.tags
+      }
+
+      resource "aws_eks_access_entry" "admin" {
+        for_each      = toset(var.admin_principal_arns)
+        cluster_name  = aws_eks_cluster.this.name
+        principal_arn = each.value
+        type          = "STANDARD"
+      }
+
+      resource "aws_eks_access_policy_association" "admin" {
+        for_each      = toset(var.admin_principal_arns)
+        cluster_name  = aws_eks_cluster.this.name
+        principal_arn = each.value
+        policy_arn    = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonEKSClusterAdminPolicy"
+
+        access_scope {
+          type = "cluster"
+        }
+
+        depends_on = [aws_eks_access_entry.admin]
+      }
+
+      # Launch template: bigger encrypted gp3 root disk + enforced IMDSv2.
+      resource "aws_launch_template" "node" {
+        name_prefix = "${var.name}-node-"
+
+        block_device_mappings {
+          device_name = "/dev/xvda"
+          ebs {
+            volume_size = var.node_disk_size
+            volume_type = "gp3"
+            encrypted   = true
+          }
+        }
+
+        metadata_options {
+          http_endpoint               = "enabled"
+          http_tokens                 = "required"
+          http_put_response_hop_limit = 2
+        }
+
+        tag_specifications {
+          resource_type = "instance"
+          tags          = merge(var.tags, { Name = "${var.name}-node" })
+        }
+      }
+
+      resource "aws_eks_node_group" "this" {
+        cluster_name    = aws_eks_cluster.this.name
+        node_group_name = "${var.name}-ng"
+        node_role_arn   = var.node_role_arn
+        subnet_ids      = var.node_subnet_ids
+        instance_types  = [var.instance_type]
+
+        scaling_config {
+          desired_size = var.desired_size
+          min_size     = var.min_size
+          max_size     = var.max_size
+        }
+
+        update_config {
+          max_unavailable = 1
+        }
+
+        launch_template {
+          id      = aws_launch_template.node.id
+          version = aws_launch_template.node.latest_version
+        }
+
+        depends_on = [aws_eks_cluster.this]
+      }
+
+      # IRSA role for the EBS CSI driver — created only when that add-on is selected.
+      data "aws_iam_policy_document" "ebs_csi_assume" {
+        statement {
+          effect  = "Allow"
+          actions = ["sts:AssumeRoleWithWebIdentity"]
+          principals {
+            type        = "Federated"
+            identifiers = [aws_iam_openid_connect_provider.oidc.arn]
+          }
+          condition {
+            test     = "StringEquals"
+            variable = "${replace(aws_iam_openid_connect_provider.oidc.url, "https://", "")}:sub"
+            values   = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
+          }
+          condition {
+            test     = "StringEquals"
+            variable = "${replace(aws_iam_openid_connect_provider.oidc.url, "https://", "")}:aud"
+            values   = ["sts.amazonaws.com"]
+          }
+        }
+      }
+
+      locals {
+        ebs_csi_enabled = contains(var.enabled_addons, "aws-ebs-csi-driver")
+      }
+
+      resource "aws_iam_role" "ebs_csi" {
+        count              = local.ebs_csi_enabled ? 1 : 0
+        name               = "${var.name}-ebs-csi-role"
+        assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume.json
+        tags               = var.tags
+      }
+
+      resource "aws_iam_role_policy_attachment" "ebs_csi" {
+        count      = local.ebs_csi_enabled ? 1 : 0
+        role       = aws_iam_role.ebs_csi[0].name
+        policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+      }
+
+      # Managed add-ons — only the ones the user selected (console: Select add-ons).
+      resource "aws_eks_addon" "vpc_cni" {
+        count                       = contains(var.enabled_addons, "vpc-cni") ? 1 : 0
+        cluster_name                = aws_eks_cluster.this.name
+        addon_name                  = "vpc-cni"
+        resolve_conflicts_on_update = "OVERWRITE"
+        depends_on                  = [aws_eks_node_group.this]
+      }
+
+      resource "aws_eks_addon" "coredns" {
+        count                       = contains(var.enabled_addons, "coredns") ? 1 : 0
+        cluster_name                = aws_eks_cluster.this.name
+        addon_name                  = "coredns"
+        resolve_conflicts_on_update = "OVERWRITE"
+        depends_on                  = [aws_eks_node_group.this]
+      }
+
+      resource "aws_eks_addon" "kube_proxy" {
+        count                       = contains(var.enabled_addons, "kube-proxy") ? 1 : 0
+        cluster_name                = aws_eks_cluster.this.name
+        addon_name                  = "kube-proxy"
+        resolve_conflicts_on_update = "OVERWRITE"
+        depends_on                  = [aws_eks_node_group.this]
+      }
+
+      resource "aws_eks_addon" "ebs_csi" {
+        count                       = local.ebs_csi_enabled ? 1 : 0
+        cluster_name                = aws_eks_cluster.this.name
+        addon_name                  = "aws-ebs-csi-driver"
+        service_account_role_arn    = aws_iam_role.ebs_csi[0].arn
+        resolve_conflicts_on_update = "OVERWRITE"
+        depends_on                  = [aws_eks_node_group.this]
+      }
+
+  - path: "{{folder}}/modules/eks/variables.tf"
+    content: |
+      variable "name" { type = string }
+      variable "k8s_version" { type = string }
+      variable "cluster_role_arn" { type = string }
+      variable "node_role_arn" { type = string }
+      variable "subnet_ids" { type = list(string) }
+      variable "node_subnet_ids" { type = list(string) }
+      variable "instance_type" {
+        type    = string
+        default = "t3.medium"
+      }
+      variable "desired_size" {
+        type    = number
+        default = 2
+      }
+      variable "min_size" {
+        type    = number
+        default = 1
+      }
+      variable "max_size" {
+        type    = number
+        default = 3
+      }
+      variable "endpoint_mode" {
+        type    = string
+        default = "public_and_private"
+      }
+      variable "public_access_cidrs" {
+        type    = list(string)
+        default = ["0.0.0.0/0"]
+      }
+      variable "enabled_addons" {
+        type    = list(string)
+        default = ["vpc-cni", "coredns", "kube-proxy", "aws-ebs-csi-driver"]
+      }
+      variable "node_disk_size" {
+        type    = number
+        default = 50
+      }
+      variable "log_retention_days" {
+        type    = number
+        default = 90
+      }
+      variable "admin_principal_arns" {
+        type    = list(string)
+        default = []
+      }
+      variable "tags" {
+        type    = map(string)
+        default = {}
+      }
+
+  - path: "{{folder}}/modules/eks/outputs.tf"
+    content: |
+      output "cluster_name" { value = aws_eks_cluster.this.name }
+      output "cluster_endpoint" { value = aws_eks_cluster.this.endpoint }
+      output "oidc_provider_arn" { value = aws_iam_openid_connect_provider.oidc.arn }
+      output "kms_key_arn" { value = aws_kms_key.eks.arn }
+
+  # ── per-environment files ──
+  - path: "{{folder}}/environments/{{env}}/main.tf"
+    foreach: env
+    content: |
+      module "vpc" {
+        count  = var.create_vpc ? 1 : 0
+        source = "../../modules/vpc"
+
+        name               = "${var.cluster_name}-vpc"
+        cidr               = var.vpc_cidr
+        subnet_count       = var.subnet_count
+        single_nat_gateway = var.single_nat_gateway
+        tags               = var.tags
+      }
+
+      # Resolve which subnets the cluster + nodes use, for BOTH paths:
+      #   • new VPC  → subnets created above (nodes land in private or public per node_subnet_type)
+      #   • existing → the comma-separated subnet IDs the user supplied
+      locals {
+        new_private = try(module.vpc[0].private_subnets, [])
+        new_public  = try(module.vpc[0].public_subnets, [])
+
+        existing_cluster_subnets = compact(split(",", replace(var.existing_subnet_ids, " ", "")))
+        existing_node_subnets    = compact(split(",", replace(var.existing_node_subnet_ids, " ", "")))
+
+        cluster_subnet_ids = var.create_vpc ? concat(local.new_private, local.new_public) : local.existing_cluster_subnets
+        node_subnet_ids = var.create_vpc ? (
+          var.node_subnet_type == "public" ? local.new_public : local.new_private
+        ) : local.existing_node_subnets
+      }
+
+      module "iam" {
+        source = "../../modules/iam"
+
+        name                      = var.cluster_name
+        create_cluster_role       = var.create_cluster_role
+        existing_cluster_role_arn = var.existing_cluster_role_arn
+        create_node_role          = var.create_node_role
+        existing_node_role_arn    = var.existing_node_role_arn
+        tags                      = var.tags
+      }
+
+      module "eks" {
+        source = "../../modules/eks"
+
+        name             = var.cluster_name
+        k8s_version      = var.k8s_version
+        cluster_role_arn = module.iam.cluster_role_arn
+        node_role_arn    = module.iam.node_role_arn
+        subnet_ids       = local.cluster_subnet_ids
+        node_subnet_ids  = local.node_subnet_ids
+
+        instance_type        = var.instance_type
+        desired_size         = var.desired_size
+        min_size             = var.min_size
+        max_size             = var.max_size
+        endpoint_mode        = var.endpoint_mode
+        public_access_cidrs  = var.public_access_cidrs
+        enabled_addons       = var.enabled_addons
+        node_disk_size       = var.node_disk_size
+        admin_principal_arns = var.admin_principal_arns
+
+        tags = var.tags
+
+        depends_on = [module.iam]
+      }
+
+  - path: "{{folder}}/environments/{{env}}/providers.tf"
+    foreach: env
+    content: |
+      terraform {
+        required_version = ">= 1.3"
+        required_providers {
+          aws = {
+            source  = "hashicorp/aws"
+            version = "~> 5.0"
+          }
+          tls = {
+            source  = "hashicorp/tls"
+            version = "~> 4.0"
+          }
+        }
+      }
+
+      provider "aws" {
+        region = var.region
+      }
+
+  - path: "{{folder}}/environments/{{env}}/variables.tf"
+    foreach: env
+    content: |
+      variable "region" { type = string }
+      variable "cluster_name" { type = string }
+      variable "k8s_version" { type = string }
+      variable "vpc_cidr" {
+        type    = string
+        default = "10.0.0.0/16"
+      }
+      variable "create_vpc" {
+        type    = bool
+        default = true
+      }
+      variable "subnet_count" {
+        type    = number
+        default = 2
+      }
+      variable "node_subnet_type" {
+        type    = string
+        default = "private"
+      }
+      variable "existing_subnet_ids" {
+        type    = string
+        default = ""
+      }
+      variable "existing_node_subnet_ids" {
+        type    = string
+        default = ""
+      }
+      variable "single_nat_gateway" {
+        type    = bool
+        default = true
+      }
+      variable "instance_type" { type = string }
+      variable "desired_size" { type = number }
+      variable "min_size" { type = number }
+      variable "max_size" { type = number }
+      variable "endpoint_mode" {
+        type    = string
+        default = "public_and_private"
+      }
+      variable "public_access_cidrs" {
+        type    = list(string)
+        default = ["0.0.0.0/0"]
+      }
+      variable "create_cluster_role" {
+        type    = bool
+        default = true
+      }
+      variable "existing_cluster_role_arn" {
+        type    = string
+        default = ""
+      }
+      variable "create_node_role" {
+        type    = bool
+        default = true
+      }
+      variable "existing_node_role_arn" {
+        type    = string
+        default = ""
+      }
+      variable "enabled_addons" {
+        type    = list(string)
+        default = ["vpc-cni", "coredns", "kube-proxy", "aws-ebs-csi-driver"]
+      }
+      variable "node_disk_size" {
+        type    = number
+        default = 50
+      }
+      variable "admin_principal_arns" {
+        type    = list(string)
+        default = []
+      }
+      variable "tags" {
+        type    = map(string)
+        default = {}
+      }
+
+  - path: "{{folder}}/environments/{{env}}/outputs.tf"
+    foreach: env
+    content: |
+      output "cluster_name" {
+        value = module.eks.cluster_name
+      }
+      output "cluster_endpoint" {
+        value = module.eks.cluster_endpoint
+      }
+      output "vpc_id" {
+        value = var.create_vpc ? one(module.vpc[*].vpc_id) : "existing-vpc"
+      }
+      output "region" {
+        value = var.region
+      }
+      output "kubeconfig_command" {
+        value = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.region}"
+      }
+
+  - path: "{{folder}}/environments/{{env}}/terraform.tfvars"
+    foreach: env
+    content: |
+      region                 = "{{region}}"
+      cluster_name           = "{{name}}-{{env}}"
+      k8s_version            = "{{k8s_version}}"
+      instance_type          = "{{instance_type}}"
+      desired_size           = {{desired}}
+      min_size               = {{min}}
+      max_size               = {{max}}
+      node_disk_size         = {{node_disk_size}}
+      single_nat_gateway     = {{single_nat}}
+      endpoint_mode          = "{{endpoint_mode}}"
+      enabled_addons         = {{enabled_addons}}
+
+      # IAM roles — create new (create_*_role=true) or reuse an existing role ARN.
+      create_cluster_role       = {{create_cluster_role}}
+      existing_cluster_role_arn = "{{existing_cluster_role_arn}}"
+      create_node_role          = {{create_node_role}}
+      existing_node_role_arn    = "{{existing_node_role_arn}}"
+
+      # Networking — create a new VPC (create_vpc=true) or use an existing one (create_vpc=false).
+      create_vpc       = {{create_vpc}}
+      subnet_count     = {{subnet_count}}
+      node_subnet_type = "{{node_subnet_type}}"
+      # Used only when create_vpc=false (comma-separated subnet IDs):
+      existing_subnet_ids      = "{{existing_subnet_ids}}"
+      existing_node_subnet_ids = "{{existing_node_subnet_ids}}"
+
+      # Restrict who can reach the public API endpoint (default: open to the world).
+      # Lock this to your office/VPN egress IP for production, e.g. ["203.0.113.4/32"].
+      public_access_cidrs = ["0.0.0.0/0"]
+      # Grant your AWS console user/role cluster-admin (run: aws sts get-caller-identity):
+      # admin_principal_arns = ["arn:aws:iam::<account-id>:user/<your-user>"]
+      tags = {
+        Environment = "{{env}}"
+        ManagedBy   = "DevOpsAgent"
+      }
+
+  - path: "{{folder}}/environments/{{env}}/backend.tf"
+    foreach: env
+    when: state_bucket
+    content: |
+      terraform {
+        backend "s3" {
+          bucket = "{{state_bucket}}"
+          key    = "eks/{{name}}-{{env}}/terraform.tfstate"
+          region = "{{state_region}}"
+        }
+      }

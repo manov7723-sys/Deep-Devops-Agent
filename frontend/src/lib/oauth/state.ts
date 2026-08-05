@@ -125,3 +125,29 @@ export function verifyState(token: string, expectedNonce: string): VerifyResult 
     next,
   };
 }
+
+/**
+ * Decode ONLY the popup flag from a state token without verifying its HMAC or
+ * checking the nonce. Used by the callback's failure paths (missing_nonce,
+ * bad_sig, expired) so they can still detect popup mode even when the cookie
+ * that carries it was dropped by the browser.
+ *
+ * Trust boundary: the return value is used SOLELY to pick between
+ * "close-the-popup HTML" and "redirect to /auth/login". A forged state that
+ * lied about popup=true would only trick us into rendering a small
+ * "you can close this window" page for that requester — no auth bypass, no
+ * data exposure. Safe to use pre-verification.
+ */
+export function peekStatePopup(token: string): boolean {
+  try {
+    const dot = token.indexOf(".");
+    if (dot < 1) return false;
+    const payloadB64 = token.slice(0, dot);
+    const raw = Buffer.from(payloadB64, "base64url").toString("utf8");
+    const parts = raw.split("|");
+    if (parts.length !== 5) return false;
+    return parts[3] === "1";
+  } catch {
+    return false;
+  }
+}

@@ -1,0 +1,11 @@
+# MODULE KB: ECR repository — registry module.
+type: ecr
+title: ECR repository
+source: terraform-aws-modules/ecr/aws
+version: "~> 2.0"
+config:
+  repository_name: '"{{name}}-{{id}}"'
+provides:
+  repository_url: "module.{{id}}.repository_url"
+outputs:
+  repository_url: "module.{{id}}.repository_url"
