@@ -167,7 +167,9 @@ export function CreateProjectWizard({
   // to localStorage, which fires a 'storage' event in every other same-origin
   // tab — that path survives the COOP break.
   useEffect(() => {
-    function handle(data: { source?: string; status?: string } | null) {
+    function handle(
+      data: { source?: string; status?: string; code?: string; message?: string } | null,
+    ) {
       if (!data || data.source !== "dda-oauth") return;
       if (data.status === "connected") {
         qc.invalidateQueries({ queryKey: ["account", "oauth-accounts"] });
@@ -175,6 +177,15 @@ export function CreateProjectWizard({
         setGhNote(null);
       } else if (data.status === "needs_login") {
         setGhNote("Please sign in to the app first, then connect GitHub.");
+      } else if (data.status === "error") {
+        // Surface the callback failure inline instead of silently landing the
+        // popup on some other page. The wizard stays on step 2 so the user
+        // can retry.
+        setGhNote(
+          data.message
+            ? `GitHub sign-in failed: ${data.message}`
+            : `GitHub sign-in failed${data.code ? ` (${data.code})` : ""}. Try again.`,
+        );
       }
     }
     function onMsg(e: MessageEvent) {

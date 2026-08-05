@@ -29,9 +29,9 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
 
   // Receive the popup's result and refresh the connected accounts in place.
   useEffect(() => {
-    function onMsg(e: MessageEvent) {
-      if (e.origin !== window.location.origin) return;
-      const data = e.data as { source?: string; status?: string } | null;
+    function handle(
+      data: { source?: string; status?: string; code?: string; message?: string } | null,
+    ) {
       if (!data || data.source !== "dda-oauth") return;
       if (data.status === "connected") {
         qc.invalidateQueries({ queryKey: OAUTH_ACCOUNTS_KEY });
@@ -39,10 +39,34 @@ export function GithubConnectionClient({ slug }: { slug: string }) {
         setError(null);
       } else if (data.status === "needs_login") {
         setError("Please sign in to the app first, then connect.");
+      } else if (data.status === "error") {
+        setError(
+          data.message
+            ? `Sign-in failed: ${data.message}`
+            : `Sign-in failed${data.code ? ` (${data.code})` : ""}. Try again.`,
+        );
+      }
+    }
+    function onMsg(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return;
+      handle(e.data as Parameters<typeof handle>[0]);
+    }
+    // COOP can sever window.opener silently — the localStorage 'storage' event
+    // fires in every other same-origin tab and gives us a reliable fallback.
+    function onStorage(e: StorageEvent) {
+      if (e.key !== "dda_github_oauth_result" || !e.newValue) return;
+      try {
+        handle(JSON.parse(e.newValue));
+      } catch {
+        /* ignore malformed */
       }
     }
     window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("message", onMsg);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [qc]);
 
   const anyConnected = (accountsQuery.data ?? []).some(

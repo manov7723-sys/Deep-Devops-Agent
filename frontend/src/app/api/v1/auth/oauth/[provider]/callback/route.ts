@@ -21,13 +21,35 @@ const PKCE_COOKIE = "ddaoauthpkce";
 /**
  * HTML response for popup-mode OAuth: notify the opener window (the wizard) and
  * close the popup, so the main page never navigates (no redirect to home).
+ *
+ * Broadcasts on BOTH channels — postMessage AND a localStorage event — because
+ * modern browsers (Chrome COOP) sever `window.opener` on cross-origin
+ * navigation, which silently swallows postMessage. The localStorage 'storage'
+ * event still fires cross-tab and gives the wizard a reliable signal.
+ *
+ * Body text intentionally does not include the word "home" or any redirect —
+ * the popup must never navigate the opener or fall back to the dashboard.
  */
-function popupClose(status: "connected" | "needs_login"): NextResponse {
+function popupClose(
+  status: "connected" | "needs_login" | "error",
+  detail?: { code?: string; message?: string },
+): NextResponse {
+  const bodyText =
+    status === "connected"
+      ? "Connected. You can close this window."
+      : status === "needs_login"
+        ? "Please sign in to the app first, then close this window and reconnect."
+        : `Sign-in failed${detail?.message ? `: ${detail.message}` : ""}. You can close this window.`;
+  const msg = { source: "dda-oauth", status, ts: Date.now(), ...(detail ?? {}) };
   const html = `<!doctype html><meta charset="utf-8"><title>GitHub</title>
-<body style="font:14px system-ui;padding:24px;color:#444">Connected. You can close this window.</body>
+<body style="font:14px system-ui;padding:24px;color:#444">${bodyText.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] as string)}</body>
 <script>
-  try { window.opener && window.opener.postMessage({ source: "dda-oauth", status: ${JSON.stringify(status)} }, window.location.origin); } catch (e) {}
-  window.close();
+(function () {
+  var msg = ${JSON.stringify(msg)};
+  try { if (window.opener) window.opener.postMessage(msg, window.location.origin); } catch (e) {}
+  try { localStorage.setItem("dda_github_oauth_result", JSON.stringify(msg)); } catch (e) {}
+  try { window.close(); } catch (e) {}
+})();
 </script>`;
   return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
@@ -82,9 +104,16 @@ function smartReturn(nextPath: string | null): NextResponse {
 export async function GET(req: Request, ctx: { params: Promise<{ provider: string }> }) {
   const { provider: providerId } = await ctx.params;
   const url = new URL(req.url);
+  // Detect popup mode BEFORE any early-return. Every failure path needs to
+  // know it's inside a popup so it can close it instead of navigating the
+  // window — otherwise the popup follows a 303 to /auth/login and the
+  // (guest)/layout then bounces it to /u/dashboard for signed-in users,
+  // which is why the popup used to end up showing the home page.
+  const jar = await cookies();
+  const popupCookie = jar.get(POPUP_COOKIE)?.value === "1";
   const provider = await getProviderAsync(providerId);
   if (!provider) {
-    return failureResponse("provider_unavailable", "OAuth provider isn't configured.", url, req.headers);
+    return failureResponse("provider_unavailable", "OAuth provider isn't configured.", url, req.headers, undefined, popupCookie);
   }
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -98,16 +127,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, providerError },
     });
-    return failureResponse("provider_error", "The provider rejected the sign-in.", url, req.headers);
+    return failureResponse("provider_error", "The provider rejected the sign-in.", url, req.headers, undefined, popupCookie);
   }
   if (!code || !state) {
-    return failureResponse("missing_params", "Missing code or state.", url, req.headers);
+    return failureResponse("missing_params", "Missing code or state.", url, req.headers, undefined, popupCookie);
   }
 
-  const jar = await cookies();
   const nonce = jar.get(NONCE_COOKIE)?.value;
   if (!nonce) {
-    return failureResponse("missing_nonce", "Sign-in state expired. Try again.", url, req.headers);
+    return failureResponse("missing_nonce", "Sign-in state expired. Try again.", url, req.headers, undefined, popupCookie);
   }
   const verified = verifyState(state, nonce);
   if (!verified.ok) {
@@ -117,11 +145,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, reason: verified.code },
     });
-    return failureResponse(verified.code, "Sign-in state could not be verified.", url, req.headers);
+    return failureResponse(verified.code, "Sign-in state could not be verified.", url, req.headers, undefined, popupCookie);
   }
   if (verified.provider !== providerId) {
-    return failureResponse("provider_mismatch", "Sign-in state is for a different provider.", url, req.headers);
+    return failureResponse("provider_mismatch", "Sign-in state is for a different provider.", url, req.headers, undefined, popupCookie);
   }
+  // Popup mode is authoritative from the SIGNED state once verified; fall back
+  // to the cookie for the pre-verify failure paths above.
+  const isPopupFlow = verified.popup || popupCookie;
 
   // Single-use: clear the nonce as soon as it's been spent.
   jar.delete(NONCE_COOKIE);
@@ -158,7 +189,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
         clientId: provider.clientId,
       },
     });
-    return failureResponse(ex.code, ex.message, url, req.headers, redirectUri);
+    return failureResponse(ex.code, ex.message, url, req.headers, redirectUri, isPopupFlow);
   }
 
   // Attach-to-current-user mode. When the caller is already signed in (e.g.
@@ -171,7 +202,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   // GitHub reliably. Cookies are only a fallback for the legacy full-page flow.
   const nextPath = verified.next ?? jar.get(NEXT_COOKIE)?.value ?? null;
   jar.delete(NEXT_COOKIE);
-  const isPopup = verified.popup || jar.get(POPUP_COOKIE)?.value === "1";
+  const isPopup = isPopupFlow;
   jar.delete(POPUP_COOKIE);
   if (activeSess) {
     const conflict = await prisma.oAuthAccount.findUnique({
@@ -196,6 +227,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
         "That GitHub account is already linked to a different DeepAgent user.",
         url,
         req.headers,
+        undefined,
+        isPopupFlow,
       );
     }
     const accessTokenRef = encryptSecret(ex.profile.accessToken);
@@ -281,7 +314,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, reason: resolved.code, email: ex.profile.email },
     });
-    return failureResponse(resolved.code, "The provider hasn't verified that email.", url, req.headers);
+    return failureResponse(
+      resolved.code,
+      "The provider hasn't verified that email.",
+      url,
+      req.headers,
+      undefined,
+      isPopupFlow,
+    );
   }
 
   const { outcome, user } = resolved.identity;
@@ -360,9 +400,19 @@ function failureResponse(
   requestUrl: URL,
   headers?: Headers,
   redirectUri?: string,
+  isPopup?: boolean,
 ) {
   if (isMockMode()) {
     return NextResponse.json({ ok: false, code, message, redirectUri }, { status: 400 });
+  }
+  // Popup mode: never navigate. The popup was opened by the wizard (or the
+  // per-project source-control page); redirecting it to /auth/login triggers
+  // the (guest) layout's "already signed in → /u/dashboard" rule and the
+  // popup ends up showing the Dashboard, which reads to the user as "OAuth
+  // sent me to the home page." Instead, close the popup and hand the error
+  // back to the opener via postMessage + localStorage.
+  if (isPopup) {
+    return popupClose("error", { code, message });
   }
   const dest = new URL("/auth/login", publicOrigin(requestUrl.origin, headers));
   dest.searchParams.set("oauth_error", code);
