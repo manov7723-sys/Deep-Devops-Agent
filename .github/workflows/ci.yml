@@ -1,0 +1,79 @@
+name: CI (build all services)
+
+# Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
+# When this workflow succeeds, the CD workflow fires automatically via workflow_run.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and push all services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::985465459771:role/gha-manov7723-sys-deep-devops-agent-dynamic-app
+          aws-region: us-east-1
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and tag backend image
+        env:
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-app
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "backend/Dockerfile" "backend"
+
+      - name: Scan backend image for vulnerabilities (Trivy)
+        continue-on-error: true
+        env:
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-app
+          TAG: ${{ github.sha }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.65.0 image \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+            "$ECR:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+      - name: Push backend image
+        env:
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-app
+          TAG: ${{ github.sha }}
+        run: |
+          docker push "$ECR:$TAG"
+          docker push "$ECR:latest"
+
+      - name: Build and tag frontend image
+        env:
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-react-app
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "frontend/Dockerfile" "frontend"
+
+      - name: Scan frontend image for vulnerabilities (Trivy)
+        continue-on-error: true
+        env:
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-react-app
+          TAG: ${{ github.sha }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.65.0 image \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+            "$ECR:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+      - name: Push frontend image
+        env:
+          ECR: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-react-app
+          TAG: ${{ github.sha }}
+        run: |
+          docker push "$ECR:$TAG"
+          docker push "$ECR:latest"
