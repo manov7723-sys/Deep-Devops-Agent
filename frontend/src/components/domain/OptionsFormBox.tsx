@@ -53,6 +53,16 @@ export type OptionsFormSelectQuestion = {
   as?: "pills" | "dropdown";
   /** Optional default value; must match one of `options` exactly to take effect. */
   default?: string;
+  /**
+   * Key of ANOTHER question whose non-empty answer also satisfies this one.
+   *
+   * For pairing fixed choices with a free-text escape hatch: the deploy
+   * wizard offers namespace pills plus an optional "or type a different
+   * namespace" box, and filling either is a complete answer. Without this the
+   * pill stayed mandatory, so a user who typed a name still had Deploy
+   * disabled with nothing on screen explaining why.
+   */
+  satisfiedBy?: string;
 };
 
 export type OptionsFormInputQuestion = {
@@ -61,6 +71,16 @@ export type OptionsFormInputQuestion = {
   kind: "text" | "number";
   default?: string;
   placeholder?: string;
+  /**
+   * Blank is a valid answer — Submit stays enabled and the key is omitted from
+   * the submitted text entirely.
+   *
+   * The case this exists for: pairing a fixed-choice question with a free-text
+   * escape hatch, e.g. "pick a namespace" (pills) + "or type a new one"
+   * (optional text). Without this the empty box blocks Submit, so the escape
+   * hatch would be mandatory — the opposite of what it's for.
+   */
+  optional?: boolean;
 };
 
 export type OptionsFormQuestion = OptionsFormSelectQuestion | OptionsFormInputQuestion;
@@ -108,7 +128,16 @@ export function OptionsFormBox({
 
   const [answers, setAnswers] = useState<Record<string, string>>(initial);
   const [submitted, setSubmitted] = useState(false);
-  const allAnswered = data.questions.every((q) => String(answers[q.key] ?? "").trim().length > 0);
+  // A question counts as answered when:
+  //   • it's an optional free-input question (blank is fine), OR
+  //   • it has a non-empty answer, OR
+  //   • its `satisfiedBy` companion has a non-empty answer (pill vs free-text
+  //     pairs — answering either one is enough).
+  const hasValue = (key: string) => String(answers[key] ?? "").trim().length > 0;
+  const allAnswered = data.questions.every((q) => {
+    if (isInputQuestion(q)) return q.optional || hasValue(q.key);
+    return hasValue(q.key) || (!!q.satisfiedBy && hasValue(q.satisfiedBy));
+  });
 
   function handleSubmit() {
     if (!allAnswered || !interactive || submitted) return;
@@ -119,7 +148,13 @@ export function OptionsFormBox({
     // occasionally sliced at the wrong comma and mis-mapped ALB → NLB (the
     // 2026-08 incident). Newline is the ONE separator that no label contains,
     // so each `key: value` line is unambiguous end-to-end.
-    const parts = data.questions.map((q) => `${q.key}: ${answers[q.key]}`);
+    //
+    // Blank optional answers are OMITTED rather than sent as `key: ` — an
+    // empty value reads to the model as a deliberate empty string, and it has
+    // acted on that (deploying to a namespace literally named "").
+    const parts = data.questions
+      .filter((q) => String(answers[q.key] ?? "").trim().length > 0)
+      .map((q) => `${q.key}: ${String(answers[q.key]).trim()}`);
     setSubmitted(true);
     onSubmit?.(parts.join("\n"));
   }

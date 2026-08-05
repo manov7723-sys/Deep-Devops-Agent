@@ -47,16 +47,46 @@ export function authCookieSecure(): boolean {
  *
  * APP_PUBLIC_URL removes the guesswork. Set it to the URL users actually type.
  *
- * @param fallbackOrigin origin derived from the request, used when unset
+ * When it is NOT set, prefer the proxy's forwarded headers over the request
+ * origin. `X-Forwarded-Host` / `X-Forwarded-Proto` are exactly what an ALB,
+ * ELB, nginx or Cloudflare puts the PUBLIC hostname into, and they are present
+ * on plain GET navigations where `Origin` is absent. Reading them turns the
+ * common misconfiguration (APP_PUBLIC_URL forgotten on a fresh deploy) from a
+ * silent redirect-to-localhost into correct behaviour.
+ *
+ * Precedence: APP_PUBLIC_URL → X-Forwarded-* → Host header → request origin.
+ *
+ * @param fallbackOrigin origin derived from the request, used as the last resort
+ * @param headers        the request's headers, when available
  */
-export function publicOrigin(fallbackOrigin: string): string {
+export function publicOrigin(fallbackOrigin: string, headers?: Headers): string {
   const configured = process.env.APP_PUBLIC_URL?.trim();
-  if (!configured) return fallbackOrigin;
-  try {
-    // Normalise: accept "https://app.example.com/" or a bare host.
-    const withScheme = /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
-    return new URL(withScheme).origin;
-  } catch {
-    return fallbackOrigin;
+  if (configured) {
+    try {
+      // Normalise: accept "https://app.example.com/" or a bare host.
+      const withScheme = /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
+      return new URL(withScheme).origin;
+    } catch {
+      /* malformed value — fall through to header/derived detection */
+    }
   }
+
+  if (headers) {
+    // X-Forwarded-Host may carry a comma-separated chain when several proxies
+    // are in front; the FIRST entry is the original client-facing host.
+    const fwdHost = headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+    const host = fwdHost || headers.get("host")?.trim();
+    if (host && !/^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|$)/i.test(host)) {
+      const proto =
+        headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ||
+        (fallbackOrigin.startsWith("https:") ? "https" : "http");
+      try {
+        return new URL(`${proto}://${host}`).origin;
+      } catch {
+        /* unparseable host — fall through */
+      }
+    }
+  }
+
+  return fallbackOrigin;
 }

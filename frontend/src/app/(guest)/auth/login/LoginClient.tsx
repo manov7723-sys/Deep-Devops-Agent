@@ -49,6 +49,8 @@ const OAUTH_ERROR_COPY: Record<string, string> = {
     "The OAuth client ID or secret in the admin settings is wrong. Ask an admin to re-paste them in Admin → OAuth providers.",
   redirect_uri_mismatch:
     "The provider's callback URL doesn't match this site. Ask an admin to set the OAuth App's callback to this server's /api/v1/auth/oauth/<provider>/callback URL.",
+  app_public_url_unset:
+    "This server doesn't know its own public URL, so sign-in would have sent you to the wrong address. An admin needs to set APP_PUBLIC_URL to the URL you're visiting right now (Connections → App configuration secrets → Public URL), then reload.",
   bad_verification_code:
     "The sign-in code expired or was already used. Click the button to start over.",
   unsupported_grant_type:

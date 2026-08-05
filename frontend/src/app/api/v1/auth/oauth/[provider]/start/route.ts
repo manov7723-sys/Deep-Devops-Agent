@@ -39,7 +39,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       return NextResponse.json({ ok: false, code: "provider_unavailable" }, { status: 503 });
     }
     const url = new URL(req.url);
-    const dest = new URL("/auth/login", url.origin);
+    // publicOrigin, NOT url.origin — behind a proxy the latter is the pod's
+    // own address (http://localhost:3000), which would bounce the user to
+    // their own machine. See the comment on failureResponse in ./callback.
+    const dest = new URL("/auth/login", publicOrigin(url.origin, req.headers));
     dest.searchParams.set("oauth_error", "provider_unavailable");
     return NextResponse.redirect(dest, 303);
   }
@@ -66,7 +69,45 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   // the user to localhost, which has no nonce cookie for that flow, and the
   // callback fails with `missing_nonce` on a page that isn't even the app they
   // started from.
-  const origin = publicOrigin(req.headers.get("origin") ?? reqUrl.origin);
+  const origin = publicOrigin(req.headers.get("origin") ?? reqUrl.origin, req.headers);
+
+  // REFUSE to start a flow that would send a loopback redirect_uri from a
+  // production deployment.
+  //
+  // WHY (2026-08 incident): behind an ALB/ELB, Next.js rebuilds req.url from
+  // the pod's own listen address, so `new URL(req.url).origin` is
+  // "http://localhost:3000" — the container's internal address, not the public
+  // one. With APP_PUBLIC_URL unset, publicOrigin() falls back to that and the
+  // deployed app asks the provider to redirect to localhost. If the OAuth app
+  // ALSO has a localhost callback registered (very common — it was added for
+  // local development), the provider considers it valid, accepts the flow, and
+  // sends the user to their OWN laptop. Nothing errors: no redirect_uri
+  // mismatch, no failed exchange, no log line. The user lands on a different
+  // installation of the app and cannot tell why sign-in "did nothing".
+  //
+  // Failing here converts hours of invisible misdirection into one sentence
+  // naming the exact env var to set.
+  if (process.env.NODE_ENV === "production" && !process.env.APP_PUBLIC_URL?.trim()) {
+    const host = (() => {
+      try {
+        return new URL(origin).hostname;
+      } catch {
+        return "";
+      }
+    })();
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0") {
+      console.error(
+        `[oauth/start] REFUSING to start ${providerId} sign-in: APP_PUBLIC_URL is not set, so the redirect_uri would be ${origin}/api/v1/auth/oauth/${providerId}/callback — the pod's own address. Set APP_PUBLIC_URL to the URL users actually visit, then retry.`,
+      );
+      if (isMockMode()) {
+        return NextResponse.json({ ok: false, code: "app_public_url_unset" }, { status: 503 });
+      }
+      const dest = new URL("/auth/login", publicOrigin(reqUrl.origin, req.headers));
+      dest.searchParams.set("oauth_error", "app_public_url_unset");
+      return NextResponse.redirect(dest, 303);
+    }
+  }
+
   const authorizeUrl = buildAuthorizeUrl({ provider, origin, state });
 
   // Log the EXACT redirect_uri + client_id we're about to send. A provider

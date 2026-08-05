@@ -178,13 +178,23 @@ function PipelineRow(props: {
         </div>
       </div>
 
+      {/* Run failures render OUTSIDE the collapsible body.
+          They used to live inside `{open && …}`, so clicking Run on a
+          COLLAPSED row (the default state) showed nothing at all: the button
+          flashed its loading state, the request failed, and the reason was
+          hidden behind a disclosure the user had no reason to open. It read as
+          "the Run button does nothing". */}
+      {run.isError && (
+        <div
+          className="faint"
+          style={{ color: "var(--danger)", fontSize: 12, padding: "0 16px 12px 40px" }}
+        >
+          {(run.error as Error).message}
+        </div>
+      )}
+
       {open && (
         <div className="col gap-3" style={{ padding: "0 16px 16px 40px" }}>
-          {run.isError && (
-            <div className="faint" style={{ color: "var(--danger)", fontSize: 12 }}>
-              {(run.error as Error).message}
-            </div>
-          )}
 
           {/* Agent reviewer toggle */}
           <label className="row gap-2" style={{ alignItems: "center", cursor: "pointer" }}>

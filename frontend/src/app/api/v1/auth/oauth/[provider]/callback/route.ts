@@ -82,7 +82,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   const url = new URL(req.url);
   const provider = await getProviderAsync(providerId);
   if (!provider) {
-    return failureResponse("provider_unavailable", "OAuth provider isn't configured.", url);
+    return failureResponse("provider_unavailable", "OAuth provider isn't configured.", url, req.headers);
   }
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -96,16 +96,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, providerError },
     });
-    return failureResponse("provider_error", "The provider rejected the sign-in.", url);
+    return failureResponse("provider_error", "The provider rejected the sign-in.", url, req.headers);
   }
   if (!code || !state) {
-    return failureResponse("missing_params", "Missing code or state.", url);
+    return failureResponse("missing_params", "Missing code or state.", url, req.headers);
   }
 
   const jar = await cookies();
   const nonce = jar.get(NONCE_COOKIE)?.value;
   if (!nonce) {
-    return failureResponse("missing_nonce", "Sign-in state expired. Try again.", url);
+    return failureResponse("missing_nonce", "Sign-in state expired. Try again.", url, req.headers);
   }
   const verified = verifyState(state, nonce);
   if (!verified.ok) {
@@ -115,10 +115,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, reason: verified.code },
     });
-    return failureResponse(verified.code, "Sign-in state could not be verified.", url);
+    return failureResponse(verified.code, "Sign-in state could not be verified.", url, req.headers);
   }
   if (verified.provider !== providerId) {
-    return failureResponse("provider_mismatch", "Sign-in state is for a different provider.", url);
+    return failureResponse("provider_mismatch", "Sign-in state is for a different provider.", url, req.headers);
   }
 
   // Single-use: clear the nonce as soon as it's been spent.
@@ -127,7 +127,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   // MUST match the origin used at /start — the provider compares the
   // redirect_uri on the token exchange against the one from the authorize
   // request, and a mismatch fails with redirect_uri_mismatch.
-  const origin = publicOrigin(req.headers.get("origin") ?? url.origin);
+  const origin = publicOrigin(req.headers.get("origin") ?? url.origin, req.headers);
   const ex = await exchange(provider, code, origin);
   if (!ex.ok) {
     const redirectUri = `${origin}/api/v1/auth/oauth/${providerId}/callback`;
@@ -152,7 +152,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
         clientId: provider.clientId,
       },
     });
-    return failureResponse(ex.code, ex.message, url, redirectUri);
+    return failureResponse(ex.code, ex.message, url, req.headers, redirectUri);
   }
 
   // Attach-to-current-user mode. When the caller is already signed in (e.g.
@@ -189,6 +189,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
         "already_linked",
         "That GitHub account is already linked to a different DeepAgent user.",
         url,
+        req.headers,
       );
     }
     const accessTokenRef = encryptSecret(ex.profile.accessToken);
@@ -274,7 +275,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       userAgent: meta.userAgent,
       metadata: { provider: providerId, reason: resolved.code, email: ex.profile.email },
     });
-    return failureResponse(resolved.code, "The provider hasn't verified that email.", url);
+    return failureResponse(resolved.code, "The provider hasn't verified that email.", url, req.headers);
   }
 
   const { outcome, user } = resolved.identity;
@@ -325,20 +326,39 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   const dest = nextPath
     ? `${totpDest}${totpDest.includes("?") ? "&" : "?"}next=${encodeURIComponent(nextPath)}`
     : totpDest;
-  return NextResponse.redirect(new URL(dest, url.origin));
+  // `origin` (from publicOrigin) — NOT url.origin. See failureResponse below.
+  return NextResponse.redirect(new URL(dest, origin));
 }
 
 /**
  * Build a failure response. In mock mode returns JSON for tests; otherwise
- * 303-redirects back to /auth/login carrying the failure code so the form
- * can render a human-readable message. The base origin is taken from the
- * request URL so the redirect works in any deployment, not just localhost.
+ * 303-redirects back to /auth/login carrying the failure code so the form can
+ * render a human-readable message.
+ *
+ * The base origin MUST come from publicOrigin(), never from `new URL(req.url)`.
+ *
+ * WHY (2026-08 incident): behind an ALB/ELB, Next.js rebuilds req.url from the
+ * pod's own listen address, so `url.origin` is "http://localhost:3000". Every
+ * redirect built on it sent the user to THEIR OWN MACHINE at the end of an
+ * otherwise-successful OAuth round-trip: the flow started on the deployed app,
+ * authorised at GitHub, exchanged the code on the deployed app — and then
+ * 303'd to localhost:3000/auth/login. Setting APP_PUBLIC_URL did not help,
+ * because that value was only consulted when building `redirect_uri` for the
+ * provider, not for these redirects. The result looked like "GitHub login
+ * redirects me to localhost" with no error anywhere, and survived rebuilding
+ * OAuth apps, rotating secrets and re-checking every callback URL.
  */
-function failureResponse(code: string, message: string, requestUrl: URL, redirectUri?: string) {
+function failureResponse(
+  code: string,
+  message: string,
+  requestUrl: URL,
+  headers?: Headers,
+  redirectUri?: string,
+) {
   if (isMockMode()) {
     return NextResponse.json({ ok: false, code, message, redirectUri }, { status: 400 });
   }
-  const dest = new URL("/auth/login", requestUrl.origin);
+  const dest = new URL("/auth/login", publicOrigin(requestUrl.origin, headers));
   dest.searchParams.set("oauth_error", code);
   // For the two failure codes whose cause is a config mismatch rather than a
   // user error, pass the redirect_uri we actually sent so the login page can
