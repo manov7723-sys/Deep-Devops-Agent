@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: deep-devops-agent-frontend
-  namespace: dev
+  namespace: deep-devops-agent
   annotations:
     "kubernetes.io/ingress.class": "alb"
     "alb.ingress.kubernetes.io/scheme": "internet-facing"

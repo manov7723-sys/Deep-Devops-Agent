@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: deep-devops-agent-backend
-  namespace: dev
+  namespace: deep-devops-agent
   labels:
     app.kubernetes.io/name: deep-devops-agent-backend
     app.kubernetes.io/managed-by: deepagent
