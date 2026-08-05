@@ -470,8 +470,15 @@ export async function executeTool(
   name: string,
   input: unknown,
   ctx: ToolContext,
+  /**
+   * Tools that exist only for this request and aren't in ALL_TOOLS — currently
+   * the ones discovered from the project's MCP servers, which vary per project
+   * and per connector state. Checked BEFORE the static registry so a dynamic
+   * tool can't be shadowed by a same-named built-in.
+   */
+  extraTools?: Tool[],
 ): Promise<ToolExecuteResult<unknown>> {
-  const tool = getTool(name);
+  const tool = extraTools?.find((t) => t.name === name) ?? getTool(name);
   if (!tool) {
     return { ok: false, error: `Unknown tool "${name}".` };
   }

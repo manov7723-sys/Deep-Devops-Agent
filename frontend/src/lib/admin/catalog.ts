@@ -8,6 +8,7 @@ import type {
   McpAuthType,
   McpConnector,
   McpStatus,
+  McpTransport,
   Model,
   ModelProvider,
 } from "@prisma/client";
@@ -453,6 +454,13 @@ export type McpRow = {
   avgLatencyMs: number | null;
   credentialKeys: Array<{ key: string; isSecret: boolean }>;
   createdAt: string;
+  /** http/sse → remote server at `url`; stdio → subprocess `command args...`. */
+  transport: McpTransport;
+  url: string | null;
+  command: string | null;
+  args: string[];
+  /** Disabled connectors are never dialled or offered to the agent. */
+  enabled: boolean;
 };
 
 function mcpRow(
@@ -468,6 +476,11 @@ function mcpRow(
     avgLatencyMs: c.avgLatencyMs,
     credentialKeys: c.credentials.map((cr) => ({ key: cr.key, isSecret: cr.isSecret })),
     createdAt: c.createdAt.toISOString(),
+    transport: c.transport,
+    url: c.url,
+    command: c.command,
+    args: c.args,
+    enabled: c.enabled,
   };
 }
 
@@ -486,6 +499,12 @@ export type CreateMcpArgs = {
   status: McpStatus;
   avgCallsPerDay?: number;
   avgLatencyMs?: number;
+  /** http/sse reach a remote server; stdio spawns `command args...` locally. */
+  transport?: McpTransport;
+  url?: string;
+  command?: string;
+  args?: string[];
+  enabled?: boolean;
 };
 
 export async function createMcp(args: CreateMcpArgs): Promise<McpRow> {
@@ -497,6 +516,11 @@ export async function createMcp(args: CreateMcpArgs): Promise<McpRow> {
       status: args.status,
       avgCallsPerDay: args.avgCallsPerDay ?? null,
       avgLatencyMs: args.avgLatencyMs ?? null,
+      transport: args.transport ?? "http",
+      url: args.url ?? null,
+      command: args.command ?? null,
+      args: args.args ?? [],
+      enabled: args.enabled ?? true,
     },
     include: { credentials: { select: { key: true, isSecret: true } } },
   });
@@ -510,6 +534,11 @@ export type PatchMcpArgs = Partial<{
   status: McpStatus;
   avgCallsPerDay: number | null;
   avgLatencyMs: number | null;
+  transport: McpTransport;
+  url: string | null;
+  command: string | null;
+  args: string[];
+  enabled: boolean;
 }>;
 
 export type PatchMcpResult = { ok: true; connector: McpRow } | { ok: false; code: "not_found" };
@@ -526,6 +555,11 @@ export async function patchMcp(id: string, patch: PatchMcpArgs): Promise<PatchMc
       ...(patch.status !== undefined && { status: patch.status }),
       ...(patch.avgCallsPerDay !== undefined && { avgCallsPerDay: patch.avgCallsPerDay }),
       ...(patch.avgLatencyMs !== undefined && { avgLatencyMs: patch.avgLatencyMs }),
+      ...(patch.transport !== undefined && { transport: patch.transport }),
+      ...(patch.url !== undefined && { url: patch.url }),
+      ...(patch.command !== undefined && { command: patch.command }),
+      ...(patch.args !== undefined && { args: patch.args }),
+      ...(patch.enabled !== undefined && { enabled: patch.enabled }),
     },
     include: { credentials: { select: { key: true, isSecret: true } } },
   });

@@ -28,6 +28,7 @@ import {
   toolsForProject,
   type Tool,
 } from "./tools";
+import { mcpToolsForProject } from "./mcp/tools";
 
 export type ResolvedModel = {
   name: string;
@@ -1213,7 +1214,22 @@ export async function* runAgentTurnStream(args: {
   // makes the model respond faster.
   const clouds = await getProjectClouds(args.projectId);
   const gitProviders = await getProjectGitProviders(args.projectId);
-  const projectTools = toolsForProject({ clouds, gitProviders });
+  const builtInTools = toolsForProject({ clouds, gitProviders });
+
+  // MCP tools — discovered per request from the project's enabled connectors.
+  //
+  // They can't be part of the static registry: which servers exist, whether
+  // they're reachable, and what they expose all change without a deploy. So we
+  // dial them here, adapt them to the same `Tool` shape, and append. A failed
+  // discovery yields [] (see mcpToolsForProject) — the agent then runs with
+  // built-ins only rather than failing the turn.
+  const mcpTools = await mcpToolsForProject(args.projectId);
+  if (mcpTools.length) {
+    console.log(
+      `[mcp] ${mcpTools.length} tool(s) available to project ${args.projectId}: ${mcpTools.map((t) => t.name).join(", ")}`,
+    );
+  }
+  const projectTools = [...builtInTools, ...mcpTools];
 
   // Dispatch to the provider's tool-use loop. Each implementation yields the
   // same AgentStreamEvent shape, and the accumulator below survives across
@@ -1273,7 +1289,16 @@ type ProviderLoopArgs = {
   history: Array<{ role: "user" | "assistant"; text: string }>;
   projectId: string;
   userId: string;
-  /** Tools available for this project (already filtered to its connected clouds). */
+  /**
+   * Tools available for this project: the built-ins filtered to its connected
+   * clouds, PLUS any discovered from its enabled MCP connectors. MCP entries
+   * are only distinguishable by their `mcp__` name prefix — everything
+   * downstream treats them identically, which is the point of adapting them
+   * to the same `Tool` shape.
+   *
+   * This list is also what the dispatcher resolves names against, since MCP
+   * tools are per-request and never appear in the static ALL_TOOLS registry.
+   */
   tools: Tool[];
 };
 
@@ -1370,7 +1395,9 @@ async function* runAnthropicLoop(
     // for the next turn.
     const resultContent: ContentBlockParam[] = [];
     for (const tu of toolUseBlocks) {
-      const res = await executeTool(tu.name, tu.input, toolCtx);
+      // args.tools carries the MCP-discovered tools, which aren't in the
+      // static registry — pass it so the dispatcher can resolve them.
+      const res = await executeTool(tu.name, tu.input, toolCtx, args.tools);
       const payload = res.ok ? res.output : { error: res.error };
       const summary = res.ok
         ? `Returned ${JSON.stringify(res.output).length} bytes of JSON.`
@@ -1536,7 +1563,9 @@ async function* runOpenAILoop(
       }
       yield { type: "tool_call_input", toolUseId: tc.id, input };
 
-      const res = await executeTool(tc.name, input, toolCtx);
+      // Same as the Anthropic loop: args.tools includes the per-request MCP
+      // tools that aren't in the static registry.
+      const res = await executeTool(tc.name, input, toolCtx, args.tools);
       const payload = res.ok ? res.output : { error: res.error };
       const summary = res.ok
         ? `Returned ${JSON.stringify(res.output).length} bytes of JSON.`

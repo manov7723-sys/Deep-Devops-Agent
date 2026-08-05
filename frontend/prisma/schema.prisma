@@ -283,6 +283,18 @@ enum McpAuthType {
   credential
 }
 
+/**
+ * MCP transport. `http` (Streamable HTTP) and `sse` talk to a REMOTE server
+ * over the network — no binaries in the image. `stdio` spawns a local
+ * subprocess and therefore requires that binary to be installed wherever the
+ * app runs.
+ */
+enum McpTransport {
+  http
+  sse
+  stdio
+}
+
 model User {
   id                    String      @id @default(uuid(7)) @db.Uuid
   email                 String      @unique
@@ -2010,6 +2022,26 @@ model McpConnector {
   avgCallsPerDay Int? // parsed from "84.2k / day"
   avgLatencyMs   Int? // parsed from "120ms"
   createdAt      DateTime    @default(now())
+
+  // ── How to actually reach this server ────────────────────────────────
+  // Until these existed the MCP tables stored metadata + credentials but no
+  // way to CONNECT, so the admin UI was a registry the agent could never use.
+  //
+  //   transport = http | sse → `url` is the server endpoint. Nothing extra is
+  //     needed in the container image, which is what makes MCP usable from a
+  //     deployed pod (see the 2026-08 "aws CLI is not installed" incident).
+  //   transport = stdio      → `command` + `args` are spawned as a subprocess.
+  //     The binary MUST exist in the image, so this is really only viable for
+  //     local development or a purpose-built image.
+  transport McpTransport @default(http)
+  /** Endpoint for http/sse transports, e.g. https://mcp.example.com/sse */
+  url       String?
+  /** Executable for stdio transport, e.g. "npx" or "uvx". */
+  command   String?
+  /** Argv for stdio transport, e.g. ["-y","@some/mcp-server"]. */
+  args      String[]     @default([])
+  /** Master switch — disabled connectors are never dialled or listed. */
+  enabled   Boolean      @default(true)
 
   oauth              McpOAuth?
   credentials        McpCredential[]

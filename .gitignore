@@ -12,7 +12,12 @@
 next-env.d.ts
 
 # Secrets / env — NEVER commit these
-
+# `**/.env` covers the bare file; `**/.env.*` covers .env.local/.production/etc.
+# Both lines are required — `**/.env.*` does NOT match a file named exactly
+# ".env". That line was dropped in a 2026-08 merge, which left frontend/.env
+# (API keys, OAuth client secret, DATABASE_URL, seed admin password) untracked
+# but no longer ignored — one `git add -A` from being published.
+**/.env
 **/.env.*
 !**/.env.example
 

@@ -108,14 +108,57 @@ export const McpSummary = z.object({
 });
 export type McpSummary = z.infer<typeof McpSummary>;
 
-export const CreateMcpRequest = z.object({
-  name: z.string().trim().min(1).max(80),
-  description: z.string().trim().min(1).max(280),
-  authType: McpAuthTypeApi.default("none"),
-  status: McpStatusApi.default("ok"),
-  avgCallsPerDay: z.number().int().min(0).optional(),
-  avgLatencyMs: z.number().int().min(0).optional(),
-});
+/**
+ * Transport decides which connection field matters:
+ *   http/sse → `url` (remote server; nothing needed in the container image)
+ *   stdio    → `command` + `args` (spawns a subprocess; the binary must exist
+ *              wherever the app runs, so it's unsuitable for a stock image)
+ */
+export const McpTransportApi = z.enum(["http", "sse", "stdio"]);
+
+/**
+ * A connector with no reachable endpoint is a row the agent can never use, so
+ * the transport-appropriate field is required rather than optional. This is
+ * enforced here rather than at dial time because a validation error at create
+ * is fixable; a silent no-op at agent runtime is not.
+ */
+const withTransportTarget = <T extends z.ZodTypeAny>(schema: T) =>
+  schema.superRefine((d: Record<string, unknown>, ctx: z.RefinementCtx) => {
+    const t = d.transport;
+    if (t === "stdio") {
+      if (!d.command) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["command"],
+          message: "command is required when transport is stdio.",
+        });
+      }
+    } else if (t === "http" || t === "sse") {
+      if (!d.url) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["url"],
+          message: `url is required when transport is ${String(t)}.`,
+        });
+      }
+    }
+  });
+
+export const CreateMcpRequest = withTransportTarget(
+  z.object({
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().min(1).max(280),
+    authType: McpAuthTypeApi.default("none"),
+    status: McpStatusApi.default("ok"),
+    avgCallsPerDay: z.number().int().min(0).optional(),
+    avgLatencyMs: z.number().int().min(0).optional(),
+    transport: McpTransportApi.default("http"),
+    url: z.string().trim().url().optional(),
+    command: z.string().trim().min(1).optional(),
+    args: z.array(z.string()).default([]),
+    enabled: z.boolean().default(true),
+  }),
+);
 export type CreateMcpRequest = z.infer<typeof CreateMcpRequest>;
 
 export const PatchMcpRequest = z
@@ -126,6 +169,11 @@ export const PatchMcpRequest = z
     status: McpStatusApi.optional(),
     avgCallsPerDay: z.number().int().min(0).nullable().optional(),
     avgLatencyMs: z.number().int().min(0).nullable().optional(),
+    transport: McpTransportApi.optional(),
+    url: z.string().trim().url().nullable().optional(),
+    command: z.string().trim().min(1).nullable().optional(),
+    args: z.array(z.string()).optional(),
+    enabled: z.boolean().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: "At least one field is required" });
 export type PatchMcpRequest = z.infer<typeof PatchMcpRequest>;
