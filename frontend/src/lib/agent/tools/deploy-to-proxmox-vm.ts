@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/db/prisma";
 import { getOrCreateProjectDeployKeypair } from "@/lib/devops/deploy-keypair";
 import { setGithubSecretTool } from "./set-github-secret";
 import { generateProxmoxDeployWorkflowTool } from "./generate-proxmox-deploy-workflow";
@@ -109,12 +110,28 @@ export const deployToProxmoxVmTool: Tool<Input, Output> = {
     );
     if (!gen.ok) return { ok: false, error: `Generation failed: ${gen.error}` };
 
-    // 4. Push files in a single PR — openPullRequest=true only on the first
-    //    write so we end up with one PR that carries all three files.
-    const branch = `deploy/proxmox-${input.appName}`;
+    // 4. DIRECT-COMMIT the generated files to the repo's default branch — no
+    //    side branch, no PR. Same policy as deploy_my_app and every
+    //    provision_* tool: a `deploy/*` branch left unmerged hides the
+    //    workflow from GitHub Actions (which only auto-registers workflows on
+    //    the default branch) and from every tool that reads the default ref.
+    const repoRow = await prisma.repo.findFirst({
+      where: {
+        fullName: input.repoFullName,
+        deletedAt: null,
+        projectRepos: { some: { projectId: ctx.projectId } },
+      },
+      select: { defaultBranch: true },
+    });
+    if (!repoRow) {
+      return {
+        ok: false,
+        error: `Repo "${input.repoFullName}" isn't attached to this project — attach it first.`,
+      };
+    }
+    const branch = repoRow.defaultBranch;
     const committed: string[] = [];
-    let pullRequest: { number: number; url: string } | undefined;
-    let first = true;
+    const pullRequest: { number: number; url: string } | undefined = undefined;
     for (const [path, content] of Object.entries(gen.output.files)) {
       const res = await writeRepoFileTool.execute(
         {
@@ -123,30 +140,18 @@ export const deployToProxmoxVmTool: Tool<Input, Output> = {
           content,
           branch,
           message: `Wire up Proxmox deploy for ${input.appName}`,
-          openPullRequest: first,
-          pullRequestBody: [
-            `Deploys \`${input.appName}\` to Proxmox VM \`${vmHost}\` on every push to \`${input.branch ?? "main"}\`.`,
-            "",
-            "Files:",
-            ...Object.keys(gen.output.files).map((p) => `- \`${p}\``),
-            "",
-            "Repo secrets already set: `VM_HOST`, `VM_SSH_KEY`.",
-          ].join("\n"),
         },
         ctx,
       );
       if (!res.ok) return { ok: false, error: `Push failed on ${path}: ${res.error}` };
       committed.push(path);
-      if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
-      first = false;
     }
 
     const bits: string[] = [
       `Wired Proxmox deploy for "${input.appName}" → ${vmHost}:${input.port}.`,
-      `Committed ${committed.length} files.`,
+      `Committed ${committed.length} files directly to ${branch}.`,
+      `Repo secrets set: ${secretsSet.join(", ")}.`,
     ];
-    if (pullRequest) bits.push(`PR #${pullRequest.number}: ${pullRequest.url}`);
-    bits.push(`Repo secrets set: ${secretsSet.join(", ")}.`);
 
     return {
       ok: true,

@@ -1002,6 +1002,12 @@ export type AppSecretsInput = {
   secretName?: string;
   /** `.env`-style text, KEY=value per line. Parsed server-side; never stored. */
   envText: string;
+  /**
+   * Merge into the Secret's existing keys rather than replacing it. Send true
+   * from per-field forms (which only know their own fields); leave false for
+   * the paste-your-whole-.env flow, where the text IS the complete state.
+   */
+  merge?: boolean;
 };
 
 export type AppSecretsResult = {

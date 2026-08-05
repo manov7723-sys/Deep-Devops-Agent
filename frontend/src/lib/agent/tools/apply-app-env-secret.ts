@@ -37,6 +37,7 @@ export const applyAppEnvSecretTool: Tool<
     namespace: string;
     envText: string;
     secretName?: string;
+    replaceAll?: boolean;
   },
   {
     secretName: string;
@@ -70,6 +71,11 @@ export const applyAppEnvSecretTool: Tool<
       secretName: {
         type: "string",
         description: "K8s Secret name. Defaults to 'app-env'. Match what your Deployments' envFrom references (that's 'app-env' when deploy_my_app generated them).",
+      },
+      replaceAll: {
+        type: "boolean",
+        description:
+          "DANGEROUS — deletes every key not present in envText. Default false (merge: keys you don't mention keep their current values). Only pass true when the user explicitly restated their COMPLETE app config and wants stale keys removed. Setting one key with replaceAll=true silently wipes the rest (that's how a lone APP_PUBLIC_URL write destroyed the GitHub OAuth credentials in the 2026-08 incident).",
       },
     },
     required: ["envKey", "namespace", "envText"],
@@ -109,6 +115,14 @@ export const applyAppEnvSecretTool: Tool<
         namespace,
         secretName,
         entries,
+        // MERGE by default (opt out with replaceAll). The agent is almost
+        // always adding or updating a FEW keys in response to a specific
+        // request ("set SESSION_COOKIE_SECURE=false"), not restating the app's
+        // entire config. Replace semantics silently deleted every key the
+        // caller didn't mention — that is how a lone APP_PUBLIC_URL write
+        // wiped GITHUB_OAUTH_CLIENT_ID/_SECRET and broke sign-in with no
+        // error naming the cause (2026-08 incident).
+        merge: input.replaceAll !== true,
       });
       if (!applied.ok) return { ok: false, error: applied.error };
 

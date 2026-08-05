@@ -634,11 +634,58 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
 // Paste, submit, done: the Secret is applied, wired via envFrom, and the pods
 // are rolled — because values are read at container start and never reload.
 
+/**
+ * The config keys almost every deployed app needs, rendered as their own
+ * labeled boxes instead of buried in a paste-your-.env textarea.
+ *
+ * WHY (2026-08 incident): a blank textarea assumes the operator already knows
+ * WHICH keys matter. In practice a deploy would come up "healthy" and then
+ * fail at sign-in because APP_PUBLIC_URL was unset (OAuth redirect_uri became
+ * the pod's origin) or APP_SECRET_KEY was missing (TOTP setup 500s). Naming
+ * the fields turns tribal knowledge into a form. `extra` still accepts
+ * anything app-specific.
+ */
+const WELL_KNOWN_APP_KEYS: Array<{
+  key: string;
+  label: string;
+  hint: string;
+  placeholder: string;
+  secret?: boolean;
+}> = [
+  {
+    key: "APP_PUBLIC_URL",
+    label: "Public URL",
+    hint: "The URL users actually type. Behind a load balancer the app can't infer this — leave it unset and OAuth sends the pod's own origin as redirect_uri, which the provider rejects. No trailing slash.",
+    placeholder: "http://my-app-1234.us-east-1.elb.amazonaws.com",
+  },
+  {
+    key: "GITHUB_OAUTH_CLIENT_ID",
+    label: "GitHub OAuth client ID",
+    hint: "From the OAuth App whose Authorization callback URL is <public URL>/api/v1/auth/oauth/github/callback. Each environment needs its OWN app — one app holds only one callback URL.",
+    placeholder: "Ov23li...",
+  },
+  {
+    key: "GITHUB_OAUTH_CLIENT_SECRET",
+    label: "GitHub OAuth client secret",
+    hint: "Shown once by GitHub when generated. A stale secret fails as 'invalid_client', which reads like a wrong client ID.",
+    placeholder: "••••••••",
+    secret: true,
+  },
+  {
+    key: "APP_SECRET_KEY",
+    label: "App encryption key",
+    hint: "base64 of 32 random bytes — generate with: openssl rand -base64 32. Encrypts TOTP secrets, OAuth tokens and stored credentials. Changing it invalidates everything previously encrypted, so set it once and keep it.",
+    placeholder: "base64(32 bytes)",
+    secret: true,
+  },
+];
+
 function AppSecretsPanel({ slug }: { slug: string }) {
   const { data: envs } = useProjectEnvs(slug);
   const [envKey, setEnvKey] = useState<string>("");
   const [namespace, setNamespace] = useState<string>("default");
   const [secretName, setSecretName] = useState<string>("app-env");
+  const [fields, setFields] = useState<Record<string, string>>({});
   const [envText, setEnvText] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<null | {
@@ -662,13 +709,15 @@ function AppSecretsPanel({ slug }: { slug: string }) {
   }));
 
   // Count locally so the button can state exactly what will be written before
-  // anything is sent.
-  const pairCount = envText
+  // anything is sent. Named fields + any extra pasted lines.
+  const filledFields = WELL_KNOWN_APP_KEYS.filter((f) => (fields[f.key] ?? "").trim().length > 0);
+  const extraPairCount = envText
     .split(/\r?\n/)
     .filter((l) => {
       const t = l.trim();
       return t && !t.startsWith("#") && /^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/.test(t);
     }).length;
+  const pairCount = filledFields.length + extraPairCount;
 
   const ready = !!envKey && !!namespace.trim() && !!secretName.trim() && pairCount > 0;
 
@@ -676,11 +725,25 @@ function AppSecretsPanel({ slug }: { slug: string }) {
     if (!ready) return;
     setError(null);
     try {
+      // Named fields first, then the free-text block — later lines win on a
+      // duplicate key, so an explicit override in "Additional variables"
+      // beats the same key typed into a box above.
+      const composed = [
+        ...filledFields.map((f) => `${f.key}=${(fields[f.key] ?? "").trim()}`),
+        envText,
+      ]
+        .filter((s) => s.trim().length > 0)
+        .join("\n");
       const res = await submit.mutateAsync({
         envKey,
         namespace: namespace.trim(),
         secretName: secretName.trim(),
-        envText,
+        envText: composed,
+        // MERGE, never replace. This form only knows about the fields it
+        // renders; replacing would silently delete every other key already in
+        // the Secret (that is exactly how a lone APP_PUBLIC_URL write wiped
+        // the GitHub OAuth credentials in the 2026-08 incident).
+        merge: true,
       });
       setDone({
         summary: res.summary,
@@ -688,8 +751,10 @@ function AppSecretsPanel({ slug }: { slug: string }) {
         skippedLines: res.skippedLines,
         localhostKeys: res.localhostKeys,
       });
-      // Clear the pasted secrets from component state once applied — no reason
-      // to keep them sitting in memory after they've reached the cluster.
+      // Clear the entered secrets from component state once applied — no
+      // reason to keep them sitting in memory after they've reached the
+      // cluster.
+      setFields({});
       setEnvText("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not write app secrets.");
@@ -699,7 +764,7 @@ function AppSecretsPanel({ slug }: { slug: string }) {
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub="Paste your app's .env — signing keys, API keys, anything it reads from the environment. Written as a Kubernetes Secret, wired into the namespace's Deployments, and the pods are rolled so they pick it up.">
+        <Block.Title sub="Fill in the boxes your app needs — the common ones are named below, anything else goes in Additional variables. Written as a Kubernetes Secret, wired into the namespace's Deployments, and the pods are rolled so they pick it up. Values are merged: keys you leave blank keep whatever is already set.">
           App configuration secrets
         </Block.Title>
       </Block.Header>
@@ -781,17 +846,55 @@ function AppSecretsPanel({ slug }: { slug: string }) {
                 </Field>
               </div>
 
+              {/* One box per well-known key. Blank boxes are skipped entirely,
+                  so this form can be used to set a single value without
+                  disturbing anything else already in the Secret. */}
+              <div className="col gap-3">
+                {WELL_KNOWN_APP_KEYS.map((f) => (
+                  <Field key={f.key} label={f.label} hint={f.hint}>
+                    <Input
+                      value={fields[f.key] ?? ""}
+                      onChange={(e) =>
+                        setFields((prev) => ({ ...prev, [f.key]: e.target.value }))
+                      }
+                      className="mono"
+                      type={f.secret ? "password" : "text"}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder={f.placeholder}
+                    />
+                  </Field>
+                ))}
+              </div>
+
+              {/* The GitHub callback URL is derived, not typed — showing it
+                  removes the most common OAuth misconfiguration (hand-built
+                  URL with a typo, or pointing at the wrong environment). */}
+              {(fields.APP_PUBLIC_URL ?? "").trim() && (
+                <div
+                  className="col gap-1"
+                  style={{ fontSize: 12.5, padding: "8px 10px", border: "1px solid var(--border, #ddd)", borderRadius: 6 }}
+                >
+                  <span className="muted">
+                    Paste this as the <b>Authorization callback URL</b> on your GitHub OAuth App:
+                  </span>
+                  <span className="mono" style={{ wordBreak: "break-all" }}>
+                    {(fields.APP_PUBLIC_URL ?? "").trim().replace(/\/+$/, "")}
+                    /api/v1/auth/oauth/github/callback
+                  </span>
+                </div>
+              )}
+
               <Field
-                label="Environment variables"
-                hint="One KEY=value per line. Comments (#) and blank lines are ignored; surrounding quotes are stripped. Replaces the whole Secret, so paste the complete set."
-                required
+                label="Additional variables"
+                hint="Anything else your app reads from the environment — one KEY=value per line. Comments (#) and blanks are ignored; surrounding quotes are stripped. Merged into the Secret alongside the fields above; keys you don't mention are left untouched."
               >
                 <Textarea
                   value={envText}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEnvText(e.target.value)}
                   className="mono"
-                  rows={10}
-                  placeholder={"APP_SECRET_KEY=...\nJWT_SIGNING_KEY=...\nSTRIPE_SECRET_KEY=...\n# DATABASE_URL is managed by the RDS connect above"}
+                  rows={6}
+                  placeholder={"JWT_SIGNING_KEY=...\nSTRIPE_SECRET_KEY=...\n# DATABASE_URL is managed by the database connect above"}
                 />
               </Field>
 

@@ -60,11 +60,22 @@ const OAUTH_ERROR_COPY: Record<string, string> = {
   bad_token: "The provider returned an invalid token. Try signing in again.",
 };
 
-function describeOauthError(code: string | null | undefined): string | null {
+function describeOauthError(
+  code: string | null | undefined,
+  redirectUri?: string | null,
+): string | null {
   if (!code) return null;
-  return (
-    OAUTH_ERROR_COPY[code] ?? "Sign-in with that provider failed. Please try again or use email."
-  );
+  const base =
+    OAUTH_ERROR_COPY[code] ?? "Sign-in with that provider failed. Please try again or use email.";
+  // For config-mismatch failures, name the EXACT redirect_uri we sent. Without
+  // it the operator has nothing to diff against the provider's settings page,
+  // and the two real causes (APP_PUBLIC_URL unset behind a proxy, or one OAuth
+  // App reused across environments — it can only hold ONE callback URL) are
+  // invisible from the browser. (2026-08 incident.)
+  if (redirectUri && (code === "redirect_uri_mismatch" || code === "invalid_client")) {
+    return `${base} This site sent redirect_uri=${redirectUri} — that exact URL must be the app's Authorization callback URL at the provider. Note each environment (local vs deployed) needs its OWN OAuth App, since an app can only register one callback URL.`;
+  }
+  return base;
 }
 
 export function LoginClient() {
@@ -72,7 +83,7 @@ export function LoginClient() {
   const sp = useSearchParams();
   const next = safeNext(sp.get("next"));
   const prefillEmail = sp.get("email") ?? "";
-  const oauthError = describeOauthError(sp.get("oauth_error"));
+  const oauthError = describeOauthError(sp.get("oauth_error"), sp.get("oauth_redirect_uri"));
   const [serverError, setServerError] = useState<string | null>(null);
 
   const form = useForm({

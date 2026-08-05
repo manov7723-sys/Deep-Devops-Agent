@@ -30,6 +30,13 @@ const Body = z.object({
     .default("app-env"),
   /** `.env`-style text: KEY=value per line. */
   envText: z.string().min(1, "Paste at least one KEY=value line."),
+  /**
+   * Merge into the Secret's existing keys instead of replacing it wholesale.
+   * The per-field form sends true (it only knows about the fields it renders);
+   * the paste-your-whole-.env textarea sends false, since that IS the complete
+   * desired state and removing a key must stay possible. See applyAppSecret.
+   */
+  merge: z.boolean().optional().default(false),
 });
 
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string }> }) {
@@ -91,6 +98,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       namespace: body.namespace,
       secretName: body.secretName,
       entries,
+      merge: body.merge,
     });
     if (!applied.ok) {
       return NextResponse.json(

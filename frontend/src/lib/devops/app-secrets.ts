@@ -226,8 +226,25 @@ export async function applyAppSecret(args: {
   namespace: string;
   secretName: string;
   entries: ParsedEnv[];
+  /**
+   * MERGE the given entries into the Secret's existing keys instead of
+   * replacing the whole thing.
+   *
+   * WHY THIS EXISTS (2026-08 incident): the default replace semantics are
+   * right for "paste your whole .env" (it's the complete desired state, and
+   * removing a key must be possible). They are catastrophic for a form that
+   * writes ONE key — setting APP_PUBLIC_URL alone silently deleted the
+   * GITHUB_OAUTH_* keys that were already there, and the app came back up
+   * with OAuth broken and no error naming the cause.
+   *
+   * Callers writing a SUBSET (per-field forms, agent tools adding one key)
+   * must pass merge: true. Callers writing the COMPLETE set (the paste-your-
+   * .env textarea) leave it false.
+   */
+  merge?: boolean;
 }): Promise<{ ok: true; keys: string[] } | { ok: false; error: string }> {
-  const { kubeconfigPath, execEnv, namespace, secretName, entries } = args;
+  const { kubeconfigPath, execEnv, namespace, secretName, merge } = args;
+  let entries = args.entries;
   const { runStage } = await import("@/lib/runner/exec");
   const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
   const { join } = await import("node:path");
@@ -235,6 +252,35 @@ export async function applyAppSecret(args: {
   const env = { ...execEnv, KUBECONFIG: kubeconfigPath };
 
   if (entries.length === 0) return { ok: false, error: "No key=value pairs found in the input." };
+
+  // Merge mode: read what's already in the Secret and layer the new entries
+  // on top, so unmentioned keys survive. A missing Secret (first write) just
+  // means there's nothing to merge — proceed with the entries as-is.
+  if (merge) {
+    const existing = await runStage({
+      command: "kubectl",
+      args: ["get", "secret", secretName, "-n", namespace, "-o", "json"],
+      cwd: process.cwd(),
+      env,
+      timeoutMs: 30_000,
+      maxBufferBytes: 4 * 1024 * 1024,
+    });
+    if (existing.exitCode === 0) {
+      try {
+        const parsed = JSON.parse(existing.stdout) as { data?: Record<string, string> };
+        const incoming = new Set(entries.map((e) => e.key));
+        const carried: ParsedEnv[] = Object.entries(parsed.data ?? {})
+          .filter(([k]) => !incoming.has(k))
+          .map(([k, v]) => ({ key: k, value: Buffer.from(v, "base64").toString("utf8") }));
+        entries = [...carried, ...entries];
+      } catch {
+        return {
+          ok: false,
+          error: `Could not parse the existing Secret "${secretName}" to merge into it. Aborting rather than risk overwriting keys.`,
+        };
+      }
+    }
+  }
 
   const dir = await mkdtemp(join(tmpdir(), "dda-appsecret-"));
   try {

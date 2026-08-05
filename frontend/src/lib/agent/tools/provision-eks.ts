@@ -146,8 +146,42 @@ export const provisionEksTool: Tool<Input, Output> = {
     const committed: string[] = [];
     if (wantsPush) {
       const base = (input.path ?? `terraform/eks/${input.name}`).replace(/^\/+|\/+$/g, "");
-      const branch = `infra/eks-${input.name}`;
-      let first = true;
+
+      // COMMIT DIRECTLY TO THE REPO'S DEFAULT BRANCH — no PR, no infra/eks-<name>
+      // side branch. Aligns with deploy_my_app's commitMode='direct' default.
+      //
+      // WHY (2026-08 incident):
+      // The previous shape wrote to a branch `infra/eks-<name>` and opened a PR,
+      // then immediately called startTerraformRun with the in-memory files. The
+      // apply ran fine, but the PR was left open — so the .tf files existed
+      // only on that branch, never on main. Consequences:
+      //   • heal_terraform_state (and any subsequent apply/replan) reads from
+      //     the default branch by default → can't find the files → agent has
+      //     to ask the user "where are the tf files?" every single retry.
+      //   • If the user later merges/deletes the branch, or someone
+      //     force-pushes, the state can silently drift.
+      //   • A "generate Terraform" tool that requires a human PR-review step
+      //     adds no safety here — the files come from a vetted deterministic
+      //     blueprint (buildEksTerraform), and production changes are already
+      //     gated by request_infra_approval.
+      // Direct commit puts the .tf files on main immediately, where every
+      // downstream tool expects to find them.
+      const repo = await prisma.repo.findFirst({
+        where: {
+          fullName: input.repoFullName!,
+          deletedAt: null,
+          projectRepos: { some: { projectId: ctx.projectId } },
+        },
+        select: { defaultBranch: true },
+      });
+      if (!repo) {
+        return {
+          ok: false,
+          error: `Repo "${input.repoFullName}" isn't attached to this project — attach it first, then re-run provision_eks.`,
+        };
+      }
+      const branch = repo.defaultBranch;
+
       for (const [rel, content] of Object.entries(files)) {
         const filename = rel.split("/").pop() || rel;
         const res = await writeRepoFileTool.execute(
@@ -157,16 +191,14 @@ export const provisionEksTool: Tool<Input, Output> = {
             content,
             branch,
             message: `Add EKS cluster ${input.name} (Terraform)`,
-            openPullRequest: first,
-            pullRequestBody: `Deterministic EKS blueprint for \`${input.name}\` in ${region}.`,
+            // openPullRequest omitted — direct-commit path. writeRepoFileTool
+            // allows direct commits to the default branch when this is false.
           },
           ctx,
         );
         if (!res.ok)
           return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
-        if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
-        first = false;
       }
     }
 

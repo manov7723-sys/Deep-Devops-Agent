@@ -256,8 +256,31 @@ export const provisionAksTool: Tool<Input, Output> = {
     const committed: string[] = [];
     if (wantsPush) {
       const base = (input.path ?? `terraform/aks/${input.name}`).replace(/^\/+|\/+$/g, "");
-      const branch = `infra/aks-${input.name}`;
-      let first = true;
+
+      // DIRECT-COMMIT to the repo's default branch — no side branch, no PR.
+      // See the same block in provision-eks.ts for the full rationale: files
+      // stranded on an unmerged `infra/*` branch are invisible to every
+      // downstream tool (heal_terraform_state, re-plan, re-apply), which all
+      // read the default branch, so each retry had to ask the user where the
+      // .tf files were. Safety is unchanged: applies still go through
+      // request_infra_approval, and the HCL comes from a vetted deterministic
+      // blueprint, so a human PR review adds nothing here.
+      const repo = await prisma.repo.findFirst({
+        where: {
+          fullName: input.repoFullName!,
+          deletedAt: null,
+          projectRepos: { some: { projectId: ctx.projectId } },
+        },
+        select: { defaultBranch: true },
+      });
+      if (!repo) {
+        return {
+          ok: false,
+          error: `Repo "${input.repoFullName}" isn't attached to this project — attach it first, then re-run provision_aks.`,
+        };
+      }
+      const branch = repo.defaultBranch;
+
       for (const [rel, content] of Object.entries(files)) {
         const filename = rel.split("/").pop() || rel;
         const res = await writeRepoFileTool.execute(
@@ -267,16 +290,12 @@ export const provisionAksTool: Tool<Input, Output> = {
             content,
             branch,
             message: `Add AKS cluster ${input.name} (Terraform)`,
-            openPullRequest: first,
-            pullRequestBody: `Deterministic AKS blueprint for \`${input.name}\` in ${spec.location} (resource group \`${spec.resourceGroup}\`).`,
           },
           ctx,
         );
         if (!res.ok)
           return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
-        if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
-        first = false;
       }
     }
 

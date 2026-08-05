@@ -69,6 +69,20 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   const origin = publicOrigin(req.headers.get("origin") ?? reqUrl.origin);
   const authorizeUrl = buildAuthorizeUrl({ provider, origin, state });
 
+  // Log the EXACT redirect_uri + client_id we're about to send. A provider
+  // rejecting the flow ("redirect_uri is not associated with this
+  // application", "invalid_client") tells you nothing about which value was
+  // wrong, and the two most common causes are invisible from the browser:
+  //   • APP_PUBLIC_URL unset behind a proxy → we send the pod/localhost origin
+  //     instead of the public one the OAuth App has registered
+  //   • the same OAuth App reused across environments — it can only carry ONE
+  //     callback URL, so whichever env isn't registered always fails
+  // Printing both here turns "it redirects to the home page" into a one-line
+  // diff against the provider's settings page. (2026-08 incident.)
+  console.log(
+    `[oauth/start] provider=${providerId} client_id=${provider.clientId} redirect_uri=${origin}/api/v1/auth/oauth/${providerId}/callback app_public_url=${process.env.APP_PUBLIC_URL ?? "(unset — inferred from request)"}`,
+  );
+
   const jar = await cookies();
   jar.set(NONCE_COOKIE, nonce, {
     httpOnly: true,

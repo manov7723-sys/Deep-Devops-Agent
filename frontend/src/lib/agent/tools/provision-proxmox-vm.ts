@@ -199,8 +199,25 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
     const committed: string[] = [];
     if (wantsPush) {
       const base = (input.path ?? `terraform/proxmox/${input.name}`).replace(/^\/+|\/+$/g, "");
-      const branch = `infra/proxmox-vm-${input.name}`;
-      let first = true;
+
+      // DIRECT-COMMIT to the repo's default branch — no side branch, no PR.
+      // See provision-eks.ts for the full rationale.
+      const repo = await prisma.repo.findFirst({
+        where: {
+          fullName: input.repoFullName!,
+          deletedAt: null,
+          projectRepos: { some: { projectId: ctx.projectId } },
+        },
+        select: { defaultBranch: true },
+      });
+      if (!repo) {
+        return {
+          ok: false,
+          error: `Repo "${input.repoFullName}" isn't attached to this project — attach it first, then re-run provision_proxmox_vm.`,
+        };
+      }
+      const branch = repo.defaultBranch;
+
       for (const [rel, content] of Object.entries(files)) {
         const filename = rel.split("/").pop() || rel;
         const res = await writeRepoFileTool.execute(
@@ -210,16 +227,12 @@ export const provisionProxmoxVmTool: Tool<Input, Output> = {
             content,
             branch,
             message: `Add Proxmox VM ${input.name} (Terraform)`,
-            openPullRequest: first,
-            pullRequestBody: `Terraform for Proxmox VM \`${input.name}\` on node ${spec.node}.`,
           },
           ctx,
         );
         if (!res.ok)
           return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
-        if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
-        first = false;
       }
     }
 

@@ -32,6 +32,7 @@ import { ensureWorkloadReachableTool } from "./ensure-workload-reachable";
 import { unstickTerminatingNamespaceTool } from "./unstick-terminating-namespace";
 import { inspectPodEnvTool } from "./inspect-pod-env";
 import { diagnoseDeployedAppTool } from "./diagnose-deployed-app";
+import { healTerraformStateTool } from "./heal-terraform-state";
 import { listEcrReposTool } from "./list-ecr-repos";
 import { analyzeAppServicesTool } from "./analyze-app-services";
 import { listRepoBranchesTool } from "./list-repo-branches";
@@ -290,6 +291,10 @@ export const ALL_TOOLS: Tool[] = [
   // Composite health check: pod ready + env vars present + URL reachable + DB reachable + log tail.
   // Use whenever the user says "the app isn't working" instead of asking them to open DevTools.
   diagnoseDeployedAppTool,
+  // Terraform apply self-heal: parses "resource already exists" errors from a failed
+  // apply and generates a Terraform 1.5+ import.tf that adopts orphaned resources on
+  // the next apply. Kills the manual `terraform import` loop for state-drift errors.
+  healTerraformStateTool,
   // Registry + service analysis for the deploy flow (list ECR repos, detect frontend/backend)
   listEcrReposTool,
   analyzeAppServicesTool,

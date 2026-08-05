@@ -130,13 +130,29 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   const origin = publicOrigin(req.headers.get("origin") ?? url.origin);
   const ex = await exchange(provider, code, origin);
   if (!ex.ok) {
+    const redirectUri = `${origin}/api/v1/auth/oauth/${providerId}/callback`;
+    // Record WHICH redirect_uri + client_id were rejected. `invalid_client`
+    // and `redirect_uri_mismatch` are indistinguishable from the browser, and
+    // both have the same two root causes: a stale client secret, or the same
+    // OAuth App reused across environments (one app = one callback URL, so
+    // whichever env isn't registered always fails). See [oauth/start] for the
+    // matching outbound log. (2026-08 incident.)
+    console.error(
+      `[oauth/callback] EXCHANGE FAILED provider=${providerId} reason=${ex.code} client_id=${provider.clientId} redirect_uri=${redirectUri} app_public_url=${process.env.APP_PUBLIC_URL ?? "(unset — inferred from request)"} — verify this exact redirect_uri is the Authorization callback URL on the provider's app settings, and that the client secret in this environment is the CURRENT one.`,
+    );
     await audit({
       action: "auth.oauth.failed",
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
-      metadata: { provider: providerId, reason: ex.code, message: ex.message },
+      metadata: {
+        provider: providerId,
+        reason: ex.code,
+        message: ex.message,
+        redirectUri,
+        clientId: provider.clientId,
+      },
     });
-    return failureResponse(ex.code, ex.message, url);
+    return failureResponse(ex.code, ex.message, url, redirectUri);
   }
 
   // Attach-to-current-user mode. When the caller is already signed in (e.g.
@@ -318,11 +334,18 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
  * can render a human-readable message. The base origin is taken from the
  * request URL so the redirect works in any deployment, not just localhost.
  */
-function failureResponse(code: string, message: string, requestUrl: URL) {
+function failureResponse(code: string, message: string, requestUrl: URL, redirectUri?: string) {
   if (isMockMode()) {
-    return NextResponse.json({ ok: false, code, message }, { status: 400 });
+    return NextResponse.json({ ok: false, code, message, redirectUri }, { status: 400 });
   }
   const dest = new URL("/auth/login", requestUrl.origin);
   dest.searchParams.set("oauth_error", code);
+  // For the two failure codes whose cause is a config mismatch rather than a
+  // user error, pass the redirect_uri we actually sent so the login page can
+  // show it. Without this the user sees a generic "ask an admin" message with
+  // nothing to compare against the provider's settings page.
+  if (redirectUri && (code === "redirect_uri_mismatch" || code === "invalid_client")) {
+    dest.searchParams.set("oauth_redirect_uri", redirectUri);
+  }
   return NextResponse.redirect(dest, 303);
 }

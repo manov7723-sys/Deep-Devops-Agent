@@ -232,8 +232,26 @@ export const provisionGkeTool: Tool<Input, Output> = {
     const committed: string[] = [];
     if (wantsPush) {
       const base = (input.path ?? `terraform/gke/${input.name}`).replace(/^\/+|\/+$/g, "");
-      const branch = `infra/gke-${input.name}`;
-      let first = true;
+
+      // DIRECT-COMMIT to the repo's default branch — no side branch, no PR.
+      // See provision-eks.ts for the full rationale: `infra/*` branches left
+      // unmerged strand the .tf files where no downstream tool can find them.
+      const repo = await prisma.repo.findFirst({
+        where: {
+          fullName: input.repoFullName!,
+          deletedAt: null,
+          projectRepos: { some: { projectId: ctx.projectId } },
+        },
+        select: { defaultBranch: true },
+      });
+      if (!repo) {
+        return {
+          ok: false,
+          error: `Repo "${input.repoFullName}" isn't attached to this project — attach it first, then re-run provision_gke.`,
+        };
+      }
+      const branch = repo.defaultBranch;
+
       for (const [rel, content] of Object.entries(files)) {
         const filename = rel.split("/").pop() || rel;
         const res = await writeRepoFileTool.execute(
@@ -243,16 +261,12 @@ export const provisionGkeTool: Tool<Input, Output> = {
             content,
             branch,
             message: `Add GKE cluster ${input.name} (Terraform)`,
-            openPullRequest: first,
-            pullRequestBody: `Deterministic GKE blueprint for \`${input.name}\` in ${spec.location} (project \`${spec.project}\`).`,
           },
           ctx,
         );
         if (!res.ok)
           return { ok: false, error: `Push failed on ${base}/${filename}: ${res.error}` };
         committed.push(`${base}/${filename}`);
-        if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
-        first = false;
       }
     }
 
