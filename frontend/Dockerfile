@@ -27,9 +27,4 @@ WORKDIR /app
 COPY --from=builder /app ./
 USER node
 EXPOSE 3000
-# `npm start` runs package.json's "start" script (which is "next start"),
-# using npm's built-in PATH handling to resolve the `next` binary from
-# node_modules/.bin. More reliable than exec-form CMD ["next","start"]
-# (which fails "Cannot find module '/app/next'" because exec-form skips
-# PATH lookup).
-CMD ["npm","start"]
+CMD ["sh", "-c", "export PATH=/app/node_modules/.bin:$PATH; exec next start"]
