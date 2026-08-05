@@ -1,7 +1,11 @@
 terraform {
   required_version = ">= 1.5.0"
-  # No S3 backend configured — state is local. Set a Terraform state
-  # bucket on the Infrastructure page for production use.
+  backend "s3" {
+    bucket = "agent-demo-bucket7723"
+    key    = "eks/dev/terraform.tfstate"
+    region = "us-east-1"
+    use_lockfile   = true
+  }
   required_providers {
     aws        = { source = "hashicorp/aws", version = "~> 5.0" }
     kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.30" }
