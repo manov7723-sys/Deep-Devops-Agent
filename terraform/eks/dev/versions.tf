@@ -1,7 +1,7 @@
 terraform {
   required_version = ">= 1.5.0"
   backend "s3" {
-    bucket = "agent-demo-bucket7723"
+    bucket = "amaz-n-s3"
     key    = "eks/dev/terraform.tfstate"
     region = "us-east-1"
     use_lockfile   = true
