@@ -50,6 +50,21 @@ export type StateInput = {
   next?: string | null;
 };
 
+/**
+ * PKCE pair (RFC 7636, S256). GitHub, Google and GitLab all accept it and
+ * GitHub's docs mark it "strongly recommended".
+ *
+ * The VERIFIER is a secret and must never leave the server except in the token
+ * request — it goes in an httpOnly cookie, NOT in `state`, because `state`
+ * travels through the browser's URL bar and the provider's logs. The CHALLENGE
+ * (its SHA-256) is the only half that goes on the wire at authorize time.
+ */
+export function newPkcePair(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(48).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  return { verifier, challenge };
+}
+
 export function generateNonce(): string {
   return randomBytes(16).toString("base64url");
 }

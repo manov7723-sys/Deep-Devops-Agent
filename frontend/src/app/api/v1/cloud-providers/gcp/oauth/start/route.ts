@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getActiveSession } from "@/lib/auth/session";
+import { publicOrigin } from "@/lib/auth/cookie-security";
 import { gcpOAuthConfigured, buildGcpAuthorizeUrl, newPkce } from "@/lib/cloud/gcp-oauth";
 
 const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
@@ -12,7 +13,13 @@ const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", maxAg
  */
 export async function GET(req: Request) {
   const sess = await getActiveSession();
-  if (!sess) return NextResponse.redirect(new URL("/auth/login", req.url));
+  // publicOrigin, NOT req.url — behind a proxy req.url carries the pod's own
+  // origin (http://localhost:3000), which sends the user to their own machine.
+  if (!sess) {
+    return NextResponse.redirect(
+      new URL("/auth/login", publicOrigin(new URL(req.url).origin, req.headers)),
+    );
+  }
   if (!gcpOAuthConfigured()) {
     return NextResponse.json(
       {

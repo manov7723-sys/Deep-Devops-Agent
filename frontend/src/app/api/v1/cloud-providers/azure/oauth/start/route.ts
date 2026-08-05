@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getActiveSession } from "@/lib/auth/session";
+import { publicOrigin } from "@/lib/auth/cookie-security";
 import { azureOAuthConfigured, buildAzureAuthorizeUrl, newPkce } from "@/lib/cloud/azure-oauth";
 
 const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
@@ -13,7 +14,9 @@ const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", maxAg
 export async function GET(req: Request) {
   const sess = await getActiveSession();
   if (!sess) {
-    const url = new URL("/auth/login", req.url);
+    // publicOrigin, NOT req.url — behind a proxy req.url carries the pod's own
+    // origin (http://localhost:3000), which sends the user to their own machine.
+    const url = new URL("/auth/login", publicOrigin(new URL(req.url).origin, req.headers));
     return NextResponse.redirect(url);
   }
   if (!azureOAuthConfigured()) {

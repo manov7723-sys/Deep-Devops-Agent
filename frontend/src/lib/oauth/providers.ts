@@ -147,18 +147,49 @@ export function callbackUrl(origin: string, providerId: ProviderId): string {
   return `${origin}/api/v1/auth/oauth/${providerId}/callback`;
 }
 
+/**
+ * Whether this provider needs an explicit `redirect_uri`.
+ *
+ * GitHub does NOT: "The redirect_uri parameter is optional. If left out,
+ * GitHub will redirect users to the callback URL configured in the OAuth app
+ * settings." Omitting it is strictly safer for us — the app can then never
+ * send a WRONG one, which is exactly the failure we hit: behind an ALB the
+ * derived origin was the pod's own address, so we asked GitHub to redirect to
+ * http://localhost:3000/... GitHub accepted it (loopback URLs are exempt from
+ * exact-match checking, per the same docs) and delivered users to their own
+ * laptop with no error anywhere. With no redirect_uri, GitHub always uses the
+ * one callback URL registered on the app — a single place to configure, and
+ * impossible for the running app to get wrong.
+ *
+ * Google and GitLab both REQUIRE redirect_uri, so they keep sending it.
+ */
+function needsExplicitRedirectUri(id: ProviderId): boolean {
+  return id !== "github";
+}
+
 export function buildAuthorizeUrl(args: {
   provider: ProviderConfig;
   origin: string;
   state: string;
+  /** PKCE S256 challenge. Omitted only in mock mode. */
+  codeChallenge?: string;
 }): string {
   const params = new URLSearchParams({
     client_id: args.provider.clientId,
-    redirect_uri: callbackUrl(args.origin, args.provider.id),
     response_type: "code",
     scope: args.provider.scope,
     state: args.state,
   });
+  if (needsExplicitRedirectUri(args.provider.id)) {
+    params.set("redirect_uri", callbackUrl(args.origin, args.provider.id));
+  }
+  // PKCE — "strongly recommended" by GitHub, required-if-present on exchange.
+  // Protects the authorization code against interception: without the
+  // verifier, a stolen code cannot be redeemed.
+  if (args.codeChallenge) {
+    params.set("code_challenge", args.codeChallenge);
+    params.set("code_challenge_method", "S256");
+  }
   if (args.provider.id === "google") {
     // Google requires these for stable refresh-token behaviour.
     params.set("access_type", "offline");

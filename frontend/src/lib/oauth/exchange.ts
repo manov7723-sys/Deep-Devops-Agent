@@ -86,19 +86,30 @@ export async function exchange(
   provider: ProviderConfig,
   code: string,
   origin: string,
+  /** PKCE verifier matching the challenge sent at /start. */
+  codeVerifier?: string,
 ): Promise<ExchangeResult> {
   if (isMockMode()) return mockExchange(provider, code);
+
+  const body = new URLSearchParams({
+    client_id: provider.clientId,
+    client_secret: provider.clientSecret,
+    code,
+    grant_type: "authorization_code",
+  });
+  // redirect_uri must be sent here ONLY if it was sent on the authorize
+  // request — providers compare the two and reject a mismatch. GitHub gets
+  // neither (see needsExplicitRedirectUri in ./providers), which is what makes
+  // the flow immune to this app mis-deriving its own public origin.
+  if (provider.id !== "github") {
+    body.set("redirect_uri", callbackUrl(origin, provider.id));
+  }
+  if (codeVerifier) body.set("code_verifier", codeVerifier);
 
   const tokenRes = await fetch(provider.tokenUrl, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: provider.clientId,
-      client_secret: provider.clientSecret,
-      code,
-      redirect_uri: callbackUrl(origin, provider.id),
-      grant_type: "authorization_code",
-    }).toString(),
+    body: body.toString(),
   });
 
   // Most providers return 200 with `{error, error_description}` on failure

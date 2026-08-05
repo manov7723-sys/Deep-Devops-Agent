@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { buildAuthorizeUrl, getProviderAsync, isMockMode } from "@/lib/oauth/providers";
-import { generateNonce, signState } from "@/lib/oauth/state";
+import { generateNonce, newPkcePair, signState } from "@/lib/oauth/state";
 import { authCookieSecure, publicOrigin } from "@/lib/auth/cookie-security";
 
 const NONCE_COOKIE = "ddaoauth";
 const NEXT_COOKIE = "ddaoauthnext";
 const POPUP_COOKIE = "ddaoauthpopup";
+/** PKCE verifier. httpOnly — it is a secret and must never reach the browser's
+ *  URL bar or the provider. Only its SHA-256 challenge goes on the wire. */
+const PKCE_COOKIE = "ddaoauthpkce";
 const TEN_MIN_SEC = 10 * 60;
 
 /**
@@ -108,7 +111,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     }
   }
 
-  const authorizeUrl = buildAuthorizeUrl({ provider, origin, state });
+  const pkce = newPkcePair();
+  const authorizeUrl = buildAuthorizeUrl({
+    provider,
+    origin,
+    state,
+    codeChallenge: pkce.challenge,
+  });
 
   // Log the EXACT redirect_uri + client_id we're about to send. A provider
   // rejecting the flow ("redirect_uri is not associated with this
@@ -126,6 +135,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
 
   const jar = await cookies();
   jar.set(NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: authCookieSecure(),
+    path: "/",
+    maxAge: TEN_MIN_SEC,
+  });
+  jar.set(PKCE_COOKIE, pkce.verifier, {
     httpOnly: true,
     sameSite: "lax",
     secure: authCookieSecure(),

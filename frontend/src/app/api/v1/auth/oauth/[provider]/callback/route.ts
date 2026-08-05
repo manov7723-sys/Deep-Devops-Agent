@@ -15,6 +15,8 @@ import { authCookieSecure, publicOrigin } from "@/lib/auth/cookie-security";
 const NONCE_COOKIE = "ddaoauth";
 const NEXT_COOKIE = "ddaoauthnext";
 const POPUP_COOKIE = "ddaoauthpopup";
+/** PKCE verifier set at /start — proves this callback belongs to that flow. */
+const PKCE_COOKIE = "ddaoauthpkce";
 
 /**
  * HTML response for popup-mode OAuth: notify the opener window (the wizard) and
@@ -128,7 +130,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   // redirect_uri on the token exchange against the one from the authorize
   // request, and a mismatch fails with redirect_uri_mismatch.
   const origin = publicOrigin(req.headers.get("origin") ?? url.origin, req.headers);
-  const ex = await exchange(provider, code, origin);
+  // Single-use, like the nonce: spend the PKCE verifier whether or not the
+  // exchange succeeds, so a replayed callback can't reuse it.
+  const codeVerifier = jar.get(PKCE_COOKIE)?.value;
+  jar.delete(PKCE_COOKIE);
+  const ex = await exchange(provider, code, origin, codeVerifier);
   if (!ex.ok) {
     const redirectUri = `${origin}/api/v1/auth/oauth/${providerId}/callback`;
     // Record WHICH redirect_uri + client_id were rejected. `invalid_client`
