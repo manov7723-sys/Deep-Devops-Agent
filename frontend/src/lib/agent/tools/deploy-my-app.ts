@@ -498,10 +498,28 @@ export const deployMyAppTool: Tool<Input, Output> = {
     const envRow = await prisma.env.findFirst({
       where: { projectId: ctx.projectId, key: input.envKey },
       select: {
+        id: true,
+        namespace: true,
         kubeconfigRef: true,
         cloudProvider: { select: { id: true, kind: true, region: true, accountRef: true } },
       },
     });
+
+    // Persist the namespace we are about to deploy INTO onto the env row.
+    //
+    // The CD workflow bakes `input.namespace` in as a literal, but the Env row
+    // kept whatever it had (usually the "default" default). Everything else in
+    // the app reads Env.namespace — the app-secrets panel, the RDS/DB connect
+    // panels, the Env viewer, the logs tab — so the moment those two diverge,
+    // a Secret written through the UI lands in a namespace no pod reads, and
+    // the write still reports success. That is exactly how DDA_AGENT_MODEL and
+    // app-db went missing (2026-08). The deploy is the authority on where the
+    // app actually runs, so it owns this field.
+    if (envRow && envRow.namespace !== input.namespace) {
+      await prisma.env
+        .update({ where: { id: envRow.id }, data: { namespace: input.namespace } })
+        .catch(() => {}); // best-effort: never fail a deploy over bookkeeping
+    }
     // Prefer the env's own linked provider; fall back to the project's own
     // cloud provider directly (CloudProvider.projectId) when the env was never
     // back-linked — e.g. a cluster connected via connect-cluster's fallback

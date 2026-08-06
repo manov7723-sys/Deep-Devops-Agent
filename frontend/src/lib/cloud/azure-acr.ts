@@ -1000,6 +1000,72 @@ export async function findAcrResourceGroup(
 }
 
 /**
+ * Find the repo's CD workflow file, by asking GitHub what actually exists.
+ *
+ * WHY THIS EXISTS: this codebase emits the CD workflow under TWO different
+ * names — `deploy_my_app`'s combined mode writes `.github/workflows/cd.yml`
+ * (src/lib/ci/templates.ts) while the per-service path writes `deploy.yml`
+ * (src/lib/devops/cd-files.ts). Callers used to assume `deploy.yml`, so every
+ * repo built through the combined path got a 404 on rerun and the user was
+ * told their workflow "was not found" moments after a repair had in fact
+ * succeeded (2026-08). Guessing a filename can't be made correct; ask instead.
+ *
+ * Returns null when the repo has no workflows at all, so callers can skip the
+ * rerun rather than report a failure.
+ */
+export async function findCdWorkflowFile(
+  githubToken: string,
+  repoFullName: string,
+): Promise<Res<{ fileName: string; name: string } | null>> {
+  const headers = {
+    Authorization: `Bearer ${githubToken}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  let res: Response;
+  try {
+    res = await fetch(`https://api.github.com/repos/${repoFullName}/actions/workflows?per_page=100`, {
+      headers,
+      cache: "no-store",
+    });
+  } catch (e) {
+    return { ok: false, error: `Network error listing workflows: ${e instanceof Error ? e.message : "error"}` };
+  }
+  if (!res.ok) return { ok: false, error: `Couldn't list workflows for ${repoFullName} (HTTP ${res.status}).` };
+
+  const data = (await res.json().catch(() => ({}))) as {
+    workflows?: Array<{ name?: string; path?: string; state?: string }>;
+  };
+  const candidates = (data.workflows ?? []).filter(
+    (w) => !!w.path?.startsWith(".github/workflows/") && w.state !== "disabled_manually",
+  );
+  if (candidates.length === 0) return { ok: true, data: null };
+
+  // Rank by how confidently the entry looks like the DEPLOY workflow. Filename
+  // wins over display name: a repo can have several workflows whose names
+  // mention "deploy", but the emitted CD file is always cd.yml or deploy.yml.
+  const score = (w: { name?: string; path?: string }): number => {
+    const base = (w.path ?? "").split("/").pop()?.toLowerCase() ?? "";
+    const name = (w.name ?? "").toLowerCase();
+    if (base === "cd.yml" || base === "cd.yaml") return 100;
+    if (base === "deploy.yml" || base === "deploy.yaml") return 90;
+    if (/^cd[-.]/.test(base) || /^deploy[-.]/.test(base)) return 80;
+    // "CD (deploy all services)" — the generated display name.
+    if (/\bcd\b/.test(name) || name.includes("deploy")) return 50;
+    return 0;
+  };
+  const best = candidates
+    .map((w) => ({ w, s: score(w) }))
+    .sort((a, b) => b.s - a.s)[0]!;
+  if (best.s === 0) return { ok: true, data: null };
+
+  return {
+    ok: true,
+    data: { fileName: best.w.path!.split("/").pop()!, name: best.w.name ?? "" },
+  };
+}
+
+/**
  * Re-run the latest failed run of a workflow file. Called after the repair
  * function rewrites the secrets, so the fix takes effect without the user
  * having to push an empty commit or click "Re-run" in the GitHub UI.
