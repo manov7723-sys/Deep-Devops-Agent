@@ -25,7 +25,7 @@ import { getAzureAccessToken } from "@/lib/cloud/azure";
 import { getAksKubeconfig, getSubscriptionTenant, listAksClusters } from "@/lib/cloud/azure-arm";
 import { updateEnv } from "@/lib/devops/envs";
 import { setEnvKubeconfigSecret } from "@/lib/devops/deploy";
-import { rerunLatestFailedWorkflow } from "@/lib/cloud/azure-acr";
+import { findCdWorkflowFile, rerunLatestFailedWorkflow } from "@/lib/cloud/azure-acr";
 import { resolveTokenForRepo } from "@/lib/oauth/repo-token";
 import type { Tool } from "./types";
 
@@ -33,9 +33,11 @@ type Input = {
   repoFullName: string;
   envKey: string;
   /**
-   * Which CD workflow file to rerun after the fix. Defaults to "deploy.yml".
-   * The agent should pass the exact file name deploy_my_app reported earlier
-   * (e.g. "deploy-frontend.yml" in a monorepo).
+   * Which CD workflow file to rerun after the fix. OMIT IT normally — the tool
+   * asks GitHub which workflows exist and picks the CD one, so it works whether
+   * the repo got `cd.yml` (combined deploy path) or `deploy.yml` (per-service
+   * path). Only pass this to override, e.g. a monorepo's
+   * "deploy-frontend.yml".
    */
   cdWorkflowFile?: string;
 };
@@ -72,7 +74,8 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
       },
       cdWorkflowFile: {
         type: "string",
-        description: 'CD workflow file to rerun after fixing (default "deploy.yml").',
+        description:
+          "CD workflow file to rerun after fixing. Omit it — the tool discovers the repo's actual workflow (cd.yml, deploy.yml, whatever it is). Only pass this to override that choice.",
       },
     },
     required: ["repoFullName", "envKey"],
@@ -203,15 +206,36 @@ export const repairCdKubeconfigTool: Tool<Input, Output> = {
     })();
     let reran: { runId: number | null; note: string } | null = null;
     if (gh && gh.ok) {
-      const file = input.cdWorkflowFile || "deploy.yml";
-      const rr = await rerunLatestFailedWorkflow(gh.accessToken, input.repoFullName, file);
-      if (rr.ok) {
-        reran = { runId: rr.data.rerunRunId, note: rr.data.note };
-        if (rr.data.rerunRunId) steps.push(`Re-ran ${file} (run ${rr.data.rerunRunId}).`);
-        else steps.push(rr.data.note);
+      // Discover the CD workflow instead of assuming a filename. The combined
+      // deploy path emits cd.yml and the per-service path emits deploy.yml, so
+      // any fixed default 404s for half of all repos — and a 404 here reads as
+      // "your workflow is missing" right after the repair actually SUCCEEDED,
+      // which sends people hunting for a file that was never the problem.
+      let file = input.cdWorkflowFile ?? null;
+      if (!file) {
+        const found = await findCdWorkflowFile(gh.accessToken, input.repoFullName);
+        if (found.ok && found.data) file = found.data.fileName;
+      }
+      if (!file) {
+        steps.push(
+          "Secrets are fixed, but no CD workflow was found in .github/workflows — nothing to re-run. " +
+            "Generate the deploy workflow, or re-run your pipeline manually.",
+        );
+        reran = { runId: null, note: "No CD workflow found to re-run." };
       } else {
-        steps.push(`Rerun of ${file} failed: ${rr.error}`);
-        reran = { runId: null, note: `Rerun failed: ${rr.error}` };
+        const rr = await rerunLatestFailedWorkflow(gh.accessToken, input.repoFullName, file);
+        if (rr.ok) {
+          reran = { runId: rr.data.rerunRunId, note: rr.data.note };
+          if (rr.data.rerunRunId) steps.push(`Re-ran ${file} (run ${rr.data.rerunRunId}).`);
+          else steps.push(rr.data.note);
+        } else {
+          // The secret rewrite already landed; say so, so a rerun hiccup isn't
+          // mistaken for the repair having failed.
+          steps.push(
+            `Secrets are fixed. Could not auto-re-run ${file} (${rr.error}) — trigger it from the Actions tab.`,
+          );
+          reran = { runId: null, note: `Rerun failed: ${rr.error}` };
+        }
       }
     }
 
