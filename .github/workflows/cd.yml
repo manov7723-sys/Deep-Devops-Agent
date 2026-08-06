@@ -34,14 +34,14 @@ jobs:
           fi
           echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
 
-      - name: Ensure namespace level-1 is Active (auto-heal if stuck Terminating)
+      - name: Ensure namespace level is Active (auto-heal if stuck Terminating)
         # Three-stage self-heal — see cicd-pipeline.ts for the full rationale.
         # Stage 1: wait 60s for natural termination.
         # Stage 2: force-clear finalizers on Services + PVCs, wait 30s.
         # Stage 3: nuke the namespace's own finalizer via /finalize subresource.
         run: |
           set -eu
-          NS="level-1"
+          NS="level"
           ns_phase() { kubectl get namespace "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo ""; }
           for i in $(seq 1 30); do
             p=$(ns_phase)
@@ -93,18 +93,18 @@ jobs:
         # repos whose manifests are still split across multiple files.
         run: |
           if [ -f "k8s/prod/backend/manifest.yaml" ]; then
-            kubectl apply -n level-1 -f "k8s/prod/backend/manifest.yaml"
+            kubectl apply -n level -f "k8s/prod/backend/manifest.yaml"
           else
-            kubectl apply -n level-1 -f "k8s/prod/backend/"
+            kubectl apply -n level -f "k8s/prod/backend/"
           fi
 
       - name: Restart backend rollout (image tag "latest" — force pods onto the new build)
         id: restart_backend
-        run: kubectl rollout restart deployment/deep-devops-agent-backend -n level-1
+        run: kubectl rollout restart deployment/deep-devops-agent-backend -n level
 
       - name: Wait for backend rollout
         id: wait_backend
-        run: kubectl rollout status deployment/deep-devops-agent-backend -n level-1 --timeout=180s
+        run: kubectl rollout status deployment/deep-devops-agent-backend -n level --timeout=180s
 
       - name: Rollback backend on failed rollout
         # Scoped to THIS service's own step outcomes (see sequentialDeploySteps
@@ -114,8 +114,8 @@ jobs:
         if: ${{ always() && (steps.apply_backend.outcome == 'failure' || steps.restart_backend.outcome == 'failure' || steps.wait_backend.outcome == 'failure') }}
         run: |
           echo "::warning::Rollout of deep-devops-agent-backend failed its health check — rolling back to the previous revision."
-          kubectl rollout undo deployment/deep-devops-agent-backend -n level-1
-          kubectl rollout status deployment/deep-devops-agent-backend -n level-1 --timeout=120s
+          kubectl rollout undo deployment/deep-devops-agent-backend -n level
+          kubectl rollout status deployment/deep-devops-agent-backend -n level --timeout=120s
 
       - name: Apply frontend manifests
         id: apply_frontend
@@ -127,18 +127,18 @@ jobs:
         # repos whose manifests are still split across multiple files.
         run: |
           if [ -f "k8s/prod/frontend/manifest.yaml" ]; then
-            kubectl apply -n level-1 -f "k8s/prod/frontend/manifest.yaml"
+            kubectl apply -n level -f "k8s/prod/frontend/manifest.yaml"
           else
-            kubectl apply -n level-1 -f "k8s/prod/frontend/"
+            kubectl apply -n level -f "k8s/prod/frontend/"
           fi
 
       - name: Restart frontend rollout (image tag "latest" — force pods onto the new build)
         id: restart_frontend
-        run: kubectl rollout restart deployment/deep-devops-agent-frontend -n level-1
+        run: kubectl rollout restart deployment/deep-devops-agent-frontend -n level
 
       - name: Wait for frontend rollout
         id: wait_frontend
-        run: kubectl rollout status deployment/deep-devops-agent-frontend -n level-1 --timeout=180s
+        run: kubectl rollout status deployment/deep-devops-agent-frontend -n level --timeout=180s
 
       - name: Rollback frontend on failed rollout
         # Scoped to THIS service's own step outcomes (see sequentialDeploySteps
@@ -148,5 +148,5 @@ jobs:
         if: ${{ always() && (steps.apply_frontend.outcome == 'failure' || steps.restart_frontend.outcome == 'failure' || steps.wait_frontend.outcome == 'failure') }}
         run: |
           echo "::warning::Rollout of deep-devops-agent-frontend failed its health check — rolling back to the previous revision."
-          kubectl rollout undo deployment/deep-devops-agent-frontend -n level-1
-          kubectl rollout status deployment/deep-devops-agent-frontend -n level-1 --timeout=120s
+          kubectl rollout undo deployment/deep-devops-agent-frontend -n level
+          kubectl rollout status deployment/deep-devops-agent-frontend -n level --timeout=120s
