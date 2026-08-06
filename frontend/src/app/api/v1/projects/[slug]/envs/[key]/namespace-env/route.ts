@@ -3,7 +3,7 @@ import { requireProjectAccess } from "@/lib/projects/permissions";
 import { envBySlugAndKey } from "@/lib/devops/envs";
 import { showNamespaceEnvTool } from "@/lib/agent/tools/show-namespace-env";
 import { audit } from "@/lib/audit/log";
-import { requireStepUp } from "@/lib/auth/step-up";
+import { requireStepUp, isBrowserRequest } from "@/lib/auth/step-up";
 
 /**
  * GET /projects/[slug]/envs/[key]/namespace-env?namespace=<ns>&nameFilter=<sub>
@@ -21,6 +21,22 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; k
   const { slug, key } = await ctx.params;
   const url = new URL(req.url);
   const reveal = url.searchParams.get("reveal") === "true";
+
+  // Browser-only. This endpoint returns a namespace's whole configuration, so
+  // a URL copied out of devtools and replayed in a terminal used to hand over
+  // the lot — the cookie rides along automatically. Refuse anything that isn't
+  // a same-origin fetch from our own pages, masked view included.
+  if (!isBrowserRequest(req)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "browser_only",
+        message:
+          "This endpoint is only callable from the Deep Agent UI. Open the Env viewer instead of replaying the URL.",
+      },
+      { status: 403 },
+    );
+  }
 
   // Reading masked keys is a viewer-level action. Decoding every credential in
   // the namespace is not — that needs write-level trust, so it demands the
@@ -44,7 +60,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; k
   // still them. Reveal additionally demands the 6-digit authenticator code —
   // the same one used at login, for the same account.
   if (reveal) {
-    const step = await requireStepUp(gate.access.session.id);
+    const step = await requireStepUp(
+      gate.access.session.id,
+      req.headers.get("x-reveal-token"),
+    );
     if (!step.ok) {
       return NextResponse.json(
         {

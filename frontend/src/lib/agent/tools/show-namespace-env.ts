@@ -226,7 +226,11 @@ export const showNamespaceEnvTool: Tool<Input, Output> = {
       const message =
         shown.length === 0
           ? `No ConfigMaps, Secrets, or workload containers in "${input.namespace}"${filter ? ` matching "${input.nameFilter}"` : ""}.`
-          : `${shown.length} .env file(s) in "${input.namespace}" — ${counts.containers} container, ${counts.configMaps} ConfigMap, ${counts.secrets} Secret${filter ? ` (filtered by "${input.nameFilter}")` : ""}. Secret values are masked.`;
+          : `${shown.length} .env file(s) in "${input.namespace}" — ${counts.containers} container, ${counts.configMaps} ConfigMap, ${counts.secrets} Secret${filter ? ` (filtered by "${input.nameFilter}")` : ""}. ${
+              reveal
+                ? "Secret values are REVEALED — treat this response as credential material."
+                : "Secret values are masked."
+            }`;
 
       return {
         ok: true,

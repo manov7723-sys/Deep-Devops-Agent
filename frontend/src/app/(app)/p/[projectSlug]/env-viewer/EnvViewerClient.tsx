@@ -10,7 +10,7 @@
  * the chat agent always agree on masking and on what "the env" means.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -61,6 +61,10 @@ export function EnvViewerClient({ slug }: { slug: string }) {
   const [stepUpValue, setStepUpValue] = useState("");
   const [stepUpErr, setStepUpErr] = useState<string | null>(null);
   const [stepUpBusy, setStepUpBusy] = useState(false);
+  // In-memory only — never localStorage/sessionStorage/cookie. Lost on reload,
+  // which is intended: a reload means re-authenticating, and nothing on disk
+  // can be lifted later to replay an elevation.
+  const revealTokenRef = useRef<string | null>(null);
 
   const envs = useQuery<EnvRow[]>({
     queryKey: ["p", slug, "envs"],
@@ -113,6 +117,13 @@ export function EnvViewerClient({ slug }: { slug: string }) {
       if (applied!.reveal) qs.set("reveal", "true");
       return api.get<ViewerResp>(
         `/projects/${slug}/envs/${encodeURIComponent(applied!.env)}/namespace-env?${qs}`,
+        undefined,
+        // Memory-only proof that this request came from the page that actually
+        // passed the step-up. Deliberately NOT a cookie: a URL copied out of
+        // devtools carries cookies automatically but never this header.
+        applied!.reveal && revealTokenRef.current
+          ? { "X-Reveal-Token": revealTokenRef.current }
+          : undefined,
       );
     },
     enabled: !!applied,
@@ -192,7 +203,10 @@ export function EnvViewerClient({ slug }: { slug: string }) {
     setStepUpBusy(true);
     setStepUpErr(null);
     try {
-      await api.post("/auth/step-up", { code: stepUpValue.trim() });
+      const res = await api.post<{ ok: boolean; revealToken?: string }>("/auth/step-up", {
+        code: stepUpValue.trim(),
+      });
+      revealTokenRef.current = res.revealToken ?? null;
       setStepUpOpen(false);
       setStepUpValue("");
       setReveal(true);
@@ -495,7 +509,10 @@ export function EnvViewerClient({ slug }: { slug: string }) {
                         // re-locks rather than just repainting the pane. The
                         // 5-minute window would expire anyway; this makes the
                         // button mean what it says.
-                        if (!next) void api.del("/auth/step-up").catch(() => {});
+                        if (!next) {
+                          revealTokenRef.current = null;
+                          void api.del("/auth/step-up").catch(() => {});
+                        }
                         run(next);
                       }}
                     >

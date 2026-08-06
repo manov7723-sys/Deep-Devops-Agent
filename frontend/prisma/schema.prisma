@@ -411,6 +411,13 @@ model Session {
   elevatedUntil     DateTime? // step-up valid until; null/past = not elevated
   stepUpFailures    Int       @default(0)
   stepUpLockedUntil DateTime?
+  // Proof-of-possession for elevated reads. The cookie alone must NOT be
+  // enough: browsers attach cookies to any request to the origin, so copying a
+  // reveal URL out of devtools into curl replayed a live elevation. The raw
+  // token is returned once by /auth/step-up, kept in page memory only, and
+  // echoed back in the X-Reveal-Token header — something a pasted URL cannot
+  // carry. Only the hash is stored.
+  elevationTokenHash String?
   deviceLabel     String? // human label for the "Review devices" list
   ipAddress       String?
   userAgent       String?

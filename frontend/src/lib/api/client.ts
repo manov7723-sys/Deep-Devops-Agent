@@ -118,8 +118,11 @@ export function apiErrorMessage(e: unknown, fallback = "Request failed"): string
 }
 
 export const api = {
-  get: <T>(path: string, params?: Record<string, string | number | undefined>) =>
-    request<T>(path, { method: "GET", params }),
+  get: <T>(
+    path: string,
+    params?: Record<string, string | number | undefined>,
+    headers?: Record<string, string>,
+  ) => request<T>(path, { method: "GET", params, headers }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body?: unknown) =>
