@@ -31,6 +31,7 @@ import { attachAcrToAksTool } from "./attach-acr-to-aks";
 import { ensureWorkloadReachableTool } from "./ensure-workload-reachable";
 import { unstickTerminatingNamespaceTool } from "./unstick-terminating-namespace";
 import { inspectPodEnvTool } from "./inspect-pod-env";
+import { showNamespaceEnvTool } from "./show-namespace-env";
 import { diagnoseDeployedAppTool } from "./diagnose-deployed-app";
 import { healTerraformStateTool } from "./heal-terraform-state";
 import { listEcrReposTool } from "./list-ecr-repos";
@@ -288,6 +289,10 @@ export const ALL_TOOLS: Tool[] = [
   // Read a pod's actual env vars — answers "what is DATABASE_URL/SESSION_COOKIE_SECURE/etc
   // set to on the deployed pod?" without asking the user to run kubectl exec.
   inspectPodEnvTool,
+  // Whole-namespace env overview — ConfigMaps + Secrets (keys only, values
+  // always masked) + every workload's declared env. Answers "what env does
+  // my app in namespace X use?" without a dozen kubectl calls.
+  showNamespaceEnvTool,
   // Composite health check: pod ready + env vars present + URL reachable + DB reachable + log tail.
   // Use whenever the user says "the app isn't working" instead of asking them to open DevTools.
   diagnoseDeployedAppTool,

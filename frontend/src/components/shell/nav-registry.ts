@@ -102,6 +102,7 @@ export const NAV: Record<LayoutArea, NavEntry[]> = {
     { kind: "section", label: "Connection" },
     { kind: "link", id: "github", label: "Source control", icon: "github", hrefSegment: "github" },
     { kind: "link", id: "connection", label: "Clusters", icon: "globe", hrefSegment: "connection" },
+    { kind: "link", id: "env-viewer", label: "Env viewer", icon: "layers", hrefSegment: "env-viewer" },
     { kind: "link", id: "stats", label: "Cloud stats", icon: "stats", hrefSegment: "stats" },
     { kind: "link", id: "uptime", label: "Uptime", icon: "gauge", hrefSegment: "uptime" },
     { kind: "link", id: "scheduler", label: "Scheduler", icon: "clock", hrefSegment: "scheduler" },

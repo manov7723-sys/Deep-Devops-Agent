@@ -140,6 +140,16 @@ function ClusterRdsConnectPanel({ slug }: { slug: string }) {
     setEnvKey((nonProd ?? envs[0]!).key);
   }, [envs, envKey]);
 
+  // Follow the selected env's namespace. This used to sit on a hardcoded
+  // "default": for an app deployed into its own namespace, the Secret landed
+  // in `default` where no pod reads it — and the write still reported success,
+  // so the variable simply never appeared (2026-08, DDA_AGENT_MODEL). The
+  // field stays editable; this only re-seeds when the env changes.
+  useEffect(() => {
+    const row = envs?.find((e) => e.key === envKey);
+    if (row?.namespace) setNamespace(row.namespace);
+  }, [envs, envKey]);
+
   // Reset dependent picker when region changes.
   useEffect(() => setRdsId(""), [region]);
 
@@ -703,6 +713,16 @@ function AppSecretsPanel({ slug }: { slug: string }) {
     setEnvKey((nonProd ?? envs[0]!).key);
   }, [envs, envKey]);
 
+  // Follow the selected env's namespace. This used to sit on a hardcoded
+  // "default": for an app deployed into its own namespace, the Secret landed
+  // in `default` where no pod reads it — and the write still reported success,
+  // so the variable simply never appeared (2026-08, DDA_AGENT_MODEL). The
+  // field stays editable; this only re-seeds when the env changes.
+  useEffect(() => {
+    const row = envs?.find((e) => e.key === envKey);
+    if (row?.namespace) setNamespace(row.namespace);
+  }, [envs, envKey]);
+
   const envOptions: SelectOption[] = (envs ?? []).map((e) => ({
     value: e.key,
     label: e.isProduction ? `${e.name} (prod)` : e.name || e.key,
@@ -967,6 +987,16 @@ function AzureDbConnectPanel({ slug }: { slug: string }) {
     if (envKey || !envs?.length) return;
     const nonProd = envs.find((e) => !e.isProduction);
     setEnvKey((nonProd ?? envs[0]!).key);
+  }, [envs, envKey]);
+
+  // Follow the selected env's namespace. This used to sit on a hardcoded
+  // "default": for an app deployed into its own namespace, the Secret landed
+  // in `default` where no pod reads it — and the write still reported success,
+  // so the variable simply never appeared (2026-08, DDA_AGENT_MODEL). The
+  // field stays editable; this only re-seeds when the env changes.
+  useEffect(() => {
+    const row = envs?.find((e) => e.key === envKey);
+    if (row?.namespace) setNamespace(row.namespace);
   }, [envs, envKey]);
 
   const servers = dbQuery.data?.servers ?? [];
@@ -1244,6 +1274,16 @@ function CloudSqlConnectPanel({ slug }: { slug: string }) {
     if (envKey || !envs?.length) return;
     const nonProd = envs.find((e) => !e.isProduction);
     setEnvKey((nonProd ?? envs[0]!).key);
+  }, [envs, envKey]);
+
+  // Follow the selected env's namespace. This used to sit on a hardcoded
+  // "default": for an app deployed into its own namespace, the Secret landed
+  // in `default` where no pod reads it — and the write still reported success,
+  // so the variable simply never appeared (2026-08, DDA_AGENT_MODEL). The
+  // field stays editable; this only re-seeds when the env changes.
+  useEffect(() => {
+    const row = envs?.find((e) => e.key === envKey);
+    if (row?.namespace) setNamespace(row.namespace);
   }, [envs, envKey]);
 
   const instances = instQuery.data?.instances ?? [];

@@ -403,6 +403,14 @@ model Session {
   forcedTotpSetup Boolean       @default(false) // signup -> must set up TOTP
   rememberMe      Boolean       @default(false) // "Remember me" -> longer TTL
   mfaSatisfiedAt  DateTime? // when pending_mfa -> active (TOTP passed)
+  // Step-up ("sudo mode"): a session cookie can be 30 days old, so login-time
+  // MFA proves nothing about who is at the keyboard right now. Revealing
+  // secret values requires a fresh re-auth that grants a short elevation
+  // window. Failures are counted and locked out on the row (not in memory) so
+  // the throttle survives restarts and works across instances.
+  elevatedUntil     DateTime? // step-up valid until; null/past = not elevated
+  stepUpFailures    Int       @default(0)
+  stepUpLockedUntil DateTime?
   deviceLabel     String? // human label for the "Review devices" list
   ipAddress       String?
   userAgent       String?
