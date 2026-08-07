@@ -90,13 +90,25 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; k
     return NextResponse.json({ ok: false, code: "env_not_found" }, { status: 404 });
   }
 
-  const result = await showNamespaceEnvTool.execute(
-    // `revealSecrets` is intentionally not part of the tool's inputSchema, so
-    // the agent can never set it. Passing it here is safe: this call site is
-    // behind the developer-role gate above.
-    { envKey: key, namespace, nameFilter, revealSecrets: reveal },
-    { projectId: gate.access.project.id, userId: gate.access.session.userId },
-  );
+  // The agent reaches tools through executeTool(), which catches throws and
+  // hands the model a readable failure. This route calls execute() directly and
+  // had no such net, so anything that threw — a stale Prisma client after a
+  // schema change, a kubeconfig that won't materialise — surfaced as a bare 500
+  // with an empty body and nothing in the UI to act on.
+  let result: Awaited<ReturnType<typeof showNamespaceEnvTool.execute>>;
+  try {
+    result = await showNamespaceEnvTool.execute(
+      // `revealSecrets` is intentionally not part of the tool's inputSchema, so
+      // the agent can never set it. Passing it here is safe: this call site is
+      // behind the developer-role gate above.
+      { envKey: key, namespace, nameFilter, revealSecrets: reveal },
+      { projectId: gate.access.project.id, userId: gate.access.session.userId },
+    );
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Reading the namespace failed.";
+    console.error(`[namespace-env] ${key}/${namespace} threw:`, e);
+    return NextResponse.json({ ok: false, code: "read_failed", message }, { status: 500 });
+  }
   if (!result.ok) {
     return NextResponse.json({ ok: false, message: result.error }, { status: 400 });
   }

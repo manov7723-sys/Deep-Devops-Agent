@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Block, Btn, Field, Icon, Input, Modal, PageHead, Select } from "@/components/ui";
@@ -42,6 +42,7 @@ const GROUPS: Array<{ kind: EnvFile["kind"]; label: string; icon: "box" | "layer
 
 export function EnvViewerClient({ slug }: { slug: string }) {
   const router = useRouter();
+  const qc = useQueryClient();
   const projectActiveEnv = useActiveEnv(slug);
   const [envKey, setEnvKey] = useState("");
   const [namespace, setNamespace] = useState("");
@@ -131,6 +132,17 @@ export function EnvViewerClient({ slug }: { slug: string }) {
     // a Secret edit). The app-wide 30s staleTime would serve a cached answer
     // and make a just-added variable look missing — always re-read the cluster.
     staleTime: 0,
+    // Never retain a payload once nothing is showing it. A revealed response is
+    // plaintext credentials; with the default gcTime it sat in the cache under
+    // the `reveal:true` key, and the next click on Reveal rendered it INSTANTLY
+    // from cache while the authorising request was still in flight. The prompt
+    // then appeared on top of already-visible secrets — deleting the modal in
+    // devtools exposed them without ever entering a code.
+    gcTime: 0,
+    // The app-wide default retries once. On a 401 that just delays the prompt
+    // while the stale error sits on the query — no value in retrying an
+    // authorisation failure.
+    retry: false,
   });
 
   const files = useMemo(
@@ -154,6 +166,10 @@ export function EnvViewerClient({ slug }: { slug: string }) {
   const run = (revealOverride?: boolean) => {
     if (!canView) return;
     const nextReveal = revealOverride ?? reveal;
+    // Every reveal starts from nothing. Without this, clicking Reveal replays
+    // whatever the previous authorised call returned while the new one is still
+    // being checked — i.e. secrets on screen before the code is entered.
+    if (nextReveal) qc.removeQueries({ queryKey: ["p", slug, "namespace-env"] });
     const next = { env: effEnv, ns: namespace, filter: nameFilter.trim(), reveal: nextReveal };
     const unchanged =
       applied?.env === next.env &&
@@ -189,15 +205,20 @@ export function EnvViewerClient({ slug }: { slug: string }) {
     }
   })();
   const needsStepUp = errCode === "step_up_required";
+  const clusterGone = errCode === "cluster_unreachable" || /cluster at .* no longer resolves/i.test(
+    (viewer.data && !viewer.data.ok ? viewer.data.message : viewer.error ? apiErrorMessage(viewer.error) : "") || "",
+  );
 
   // Reveal was refused for lack of elevation → prompt instead of showing a
   // raw error, and roll the toggle back so the button doesn't lie.
   useEffect(() => {
-    if (needsStepUp && !stepUpOpen) {
+    // `!stepUpBusy` matters: without it, closing the prompt on a successful
+    // code while the retry is still in flight re-triggers this immediately.
+    if (needsStepUp && !stepUpOpen && !stepUpBusy) {
       setStepUpOpen(true);
       setReveal(false);
     }
-  }, [needsStepUp, stepUpOpen]);
+  }, [needsStepUp, stepUpOpen, stepUpBusy]);
 
   async function submitStepUp() {
     setStepUpBusy(true);
@@ -210,6 +231,10 @@ export function EnvViewerClient({ slug }: { slug: string }) {
       setStepUpOpen(false);
       setStepUpValue("");
       setReveal(true);
+      // run(true) clears the query first, which also drops the failed
+      // attempt's 401. That matters: while it lingers, `needsStepUp` stays
+      // true, and the effect below reopens the prompt the instant this closes —
+      // Reveal → Hide → Reveal could never complete.
       run(true); // retry the reveal now that the session is elevated
     } catch (e) {
       setStepUpErr(apiErrorMessage(e, "Could not confirm your identity."));
@@ -374,7 +399,41 @@ export function EnvViewerClient({ slug }: { slug: string }) {
         </Block>
       )}
 
-      {applied && errorMsg && (
+      {applied && errorMsg && clusterGone && (
+        <Block>
+          <p style={{ margin: 0 }}>
+            <strong>The cluster attached to this env is gone.</strong> Its API server no longer
+            resolves — most likely the cluster was deleted. Reconnect a cluster on the{" "}
+            <a href={`/p/${slug}/connection`}>Connections</a> page, or clear the stale connection
+            so the env stops reporting broken.
+          </p>
+          <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+            <Btn
+              variant="outline"
+              onClick={() => router.push(`/p/${slug}/connection`)}
+            >
+              Reconnect
+            </Btn>
+            <Btn
+              variant="ghost"
+              onClick={async () => {
+                if (!confirm("Clear the stored kubeconfig for this env? The env will show as not-connected until you reconnect a cluster.")) return;
+                try {
+                  await api.del(`/projects/${slug}/envs/${encodeURIComponent(applied.env)}/kubeconfig`);
+                  qc.invalidateQueries({ queryKey: ["p", slug] });
+                  setApplied(null);
+                } catch (e) {
+                  alert(apiErrorMessage(e, "Could not clear the stored kubeconfig."));
+                }
+              }}
+            >
+              Clear stored connection
+            </Btn>
+          </div>
+        </Block>
+      )}
+
+      {applied && errorMsg && !clusterGone && (
         <Block>
           <p style={{ margin: 0, color: "var(--danger)" }}>
             <strong>
@@ -511,6 +570,10 @@ export function EnvViewerClient({ slug }: { slug: string }) {
                         // button mean what it says.
                         if (!next) {
                           revealTokenRef.current = null;
+                          // Evict the revealed payload from the cache too —
+                          // otherwise "Hide" only repaints, and the plaintext
+                          // is still sitting in memory to be re-served.
+                          qc.removeQueries({ queryKey: ["p", slug, "namespace-env"] });
                           void api.del("/auth/step-up").catch(() => {});
                         }
                         run(next);
