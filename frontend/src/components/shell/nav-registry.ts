@@ -69,6 +69,9 @@ export const NAV: Record<LayoutArea, NavEntry[]> = {
       hrefSegment: "dashboard",
     },
     { kind: "link", id: "chat", label: "Chat", icon: "chat", hrefSegment: "chat" },
+    // Project team chat — people-to-people, distinct from the LLM agent
+    // "Chat" above. Members auto-join via Project Membership.
+    { kind: "link", id: "team-chat", label: "Team chat", icon: "chat", hrefSegment: "team-chat" },
     { kind: "link", id: "cicd", label: "CI/CD & Repos", icon: "cicd", hrefSegment: "cicd" },
     {
       kind: "link",

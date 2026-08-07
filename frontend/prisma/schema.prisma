@@ -362,6 +362,10 @@ model User {
   teamMembershipsAdded  TeamMembership[]    @relation("TeamMembershipInvitedBy")
   teamInvitationsSent   TeamInvitation[]    @relation("TeamInvitedBy")
   teamInvitesAccepted   TeamInvitation[]    @relation("TeamInviteAcceptedBy")
+  // Project people-chat — inverse sides of the relations declared on
+  // ProjectMessage and ProjectMessageReaction.
+  projectMessages       ProjectMessage[]         @relation("ProjectMessageUser")
+  projectMessageReactions ProjectMessageReaction[] @relation("ProjectMessageReactionUser")
   // "current subscription details" = this relation
   subscription          Subscription?
   // "current token usage" = usage counters + weekly samples
@@ -395,6 +399,9 @@ enum NotifKind {
   billing
   member
   system
+  // Project chat @mentions — one notification per mentioned user, linkHref
+  // points at the message's project chat.
+  mention
 }
 
 model Notification {
@@ -847,6 +854,7 @@ model Project {
   reportRuns        ReportRun[]
   findings          Finding[]
   team              Team?                  @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  peopleMessages    ProjectMessage[]
 
   @@index([ownerId])
   @@index([teamId])
@@ -862,6 +870,10 @@ model Membership {
   role        ProjectRole @default(viewer)
   invitedById String?     @db.Uuid // who added them (provenance)
   joinedAt    DateTime    @default(now())
+  // Cursor for the project's people-chat: the createdAt of the LAST message
+  // this member saw. Unread count = messages with createdAt > chatReadAt.
+  // Null = never opened the chat, treat every message as unread.
+  chatReadAt  DateTime?
 
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -2484,4 +2496,51 @@ model TeamInvitation {
   @@unique([teamId, email], name: "team_email_unique")
   @@index([teamId, status])
   @@index([email, status])
+}
+
+// ── Project people-chat ────────────────────────────────────────────────────
+//
+// Chat between the humans working on a project. Distinct from ChatMessage
+// (which is the LLM agent transcript) and from Notification (one-shot alerts)
+// — this is a persistent thread scoped to (project × members). Everyone with
+// a Membership is automatically in the chat; access follows Membership so
+// removing a member from the project removes them from the conversation.
+//
+// Reactions are one row per (message, user, emoji); toggling deletes the row.
+// Mentions are an array on ProjectMessage — the sender's client parses "@name"
+// against project members and the server writes a Notification per resolved
+// user. Kept as an array (not a join table) because the fan-out is small and
+// the read is always "give me the whole message".
+model ProjectMessage {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  projectId         String   @db.Uuid
+  userId            String   @db.Uuid
+  body              String
+  /** User ids resolved from @name mentions at send time. Empty for none. */
+  mentionedUserIds  String[] @default([]) @db.Uuid
+  createdAt         DateTime @default(now())
+  editedAt          DateTime?
+  deletedAt         DateTime?
+
+  project   Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User                     @relation("ProjectMessageUser", fields: [userId], references: [id], onDelete: Cascade)
+  reactions ProjectMessageReaction[]
+
+  // Newest-first by (projectId, createdAt) is what the chat pane pages.
+  @@index([projectId, createdAt])
+  @@index([userId])
+}
+
+model ProjectMessageReaction {
+  messageId String   @db.Uuid
+  userId    String   @db.Uuid
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message ProjectMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User           @relation("ProjectMessageReactionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Composite PK: one row per (message, user, emoji). Toggling deletes the row.
+  @@id([messageId, userId, emoji])
+  @@index([messageId])
 }
