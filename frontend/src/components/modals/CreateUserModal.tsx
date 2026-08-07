@@ -284,24 +284,72 @@ export function CreateUserModal({
 }
 
 /**
- * Project-access picker, AWS-IAM style.
+ * Per-project access picker with click-to-expand capability checkboxes.
  *
- * The admin picks ONE role at the top and then checks which projects it
- * applies to — same shape as attaching an IAM policy to a set of resources.
- * Prior version had a per-row role dropdown, which turned selecting five
- * projects into ten clicks; this collapses it to one radio + N checkboxes.
+ * The admin sees the full project list. Clicking a project name expands its
+ * capability panel — one checkbox per meaningful action. Selecting any
+ * capability adds an implicit "View project", because seeing nothing but
+ * being able to write to it makes no sense.
  *
- * A per-project role override is deliberately NOT in the first version. If a
- * particular user genuinely needs "viewer on A, developer on B" the admin can
- * create them at the higher role, then downgrade the outlier from the
- * project's own members page — that's rare enough not to complicate the
- * common case.
+ * IMPORTANT ARCHITECTURAL NOTE (2026-08). The backend still has three roles
+ * — viewer / developer / owner — not per-capability permissions. The
+ * checkboxes here are UX; on submit they're collapsed to the SMALLEST role
+ * that covers everything ticked. Real per-capability enforcement (each
+ * checkbox becomes its own permission enforced by every route) is a
+ * separate backend project — flagged, not done. Semantics for the admin
+ * still work: ticking "Manage team members" grants the exact ability, it
+ * just also grants everything else `owner` grants.
+ *
+ * Capability → minimum role:
+ *   view / view_secrets / deploy / manage_secrets / manage_cloud → developer (or viewer for view alone)
+ *   manage_members / manage_settings / delete_project → owner
  */
-const ROLE_OPTIONS: Array<{ value: ProjectMembership["role"]; label: string; hint: string }> = [
-  { value: "viewer", label: "View access", hint: "Read-only — dashboards, logs, env viewer" },
-  { value: "developer", label: "Full access", hint: "Read + write — everything except transferring ownership" },
-  { value: "owner", label: "Owner", hint: "Everything, including deleting the project" },
+type Capability =
+  | "view"
+  | "view_secrets"
+  | "deploy"
+  | "manage_secrets"
+  | "manage_cloud"
+  | "manage_members"
+  | "manage_settings"
+  | "delete_project";
+
+const CAPABILITIES: Array<{ id: Capability; label: string; hint: string; requires: ProjectMembership["role"] }> = [
+  { id: "view", label: "View project", hint: "See dashboards, resources, logs (read-only).", requires: "viewer" },
+  { id: "view_secrets", label: "Reveal secret values", hint: "Env viewer + inspect pod env (still requires TOTP step-up).", requires: "developer" },
+  { id: "deploy", label: "Deploy applications", hint: "Trigger CI/CD, run pipelines, apply manifests.", requires: "developer" },
+  { id: "manage_secrets", label: "Manage app secrets", hint: "Write app-env values, connect databases.", requires: "developer" },
+  { id: "manage_cloud", label: "Manage cloud connections", hint: "Connect AWS / Azure / GCP accounts to this project.", requires: "developer" },
+  { id: "manage_members", label: "Manage team members", hint: "Invite people to the project and change their roles.", requires: "owner" },
+  { id: "manage_settings", label: "Manage project settings", hint: "Rename, archive, change the target cloud.", requires: "owner" },
+  { id: "delete_project", label: "Transfer or delete project", hint: "Destructive — includes transferring ownership.", requires: "owner" },
 ];
+
+const RANK: Record<ProjectMembership["role"], number> = { viewer: 1, developer: 2, owner: 3 };
+
+/** Map a set of capability slugs to the smallest role that covers them all. */
+function capabilitiesToRole(caps: Set<Capability>): ProjectMembership["role"] | null {
+  if (caps.size === 0) return null;
+  let role: ProjectMembership["role"] = "viewer";
+  for (const cap of caps) {
+    const need = CAPABILITIES.find((c) => c.id === cap)!.requires;
+    if (RANK[need] > RANK[role]) role = need;
+  }
+  return role;
+}
+
+/** Reverse map — used to preselect a project's checkboxes from an existing role. */
+function roleToCapabilities(role: ProjectMembership["role"]): Set<Capability> {
+  const out = new Set<Capability>();
+  for (const cap of CAPABILITIES) if (RANK[role] >= RANK[cap.requires]) out.add(cap.id);
+  return out;
+}
+
+const ROLE_LABEL: Record<ProjectMembership["role"], string> = {
+  viewer: "Viewer",
+  developer: "Developer",
+  owner: "Owner",
+};
 
 function ProjectMembershipPicker({
   projects,
@@ -314,11 +362,15 @@ function ProjectMembershipPicker({
   onChange: (next: ProjectMembership[]) => void;
   loading: boolean;
 }) {
-  const [role, setRole] = useState<ProjectMembership["role"]>(
-    // Preserve whatever role the existing selections use (if any) so switching
-    // "Access" tier off and back on doesn't silently downgrade the picks.
-    (memberships[0]?.role ?? "developer") as ProjectMembership["role"],
-  );
+  // Per-project checkbox state, keyed by projectId. Kept local to this
+  // component so the modal-level state stays flat (memberships[]) — the two
+  // sync via a useEffect at the end of every capability change.
+  const [caps, setCaps] = useState<Map<string, Set<Capability>>>(() => {
+    const out = new Map<string, Set<Capability>>();
+    for (const m of memberships) out.set(m.projectId, roleToCapabilities(m.role));
+    return out;
+  });
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
   if (loading) return <p style={{ margin: 0, fontSize: 13, opacity: 0.6 }}>Loading projects…</p>;
@@ -330,104 +382,58 @@ function ProjectMembershipPicker({
     );
   }
 
-  const selected = new Set(memberships.map((m) => m.projectId));
   const visible = filter.trim()
     ? projects.filter((p) => p.name.toLowerCase().includes(filter.trim().toLowerCase()))
     : projects;
 
-  function setRoleForAll(next: ProjectMembership["role"]) {
-    setRole(next);
-    // Re-stamp the role on every existing pick so the top control stays a
-    // single source of truth. If a user WANTS "viewer on A, developer on B"
-    // they can flip individual checkboxes off, change the role, and re-check
-    // — messy but explicit, and matches how AWS IAM policy-swaps work.
-    onChange(memberships.map((m) => ({ ...m, role: next })));
-  }
-
-  function toggle(projectId: string) {
-    if (selected.has(projectId)) {
-      onChange(memberships.filter((m) => m.projectId !== projectId));
-    } else {
-      onChange([...memberships, { projectId, role }]);
+  function updateCaps(projectId: string, next: Set<Capability>) {
+    const nextMap = new Map(caps);
+    if (next.size === 0) nextMap.delete(projectId);
+    else nextMap.set(projectId, next);
+    setCaps(nextMap);
+    // Sync back to memberships[]: role = smallest that covers the ticked caps.
+    const out: ProjectMembership[] = [];
+    for (const [pid, capSet] of nextMap) {
+      const role = capabilitiesToRole(capSet);
+      if (role) out.push({ projectId: pid, role });
     }
+    onChange(out);
   }
 
-  function setAll(check: boolean) {
-    if (check) {
-      // "Select all" respects the current filter — clicking it while a search
-      // is active only adds the visible ones, matching how every checkbox
-      // list in this app already behaves.
-      const ids = new Set(visible.map((p) => p.id));
-      const others = memberships.filter((m) => !ids.has(m.projectId));
-      const added = visible.map((p) => ({ projectId: p.id, role }));
-      onChange([...others, ...added]);
-    } else {
-      const ids = new Set(visible.map((p) => p.id));
-      onChange(memberships.filter((m) => !ids.has(m.projectId)));
+  function toggleCap(projectId: string, cap: Capability) {
+    const current = new Set(caps.get(projectId) ?? []);
+    if (current.has(cap)) current.delete(cap);
+    else {
+      current.add(cap);
+      // Any non-view capability implicitly grants view — no ability to write
+      // to something you can't see. Enforced client-side so the checkbox state
+      // reflects the honest capability set.
+      if (cap !== "view") current.add("view");
     }
+    updateCaps(projectId, current);
   }
 
-  const visibleSelectedCount = visible.filter((p) => selected.has(p.id)).length;
-  const allVisibleChecked = visible.length > 0 && visibleSelectedCount === visible.length;
+  function applyPreset(projectId: string, preset: "view" | "full" | "owner" | "none") {
+    if (preset === "none") return updateCaps(projectId, new Set());
+    const role: ProjectMembership["role"] =
+      preset === "view" ? "viewer" : preset === "full" ? "developer" : "owner";
+    updateCaps(projectId, roleToCapabilities(role));
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* Role radio group — one choice applies to every checked project. */}
-      <div
-        role="radiogroup"
-        aria-label="Role for selected projects"
-        style={{ display: "flex", flexDirection: "column", gap: 6 }}
-      >
-        {ROLE_OPTIONS.map((opt) => (
-          <label
-            key={opt.value}
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "flex-start",
-              padding: "6px 10px",
-              border: role === opt.value ? "1px solid var(--accent)" : "1px solid var(--border)",
-              background: role === opt.value ? "var(--accent-soft, rgba(120,120,255,.10))" : "transparent",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 13,
-            }}
-          >
-            <input
-              type="radio"
-              name="proj-role"
-              checked={role === opt.value}
-              onChange={() => setRoleForAll(opt.value)}
-              style={{ marginTop: 2 }}
-            />
-            <span style={{ display: "flex", flexDirection: "column" }}>
-              <strong>{opt.label}</strong>
-              <span style={{ opacity: 0.65, fontSize: 12 }}>{opt.hint}</span>
-            </span>
-          </label>
-        ))}
-      </div>
+      <Input
+        type="text"
+        placeholder={`Search ${projects.length} projects…`}
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
 
-      {/* Filter + select-all bar */}
-      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <Input
-          type="text"
-          placeholder={`Search ${projects.length} projects…`}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          style={{ flex: 1 }}
-        />
-        <Btn variant="ghost" size="sm" onClick={() => setAll(!allVisibleChecked)}>
-          {allVisibleChecked ? "Clear" : "Select all"}
-        </Btn>
-      </div>
-
-      {/* Project checklist */}
       <div
         style={{
           border: "1px solid var(--border)",
           borderRadius: 8,
-          maxHeight: 240,
+          maxHeight: 380,
           overflowY: "auto",
         }}
       >
@@ -437,32 +443,110 @@ function ProjectMembershipPicker({
           </p>
         ) : (
           visible.map((p) => {
-            const isChecked = selected.has(p.id);
+            const capSet = caps.get(p.id) ?? new Set<Capability>();
+            const role = capabilitiesToRole(capSet);
+            const isOpen = expanded === p.id;
             return (
-              <label
-                key={p.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 12px",
-                  borderBottom: "1px solid var(--border)",
-                  cursor: "pointer",
-                  background: isChecked ? "var(--accent-soft, rgba(120,120,255,.06))" : "transparent",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isChecked}
-                  onChange={() => toggle(p.id)}
-                />
-                <span style={{ flex: 1, fontSize: 13 }}>{p.name}</span>
-                {isChecked && (
-                  <span style={{ fontSize: 11, opacity: 0.6 }}>
-                    {ROLE_OPTIONS.find((r) => r.value === role)?.label}
+              <div key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                {/* Row header — click to expand */}
+                <button
+                  type="button"
+                  onClick={() => setExpanded(isOpen ? null : p.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    width: "100%",
+                    padding: "10px 12px",
+                    border: "none",
+                    background: role
+                      ? "var(--accent-soft, rgba(120,120,255,.06))"
+                      : "transparent",
+                    cursor: "pointer",
+                    font: "inherit",
+                    color: "inherit",
+                    textAlign: "left",
+                  }}
+                >
+                  <Icon name={isOpen ? "chevD" : "chevR"} size={12} />
+                  <span style={{ flex: 1, fontSize: 13 }}>{p.name}</span>
+                  <span style={{ fontSize: 11, opacity: 0.7 }}>
+                    {role ? `${ROLE_LABEL[role]} · ${capSet.size} of ${CAPABILITIES.length}` : "No access"}
                   </span>
+                </button>
+
+                {/* Expanded capability panel */}
+                {isOpen && (
+                  <div
+                    style={{
+                      padding: "8px 12px 14px 34px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      background: "var(--surface-1)",
+                    }}
+                  >
+                    {/* Presets — one click for the common cases */}
+                    <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                      <Btn size="sm" variant="outline" onClick={() => applyPreset(p.id, "view")}>
+                        Preset: View only
+                      </Btn>
+                      <Btn size="sm" variant="outline" onClick={() => applyPreset(p.id, "full")}>
+                        Full access
+                      </Btn>
+                      <Btn size="sm" variant="outline" onClick={() => applyPreset(p.id, "owner")}>
+                        Owner
+                      </Btn>
+                      {role && (
+                        <Btn size="sm" variant="ghost" onClick={() => applyPreset(p.id, "none")}>
+                          Clear
+                        </Btn>
+                      )}
+                    </div>
+
+                    {CAPABILITIES.map((cap) => {
+                      const checked = capSet.has(cap.id);
+                      // "view" is implied by any other tick — surface as
+                      // disabled+checked when the user has picked something
+                      // else, so they understand the coupling rather than
+                      // finding a checkbox that mysteriously flips itself on.
+                      const implied = cap.id === "view" && !checked === false && capSet.size > 1;
+                      return (
+                        <label
+                          key={cap.id}
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "flex-start",
+                            padding: "4px 0",
+                            cursor: implied ? "default" : "pointer",
+                            fontSize: 13,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={implied}
+                            onChange={() => toggleCap(p.id, cap.id)}
+                            style={{ marginTop: 2 }}
+                          />
+                          <span style={{ display: "flex", flexDirection: "column" }}>
+                            <span>
+                              <strong>{cap.label}</strong>
+                              {implied && (
+                                <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.5 }}>
+                                  (implied)
+                                </span>
+                              )}
+                            </span>
+                            <span style={{ opacity: 0.6, fontSize: 12 }}>{cap.hint}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 )}
-              </label>
+              </div>
             );
           })
         )}
@@ -471,7 +555,7 @@ function ProjectMembershipPicker({
       <p style={{ margin: 0, fontSize: 12, opacity: 0.65 }}>
         {memberships.length === 0
           ? "No projects selected — user will only see projects added later."
-          : `${memberships.length} project${memberships.length === 1 ? "" : "s"} — user gets ${ROLE_OPTIONS.find((r) => r.value === role)?.label.toLowerCase()} on each.`}
+          : `Access on ${memberships.length} project${memberships.length === 1 ? "" : "s"}.`}
       </p>
     </div>
   );
