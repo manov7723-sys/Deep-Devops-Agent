@@ -77,7 +77,24 @@ WORKDIR /app
 # aws-cli v2 from the alpine community repo — a musl-native build, so no glibc
 # compatibility shim is needed. This is the largest added layer (~120MB with
 # its python runtime); that is the cost of the 35 `aws` shell-outs.
+#
+# NOTE (2026-08): AWS operations are migrating from this CLI to the AWS Labs
+# MCP server (`aws-via-mcp.ts`). The CLI stays as the fallback path while
+# migration is in progress — code prefers MCP when a connector is registered.
+# Once every AWS call site is MCP-only in prod, drop `aws-cli` here and the
+# image shrinks by ~120MB.
 RUN apk add --no-cache aws-cli ca-certificates
+
+# uv / uvx — spawns MCP servers written in Python (e.g. awslabs.aws-api-mcp-
+# server) as stdio subprocesses. `python3` alone is not enough: uvx is the one
+# that fetches, caches, and runs the package inside an isolated environment.
+# python3 is already installed as a dep of aws-cli; only py3-pip and uv add.
+#
+# `--break-system-packages` is required on Alpine's PEP 668-managed python.
+# This is a container, not a shared host, so overriding is the right call —
+# there is no other Python workload here to be broken.
+RUN apk add --no-cache py3-pip \
+ && pip install --no-cache-dir --break-system-packages uv
 
 # Static CLIs from the tools stage.
 COPY --from=tools /out-kubectl    /usr/local/bin/kubectl
@@ -90,7 +107,8 @@ COPY --from=tools /out-terraform  /usr/local/bin/terraform
 RUN kubectl version --client=true --output=yaml > /dev/null \
  && helm version --short \
  && terraform version \
- && aws --version
+ && aws --version \
+ && uvx --version
 
 # Copy the built app WITH its node_modules from the builder (avoids a second
 # install and guarantees framework binaries + build output are present).
