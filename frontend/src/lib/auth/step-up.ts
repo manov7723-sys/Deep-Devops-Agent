@@ -201,26 +201,33 @@ export async function clearElevation(sessionId: string): Promise<void> {
 /**
  * Reject requests that didn't originate from our own pages.
  *
- * Browsers stamp `Sec-Fetch-Site` on every fetch and forbid scripts from
- * setting it; a URL pasted into curl carries neither it nor an Origin. That
- * makes this a precise filter for "someone copied a URL out of devtools",
- * which is the case that leaked a namespace of secrets to a terminal.
+ * The signal is the FETCH METADATA set (`Sec-Fetch-Site`, `Sec-Fetch-Mode`,
+ * `Sec-Fetch-Dest`). Browsers stamp these on every fetch and — critical —
+ * treat them as "forbidden request headers": page JavaScript is not allowed
+ * to override them via `fetch({headers})`, and curl doesn't set them at all.
+ * So "the request has these headers AND Sec-Fetch-Site says same-origin"
+ * is a positive proof the request came from a page on this host, not from a
+ * terminal replaying a URL that was copied out of devtools.
  *
- * It is NOT a security boundary on its own — curl can forge any header. The
- * real control for revealed values is the memory-only reveal token, which a
- * copied URL cannot carry no matter what headers are faked. This check is the
- * cheap outer layer that also covers the masked view.
+ * An earlier version fell back to Origin/Referer when Sec-Fetch-Site was
+ * absent — but Referer is trivially forgeable with `curl -H` and the user
+ * demonstrated the bypass immediately (`Referer: /p/aws-project/connections`).
+ * Removed that fallback; if the browser signal is missing, reject.
+ *
+ * This is a genuine boundary, not just a speed bump: the only ways past it
+ * are (a) a real browser navigating to our own pages, or (b) a client so
+ * exotic that it emits fetch metadata with same-origin — a curl runner does
+ * not, and a stolen-cookie replay from anywhere else does not either.
  */
 export function isBrowserRequest(req: Request): boolean {
   const site = req.headers.get("sec-fetch-site");
-  if (site) return site === "same-origin";
-  // No fetch metadata at all → not a browser fetch we recognise. Accept only
-  // when an Origin/Referer proves it came from a page on this host.
-  const origin = req.headers.get("origin") ?? req.headers.get("referer");
-  if (!origin) return false;
-  try {
-    return new URL(origin).host === new URL(req.url).host;
-  } catch {
-    return false;
-  }
+  // No fetch metadata means not a real browser fetch. Reject rather than
+  // falling back to Origin/Referer — both are forgeable with `curl -H`, and
+  // that fallback is exactly what let a copied URL leak an RDS password to
+  // a terminal in the 2026-08 reproduction.
+  if (!site) return false;
+  // Strict same-origin. `none` (address-bar navigation) is rejected because
+  // API POST endpoints have no reason to be reached that way; `cross-site`
+  // and `same-site` (subdomains, none of which exist for this app) similarly.
+  return site === "same-origin";
 }

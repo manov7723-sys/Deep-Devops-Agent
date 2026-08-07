@@ -10,6 +10,7 @@
  *   transfer / delete → owner only
  */
 import type { ProjectRole } from "@prisma/client";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/db/prisma";
 import { getActiveSession, type LoadedSession } from "@/lib/auth/session";
 
@@ -34,12 +35,46 @@ export type ProjectAccess = {
 };
 
 export type GateResult =
-  { ok: true; access: ProjectAccess } | { ok: false; status: 401 | 403 | 404 };
+  | { ok: true; access: ProjectAccess }
+  | { ok: false; status: 401 | 403 | 404; code?: "not_a_browser" };
 
+/**
+ * Server-side authorization gate for project routes.
+ *
+ * BROWSER-ONLY BY DEFAULT. Reads `Sec-Fetch-Site` from the ambient request via
+ * next/headers — Next.js already gives us the current request's headers there,
+ * so this covers all 188 project-gated API routes without touching any call
+ * site.
+ *
+ * WHY: without this, a session cookie stolen from a browser — or a URL copied
+ * out of DevTools into curl — could POST to /rds-connect and write arbitrary
+ * K8s Secrets with attacker-supplied passwords. The user reproduced that leak
+ * in 2026-08. Sec-Fetch-Site is set by every real browser fetch and forbidden
+ * to page scripts, so requiring `same-origin` is a precise filter that curl
+ * cannot pass without explicit spoofing — and even then it's rejected unless
+ * the value matches exactly. `curl -H 'Sec-Fetch-Site: same-origin'` would
+ * bypass this check; that's a known limitation of any header-based control and
+ * why sensitive UI actions ALSO get server-side CSRF (see the reveal token in
+ * env-viewer). This layer catches the naive attack, which is the vast majority.
+ *
+ * SSR EXEMPTION: server components that call this gate use next/headers's
+ * built-in cookie/header access and don't emit their own Sec-Fetch-Site header
+ * to themselves. Detecting an SSR context is `!headerStore.get("host")` in
+ * practice — but the gate is now called from API route handlers only (the
+ * SSR page-guard is requireProjectPage in page-guards.ts, a separate path),
+ * so this concern doesn't apply here.
+ */
 export async function requireProjectAccess(
   slug: string,
   minRole: ProjectRole = "viewer",
 ): Promise<GateResult> {
+  const h = await headers();
+  const site = h.get("sec-fetch-site");
+  if (site !== "same-origin") {
+    // Reject before any DB lookup — no info about the project should leak
+    // to a caller we've already decided isn't allowed to be here.
+    return { ok: false, status: 403, code: "not_a_browser" };
+  }
   const session = await getActiveSession();
   if (!session) return { ok: false, status: 401 };
 
