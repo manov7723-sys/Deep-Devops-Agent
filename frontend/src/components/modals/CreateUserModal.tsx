@@ -283,6 +283,26 @@ export function CreateUserModal({
   );
 }
 
+/**
+ * Project-access picker, AWS-IAM style.
+ *
+ * The admin picks ONE role at the top and then checks which projects it
+ * applies to — same shape as attaching an IAM policy to a set of resources.
+ * Prior version had a per-row role dropdown, which turned selecting five
+ * projects into ten clicks; this collapses it to one radio + N checkboxes.
+ *
+ * A per-project role override is deliberately NOT in the first version. If a
+ * particular user genuinely needs "viewer on A, developer on B" the admin can
+ * create them at the higher role, then downgrade the outlier from the
+ * project's own members page — that's rare enough not to complicate the
+ * common case.
+ */
+const ROLE_OPTIONS: Array<{ value: ProjectMembership["role"]; label: string; hint: string }> = [
+  { value: "viewer", label: "View access", hint: "Read-only — dashboards, logs, env viewer" },
+  { value: "developer", label: "Full access", hint: "Read + write — everything except transferring ownership" },
+  { value: "owner", label: "Owner", hint: "Everything, including deleting the project" },
+];
+
 function ProjectMembershipPicker({
   projects,
   memberships,
@@ -294,6 +314,13 @@ function ProjectMembershipPicker({
   onChange: (next: ProjectMembership[]) => void;
   loading: boolean;
 }) {
+  const [role, setRole] = useState<ProjectMembership["role"]>(
+    // Preserve whatever role the existing selections use (if any) so switching
+    // "Access" tier off and back on doesn't silently downgrade the picks.
+    (memberships[0]?.role ?? "developer") as ProjectMembership["role"],
+  );
+  const [filter, setFilter] = useState("");
+
   if (loading) return <p style={{ margin: 0, fontSize: 13, opacity: 0.6 }}>Loading projects…</p>;
   if (projects.length === 0) {
     return (
@@ -303,51 +330,149 @@ function ProjectMembershipPicker({
     );
   }
 
-  const roleFor = (id: string) => memberships.find((m) => m.projectId === id)?.role ?? "";
-  const toggle = (id: string, role: string) => {
-    const rest = memberships.filter((m) => m.projectId !== id);
-    if (!role) onChange(rest);
-    else
-      onChange([...rest, { projectId: id, role: role as ProjectMembership["role"] }]);
-  };
+  const selected = new Set(memberships.map((m) => m.projectId));
+  const visible = filter.trim()
+    ? projects.filter((p) => p.name.toLowerCase().includes(filter.trim().toLowerCase()))
+    : projects;
+
+  function setRoleForAll(next: ProjectMembership["role"]) {
+    setRole(next);
+    // Re-stamp the role on every existing pick so the top control stays a
+    // single source of truth. If a user WANTS "viewer on A, developer on B"
+    // they can flip individual checkboxes off, change the role, and re-check
+    // — messy but explicit, and matches how AWS IAM policy-swaps work.
+    onChange(memberships.map((m) => ({ ...m, role: next })));
+  }
+
+  function toggle(projectId: string) {
+    if (selected.has(projectId)) {
+      onChange(memberships.filter((m) => m.projectId !== projectId));
+    } else {
+      onChange([...memberships, { projectId, role }]);
+    }
+  }
+
+  function setAll(check: boolean) {
+    if (check) {
+      // "Select all" respects the current filter — clicking it while a search
+      // is active only adds the visible ones, matching how every checkbox
+      // list in this app already behaves.
+      const ids = new Set(visible.map((p) => p.id));
+      const others = memberships.filter((m) => !ids.has(m.projectId));
+      const added = visible.map((p) => ({ projectId: p.id, role }));
+      onChange([...others, ...added]);
+    } else {
+      const ids = new Set(visible.map((p) => p.id));
+      onChange(memberships.filter((m) => !ids.has(m.projectId)));
+    }
+  }
+
+  const visibleSelectedCount = visible.filter((p) => selected.has(p.id)).length;
+  const allVisibleChecked = visible.length > 0 && visibleSelectedCount === visible.length;
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        maxHeight: 220,
-        overflowY: "auto",
-      }}
-    >
-      {projects.map((p) => {
-        const current = roleFor(p.id);
-        return (
-          <div
-            key={p.id}
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Role radio group — one choice applies to every checked project. */}
+      <div
+        role="radiogroup"
+        aria-label="Role for selected projects"
+        style={{ display: "flex", flexDirection: "column", gap: 6 }}
+      >
+        {ROLE_OPTIONS.map((opt) => (
+          <label
+            key={opt.value}
             style={{
               display: "flex",
-              alignItems: "center",
               gap: 8,
+              alignItems: "flex-start",
               padding: "6px 10px",
-              borderBottom: "1px solid var(--border)",
+              border: role === opt.value ? "1px solid var(--accent)" : "1px solid var(--border)",
+              background: role === opt.value ? "var(--accent-soft, rgba(120,120,255,.10))" : "transparent",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 13,
             }}
           >
-            <span style={{ flex: 1, fontSize: 13 }}>{p.name}</span>
-            <Select
-              value={current}
-              placeholder="—"
-              options={[
-                { value: "", label: "— no access" },
-                { value: "viewer", label: "viewer" },
-                { value: "developer", label: "developer" },
-                { value: "owner", label: "owner" },
-              ]}
-              onValueChange={(v) => toggle(p.id, v)}
+            <input
+              type="radio"
+              name="proj-role"
+              checked={role === opt.value}
+              onChange={() => setRoleForAll(opt.value)}
+              style={{ marginTop: 2 }}
             />
-          </div>
-        );
-      })}
+            <span style={{ display: "flex", flexDirection: "column" }}>
+              <strong>{opt.label}</strong>
+              <span style={{ opacity: 0.65, fontSize: 12 }}>{opt.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {/* Filter + select-all bar */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <Input
+          type="text"
+          placeholder={`Search ${projects.length} projects…`}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          style={{ flex: 1 }}
+        />
+        <Btn variant="ghost" size="sm" onClick={() => setAll(!allVisibleChecked)}>
+          {allVisibleChecked ? "Clear" : "Select all"}
+        </Btn>
+      </div>
+
+      {/* Project checklist */}
+      <div
+        style={{
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          maxHeight: 240,
+          overflowY: "auto",
+        }}
+      >
+        {visible.length === 0 ? (
+          <p style={{ margin: 0, padding: 12, fontSize: 13, opacity: 0.6, textAlign: "center" }}>
+            No projects match &ldquo;{filter}&rdquo;.
+          </p>
+        ) : (
+          visible.map((p) => {
+            const isChecked = selected.has(p.id);
+            return (
+              <label
+                key={p.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  cursor: "pointer",
+                  background: isChecked ? "var(--accent-soft, rgba(120,120,255,.06))" : "transparent",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => toggle(p.id)}
+                />
+                <span style={{ flex: 1, fontSize: 13 }}>{p.name}</span>
+                {isChecked && (
+                  <span style={{ fontSize: 11, opacity: 0.6 }}>
+                    {ROLE_OPTIONS.find((r) => r.value === role)?.label}
+                  </span>
+                )}
+              </label>
+            );
+          })
+        )}
+      </div>
+
+      <p style={{ margin: 0, fontSize: 12, opacity: 0.65 }}>
+        {memberships.length === 0
+          ? "No projects selected — user will only see projects added later."
+          : `${memberships.length} project${memberships.length === 1 ? "" : "s"} — user gets ${ROLE_OPTIONS.find((r) => r.value === role)?.label.toLowerCase()} on each.`}
+      </p>
     </div>
   );
 }
