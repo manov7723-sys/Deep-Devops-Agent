@@ -104,6 +104,10 @@ export type LoadedSession = {
     name: string;
     isSuperAdmin: boolean;
     twoFactorEnabled: boolean;
+    // Global project-access tier — see GlobalAccess enum in the schema.
+    // Loaded on every session read so gates in requireProjectAccess and
+    // POST /projects don't have to re-query the User table.
+    globalAccess: "none" | "view_all" | "full_all" | "admin";
   };
 };
 
@@ -116,7 +120,14 @@ async function loadByCookie(cookieName: string): Promise<LoadedSession | null> {
     where: { tokenHash },
     include: {
       user: {
-        select: { id: true, email: true, name: true, isSuperAdmin: true, twoFactorEnabled: true },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isSuperAdmin: true,
+          twoFactorEnabled: true,
+          globalAccess: true,
+        },
       },
     },
   });

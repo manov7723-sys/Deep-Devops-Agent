@@ -109,34 +109,27 @@ export async function POST(req: Request) {
   }
   const data = parsed.data;
 
-  // Same gate as POST /projects: only a lead of the chosen team can create
-  // projects under it. Duplicating the check here rather than delegating so a
-  // failed gate returns cleanly BEFORE the transaction that creates the row —
-  // and BEFORE the wizard's side-steps start doing external work.
+  // Same gate as POST /projects: admin-only (2026-08). Duplicated here — not
+  // delegated — so a failed gate returns before the wizard's side-steps do
+  // any external work (repo attach, cloud connect, tfstate provisioning).
+  if (sess.user.globalAccess !== "admin" && !sess.user.isSuperAdmin) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "admin_only",
+        message: "Only an admin can create projects. Ask your admin.",
+      },
+      { status: 403 },
+    );
+  }
   const team = await prisma.team.findUnique({
     where: { slug: data.teamSlug },
-    select: {
-      id: true,
-      memberships: { where: { userId: sess.userId }, select: { role: true } },
-    },
+    select: { id: true },
   });
   if (!team) {
     return NextResponse.json(
       { ok: false, code: "team_not_found", message: `Team "${data.teamSlug}" does not exist.` },
       { status: 404 },
-    );
-  }
-  const teamRole = team.memberships[0]?.role;
-  if (teamRole !== "lead") {
-    return NextResponse.json(
-      {
-        ok: false,
-        code: "not_team_lead",
-        message: !teamRole
-          ? `You are not a member of "${data.teamSlug}". Ask a lead to invite you before creating projects here.`
-          : `Only a team LEAD can create projects under "${data.teamSlug}". Ask a lead of this team.`,
-      },
-      { status: 403 },
     );
   }
 

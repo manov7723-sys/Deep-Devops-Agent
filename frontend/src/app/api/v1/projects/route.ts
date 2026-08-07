@@ -34,33 +34,29 @@ export async function POST(req: Request) {
   }
   const { name, description, colorHue, teamSlug } = parsed.data;
 
-  // Only a TEAM LEAD can create projects under a team. Members can't, non-
-  // members obviously can't. Enforced here so the UI can offer a plain slug
-  // picker without shipping every user's role in the client.
+  // ADMIN ONLY (2026-08). This app runs as an admin-managed platform: users
+  // signed in from an admin-issued account can NOT create projects. The team
+  // still owns the project (so members inherit visibility), but only an admin
+  // has creation authority. Previous version gated on team-lead role — that
+  // was a stepping-stone; the requirement is admin-only.
+  if (sess.user.globalAccess !== "admin" && !sess.user.isSuperAdmin) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "admin_only",
+        message: "Only an admin can create projects. Ask your admin.",
+      },
+      { status: 403 },
+    );
+  }
   const team = await prisma.team.findUnique({
     where: { slug: teamSlug },
-    select: {
-      id: true,
-      memberships: { where: { userId: sess.userId }, select: { role: true } },
-    },
+    select: { id: true },
   });
   if (!team) {
     return NextResponse.json(
       { ok: false, code: "team_not_found", message: `Team "${teamSlug}" does not exist.` },
       { status: 404 },
-    );
-  }
-  const m = team.memberships[0];
-  if (!m || m.role !== "lead") {
-    return NextResponse.json(
-      {
-        ok: false,
-        code: "not_team_lead",
-        message: !m
-          ? `You are not a member of "${teamSlug}". Ask a lead to invite you before creating projects here.`
-          : `Only a team LEAD can create projects under "${teamSlug}". Ask a lead of this team.`,
-      },
-      { status: 403 },
     );
   }
 

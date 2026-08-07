@@ -8,6 +8,8 @@ import { ProjectCard } from "@/components/domain/ProjectCard";
 import { CreateProjectWizard } from "@/components/modals/CreateProjectWizard";
 import { DeleteProjectModal } from "@/components/modals/DeleteProjectModal";
 import { useProjects } from "@/hooks/queries/projects";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api/client";
 
 function genDraftId() {
   // Deterministic enough for the wizard — wireframe-only state, no security.
@@ -17,6 +19,16 @@ function genDraftId() {
 
 export function UserProjectsClient() {
   const { data: projects } = useProjects();
+  // Only admins can create projects — the button and the empty-state "create
+  // new" tile disappear for everyone else. /auth/me exposes this pre-computed;
+  // the server-side gate on POST /projects still rejects a hand-crafted
+  // attempt from a non-admin.
+  const { data: me } = useQuery<{ user: { canCreateProjects: boolean } }>({
+    queryKey: ["auth", "me"],
+    queryFn: () => api.get("/auth/me"),
+    staleTime: 60_000,
+  });
+  const canCreate = me?.user.canCreateProjects === true;
   const router = useRouter();
   const params = useSearchParams();
   const wizardOpen = params.get("new") === "1";
@@ -60,11 +72,17 @@ export function UserProjectsClient() {
     <div className="col gap-5">
       <PageHead
         title="Projects"
-        sub="Every product you're running on DeepAgent."
+        sub={
+          canCreate
+            ? "Every product you're running on DeepAgent."
+            : "Projects your admin has given you access to. Ask your admin to create new ones or grant additional access."
+        }
         actions={
-          <Btn variant="primary" icon="plus" onClick={() => setWizard(true)}>
-            New project
-          </Btn>
+          canCreate ? (
+            <Btn variant="primary" icon="plus" onClick={() => setWizard(true)}>
+              New project
+            </Btn>
+          ) : null
         }
       />
 
@@ -77,7 +95,7 @@ export function UserProjectsClient() {
             onDelete={() => setToDelete({ slug: p.slug, name: p.name })}
           />
         ))}
-        <ProjectCard variant="create-new" onCreate={() => setWizard(true)} />
+        {canCreate && <ProjectCard variant="create-new" onCreate={() => setWizard(true)} />}
       </TileGrid>
 
       <DeleteProjectModal

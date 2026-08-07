@@ -48,6 +48,26 @@ enum TeamRole {
   member
 }
 
+// Global access tier on a User, granted only by an admin. Orthogonal to
+// per-project Membership — a user with `full_all` sees every project without
+// needing a Membership row per project. Modelled after AWS IAM's spectrum:
+//
+//   none      : sees ONLY projects where a Membership row exists (default).
+//   view_all  : read-only across every project — no writes anywhere.
+//   full_all  : developer-tier access across every project (no ownership).
+//   admin     : super-admin; supersedes isSuperAdmin, does everything.
+//
+// `admin` is the platform admin — the account that creates users and grants
+// these tiers. `isSuperAdmin` is kept as the boolean gate the /admin routes
+// already check; the backfill promotes any existing isSuperAdmin=true user
+// to globalAccess=admin so both stay in sync.
+enum GlobalAccess {
+  none
+  view_all
+  full_all
+  admin
+}
+
 enum HealthStatus {
   ok
   warn
@@ -315,6 +335,10 @@ model User {
   timezone              String?
   passwordHash          String?
   isSuperAdmin          Boolean     @default(false) // platform admin flag (NOT a project role)
+  // Global project-access tier granted by an admin. Default `none` = the user
+  // sees ONLY projects where they hold a Membership. See enum for the full
+  // spectrum. Admin creates + assigns; users can't self-modify.
+  globalAccess          GlobalAccess @default(none)
   role                  AccountRole @default(owner) // account-level role (profile card)
   twoFactorEnabled      Boolean     @default(false)
   emailVerifiedAt       DateTime? // set when an email_verify MagicLink is consumed

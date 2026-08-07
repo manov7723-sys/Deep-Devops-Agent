@@ -120,11 +120,27 @@ export async function requireProjectPageAccess(
     where: { projectId_userId: { projectId: project.id, userId: session.userId } },
     select: { role: true },
   });
-  // Non-members get 404 — the route surface must not differentiate
-  // "no such project" from "you can't see this one".
-  if (!membership) return { ok: false, status: 404 };
 
-  if (RANK[membership.role] < RANK[minRole]) {
+  // Global-access tiers bypass the "must have Membership" rule. A viewer_all
+  // gets read-only access to every project; full_all gets developer-tier;
+  // admin gets owner. This is what makes "admin sees everything" and the
+  // read-only tier work without an explicit Membership row per project.
+  const global = session.user.globalAccess;
+  const effectiveRole: ProjectRole | null = membership
+    ? membership.role
+    : global === "admin"
+      ? "owner"
+      : global === "full_all"
+        ? "developer"
+        : global === "view_all"
+          ? "viewer"
+          : null;
+
+  // Non-members without any global tier get 404 — the route surface must not
+  // differentiate "no such project" from "you can't see this one".
+  if (!effectiveRole) return { ok: false, status: 404 };
+
+  if (RANK[effectiveRole] < RANK[minRole]) {
     return { ok: false, status: 403 };
   }
 
@@ -145,7 +161,11 @@ export async function requireProjectPageAccess(
         updatedAt: project.updatedAt,
         ownerId: project.ownerId,
       },
-      role: membership.role,
+      // The effective role — same as membership.role when a Membership exists,
+      // otherwise synthesised from the caller's global tier (owner/developer/
+      // viewer for admin/full_all/view_all). Route handlers key their UI hints
+      // off this value, so it must reflect what the user can actually do.
+      role: effectiveRole,
     },
   };
 }

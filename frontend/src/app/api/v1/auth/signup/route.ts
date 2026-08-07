@@ -8,6 +8,24 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
 import { audit } from "@/lib/audit/log";
 
 export async function POST(req: Request) {
+  // Public self-signup is closed by default (2026-08). Deep Agent is an
+  // admin-managed application: users are created by an admin from
+  // /admin/users/create, and this endpoint stays available only for the
+  // installations that still WANT open signup (set ALLOW_SELF_SIGNUP=true on
+  // the runner). Every non-admin path — including the sign-up form — should
+  // now direct users to the "contact your admin" flow.
+  if (process.env.ALLOW_SELF_SIGNUP !== "true") {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "signup_disabled",
+        message:
+          "Self-signup is disabled on this installation. Ask your admin to create an account for you.",
+      },
+      { status: 403 },
+    );
+  }
+
   const raw = await req.json().catch(() => ({}));
   const parsed = SignupRequest.safeParse(raw);
   if (!parsed.success) {

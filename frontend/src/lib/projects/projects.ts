@@ -26,27 +26,84 @@ export type ProjectListItem = {
  *  carries env/repo counts + cloud-kind labels so list screens don't need to
  *  fan out per-project queries. */
 export async function listProjectsForUser(userId: string): Promise<ProjectListItem[]> {
+  // Global-access tiers see EVERY project without needing a Membership row.
+  // Cheaper than joining every list through Membership when the answer is "all
+  // of them", and it keeps the list surface consistent with what the
+  // requireProjectAccess gate now allows on each route.
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { globalAccess: true },
+  });
+  const seesAll =
+    user?.globalAccess === "admin" ||
+    user?.globalAccess === "full_all" ||
+    user?.globalAccess === "view_all";
+
+  const projectSelect = {
+    id: true,
+    slug: true,
+    name: true,
+    description: true,
+    colorHue: true,
+    health: true,
+    archivedAt: true,
+    createdAt: true,
+    updatedAt: true,
+    _count: { select: { environments: true, projectRepos: true } },
+    environments: { select: { cloudProvider: { select: { kind: true } } } },
+  } as const;
+
+  if (seesAll) {
+    // Global-view path: read Projects directly + look up ANY membership row
+    // to still report `myRole` correctly for projects the user is also
+    // explicitly on. Cap the read at 200 to keep the payload sane.
+    const [projects, memberships] = await Promise.all([
+      prisma.project.findMany({
+        where: { deletedAt: null },
+        orderBy: { updatedAt: "desc" },
+        select: projectSelect,
+        take: 200,
+      }),
+      prisma.membership.findMany({
+        where: { userId },
+        select: { projectId: true, role: true },
+      }),
+    ]);
+    const roleByProject = new Map(memberships.map((m) => [m.projectId, m.role]));
+    // A global-view user without a Membership still gets a synthetic role
+    // reflecting their tier — read-only for view_all, developer-ish for
+    // full_all/admin so per-page UI enables the same affordances a real
+    // developer would see.
+    const syntheticRole: "owner" | "developer" | "viewer" =
+      user?.globalAccess === "view_all" ? "viewer" : "developer";
+    return projects.map((p) => {
+      const kinds = new Set<string>();
+      for (const env of p.environments) if (env.cloudProvider) kinds.add(env.cloudProvider.kind);
+      return {
+        id: p.id,
+        slug: p.slug,
+        name: p.name,
+        description: p.description,
+        colorHue: p.colorHue,
+        health: p.health,
+        archivedAt: p.archivedAt?.toISOString() ?? null,
+        createdAt: p.createdAt.toISOString(),
+        updatedAt: p.updatedAt.toISOString(),
+        myRole: roleByProject.get(p.id) ?? syntheticRole,
+        envCount: p._count.environments,
+        repoCount: p._count.projectRepos,
+        cloud: [...kinds],
+      };
+    });
+  }
+
+  // Default path: strict membership isolation — the user sees ONLY projects
+  // where they hold a Membership. This is the anti-discovery guarantee: a
+  // user with globalAccess='none' cannot enumerate projects they're not on.
   const rows = await prisma.membership.findMany({
     where: { userId, project: { deletedAt: null } },
     orderBy: { project: { updatedAt: "desc" } },
-    select: {
-      role: true,
-      project: {
-        select: {
-          id: true,
-          slug: true,
-          name: true,
-          description: true,
-          colorHue: true,
-          health: true,
-          archivedAt: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: { select: { environments: true, projectRepos: true } },
-          environments: { select: { cloudProvider: { select: { kind: true } } } },
-        },
-      },
-    },
+    select: { role: true, project: { select: projectSelect } },
   });
   return rows.map((r) => {
     const kinds = new Set<string>();
