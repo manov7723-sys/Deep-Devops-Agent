@@ -4,6 +4,7 @@ import { getActiveSession } from "@/lib/auth/session";
 import { createProject, listProjectsForUser } from "@/lib/projects/projects";
 import { audit } from "@/lib/audit/log";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
+import { prisma } from "@/lib/db/prisma";
 
 export async function GET() {
   const sess = await getActiveSession();
@@ -31,12 +32,44 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  const { name, description, colorHue } = parsed.data;
+  const { name, description, colorHue, teamSlug } = parsed.data;
+
+  // Only a TEAM LEAD can create projects under a team. Members can't, non-
+  // members obviously can't. Enforced here so the UI can offer a plain slug
+  // picker without shipping every user's role in the client.
+  const team = await prisma.team.findUnique({
+    where: { slug: teamSlug },
+    select: {
+      id: true,
+      memberships: { where: { userId: sess.userId }, select: { role: true } },
+    },
+  });
+  if (!team) {
+    return NextResponse.json(
+      { ok: false, code: "team_not_found", message: `Team "${teamSlug}" does not exist.` },
+      { status: 404 },
+    );
+  }
+  const m = team.memberships[0];
+  if (!m || m.role !== "lead") {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "not_team_lead",
+        message: !m
+          ? `You are not a member of "${teamSlug}". Ask a lead to invite you before creating projects here.`
+          : `Only a team LEAD can create projects under "${teamSlug}". Ask a lead of this team.`,
+      },
+      { status: 403 },
+    );
+  }
+
   const project = await createProject({
     ownerId: sess.userId,
     name,
     description,
     colorHue,
+    teamId: team.id,
   });
   const meta = extractRequestMeta(req);
   await audit({

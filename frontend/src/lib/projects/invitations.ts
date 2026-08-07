@@ -192,8 +192,15 @@ export async function previewInvitationByToken(
   };
 }
 
+/**
+ * Same accept surface handles project AND team invites — one URL, one route,
+ * one place to reason about email checks + token consumption. The result
+ * discriminates on `kind` so callers can redirect appropriately (project →
+ * project dashboard, team → team page).
+ */
 export type AcceptInvitationResult =
-  | { ok: true; projectSlug: string; role: ProjectRole }
+  | { ok: true; kind: "project"; projectSlug: string; role: ProjectRole }
+  | { ok: true; kind: "team"; teamSlug: string; teamName: string; role: "lead" | "member" }
   | {
       ok: false;
       code: "not_found" | "expired" | "consumed" | "email_mismatch" | "already_member";
@@ -223,7 +230,61 @@ export async function acceptInvitation(
       project: { select: { slug: true } },
     },
   });
-  if (!invitation) return { ok: false, code: "not_found" };
+
+  // No project invite matched? Try a TEAM invite bound to the same magic
+  // link. Team invites were added 2026-08 and share the /auth/invite URL, so
+  // this is the fork point.
+  if (!invitation) {
+    const teamInvite = await prisma.teamInvitation.findFirst({
+      where: { magicLinkId: looked.id, status: "pending" },
+      select: {
+        id: true,
+        teamId: true,
+        email: true,
+        role: true,
+        team: { select: { slug: true, name: true } },
+      },
+    });
+    if (!teamInvite) return { ok: false, code: "not_found" };
+
+    if (teamInvite.email.toLowerCase() !== acceptingUserEmail.toLowerCase()) {
+      return { ok: false, code: "email_mismatch" };
+    }
+    const already = await prisma.teamMembership.findUnique({
+      where: { teamId_userId: { teamId: teamInvite.teamId, userId: acceptingUserId } },
+      select: { id: true },
+    });
+    if (already) {
+      await consumeMagicLink(token, "invite");
+      await prisma.teamInvitation.update({
+        where: { id: teamInvite.id },
+        data: { status: "accepted", acceptedAt: new Date(), acceptedUserId: acceptingUserId },
+      });
+      return { ok: false, code: "already_member" };
+    }
+    const consumed = await consumeMagicLink(token, "invite");
+    if (!consumed.ok) return { ok: false, code: consumed.reason };
+    await prisma.$transaction([
+      prisma.teamMembership.create({
+        data: {
+          teamId: teamInvite.teamId,
+          userId: acceptingUserId,
+          role: teamInvite.role,
+        },
+      }),
+      prisma.teamInvitation.update({
+        where: { id: teamInvite.id },
+        data: { status: "accepted", acceptedAt: new Date(), acceptedUserId: acceptingUserId },
+      }),
+    ]);
+    return {
+      ok: true,
+      kind: "team",
+      teamSlug: teamInvite.team.slug,
+      teamName: teamInvite.team.name,
+      role: teamInvite.role,
+    };
+  }
 
   // 2. Email check — wrong account doesn't burn the link.
   if (invitation.email.toLowerCase() !== acceptingUserEmail.toLowerCase()) {
@@ -264,5 +325,5 @@ export async function acceptInvitation(
       data: { status: "accepted", acceptedAt: new Date(), acceptedUserId: acceptingUserId },
     }),
   ]);
-  return { ok: true, projectSlug: invitation.project.slug, role: invitation.role };
+  return { ok: true, kind: "project", projectSlug: invitation.project.slug, role: invitation.role };
 }

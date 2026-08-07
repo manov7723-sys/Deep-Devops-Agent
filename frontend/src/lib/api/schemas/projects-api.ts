@@ -38,6 +38,10 @@ export const CreateProjectRequest = z.object({
   name: z.string().trim().min(1, "Name is required").max(80),
   description: z.string().trim().max(500).default(""),
   colorHue: z.number().int().min(0).max(360).default(285),
+  // Which team owns this project. Required (2026-08): a project must belong
+  // to a team, and only that team's lead may create it. Kept as `teamSlug`
+  // for symmetry with every other URL-facing identifier in this app.
+  teamSlug: z.string().trim().min(1, "Pick a team to create the project under"),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
 

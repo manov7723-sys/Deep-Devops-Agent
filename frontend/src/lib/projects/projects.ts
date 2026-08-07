@@ -78,6 +78,8 @@ export type CreateProjectArgs = {
   colorHue: number;
   /** The cloud this project targets ("aws"|"gcp"|"azure"); locks the Connect-provider UI. */
   cloud?: string | null;
+  /** Team that owns the project. Set on every new project (2026-08). */
+  teamId: string;
 };
 
 /**
@@ -97,6 +99,7 @@ export async function createProject(
         description: args.description,
         colorHue: args.colorHue,
         cloud: args.cloud ?? null,
+        teamId: args.teamId,
       },
       select: { id: true, slug: true },
     });

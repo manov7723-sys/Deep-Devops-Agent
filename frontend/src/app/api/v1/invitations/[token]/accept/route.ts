@@ -27,6 +27,26 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
     );
   }
   const meta = extractRequestMeta(req);
+  if (res.kind === "team") {
+    await audit({
+      userId: sess.userId,
+      action: "team.invitation_accepted",
+      targetType: "team_invitation",
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      metadata: { teamSlug: res.teamSlug, role: res.role },
+    });
+    return NextResponse.json({
+      ok: true,
+      kind: "team",
+      teamSlug: res.teamSlug,
+      teamName: res.teamName,
+      role: res.role,
+      // /u/teams is the existing dashboard-nav landing page — safe redirect
+      // that already lists every team the user belongs to.
+      redirect: `/u/teams`,
+    });
+  }
   await audit({
     userId: sess.userId,
     action: "project.invitation_accepted",
@@ -37,6 +57,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   });
   return NextResponse.json({
     ok: true,
+    kind: "project",
     projectSlug: res.projectSlug,
     role: res.role,
     redirect: `/p/${res.projectSlug}/dashboard`,

@@ -22,6 +22,10 @@ export type CreateProjectInput = {
   name: string;
   description?: string;
   colorHue?: number;
+  /** Team that OWNS this project — required (2026-08). Only a lead of the
+   *  team can call this successfully; the caller UI must present a picker.
+   *  Server returns 403 { code: "not_team_lead" } if the caller isn't. */
+  teamSlug: string;
 };
 
 export function useCreateProject() {
@@ -86,6 +90,8 @@ export type CreateProjectWithSetupInput = {
   name: string;
   description?: string;
   colorHue?: number;
+  /** Team that OWNS this project — see CreateProjectInput for details. */
+  teamSlug: string;
   repos?: RepoChoiceInput[];
   envs?: EnvChoiceInput[];
   cloud?: CloudChoiceInput | null;

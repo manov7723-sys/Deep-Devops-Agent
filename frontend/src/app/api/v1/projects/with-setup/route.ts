@@ -74,6 +74,9 @@ const Body = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().trim().max(500).default(""),
   colorHue: z.number().int().min(0).max(360).default(285),
+  // Team that owns this project. Required (2026-08): only a lead of the team
+  // can create projects under it — see the gate below.
+  teamSlug: z.string().trim().min(1, "Pick a team to create the project under"),
   repos: z.array(RepoChoice).max(50).default([]),
   envs: z.array(EnvChoice).max(20).default([]),
   cloud: CloudChoice.nullable().default(null),
@@ -106,6 +109,37 @@ export async function POST(req: Request) {
   }
   const data = parsed.data;
 
+  // Same gate as POST /projects: only a lead of the chosen team can create
+  // projects under it. Duplicating the check here rather than delegating so a
+  // failed gate returns cleanly BEFORE the transaction that creates the row —
+  // and BEFORE the wizard's side-steps start doing external work.
+  const team = await prisma.team.findUnique({
+    where: { slug: data.teamSlug },
+    select: {
+      id: true,
+      memberships: { where: { userId: sess.userId }, select: { role: true } },
+    },
+  });
+  if (!team) {
+    return NextResponse.json(
+      { ok: false, code: "team_not_found", message: `Team "${data.teamSlug}" does not exist.` },
+      { status: 404 },
+    );
+  }
+  const teamRole = team.memberships[0]?.role;
+  if (teamRole !== "lead") {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "not_team_lead",
+        message: !teamRole
+          ? `You are not a member of "${data.teamSlug}". Ask a lead to invite you before creating projects here.`
+          : `Only a team LEAD can create projects under "${data.teamSlug}". Ask a lead of this team.`,
+      },
+      { status: 403 },
+    );
+  }
+
   // Step 1 — Project itself (required). If this fails, nothing else runs.
   const project = await createProject({
     ownerId: sess.userId,
@@ -113,6 +147,7 @@ export async function POST(req: Request) {
     description: data.description,
     colorHue: data.colorHue,
     cloud: data.cloudKind,
+    teamId: team.id,
   });
   const meta = extractRequestMeta(req);
   await audit({

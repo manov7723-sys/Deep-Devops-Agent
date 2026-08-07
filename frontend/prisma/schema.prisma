@@ -39,6 +39,15 @@ enum ProjectRole {
   viewer
 }
 
+// Role inside a Team. Only a `lead` can create projects under the team and
+// invite new members; a `member` inherits access to the team's projects.
+// Kept deliberately small — three roles at the project level was already
+// enough complexity; two here maps cleanly to "who decides" vs "who does".
+enum TeamRole {
+  lead
+  member
+}
+
 enum HealthStatus {
   ok
   warn
@@ -321,6 +330,14 @@ model User {
   membershipsAdded      Membership[]        @relation("MembershipInvitedBy")
   invitationsSent       ProjectInvitation[] @relation("InvitationsSent")
   invitationsAccepted   ProjectInvitation[] @relation("InvitationsAccepted")
+  // Teams — inverse sides of the relations declared on Team / TeamMembership
+  // / TeamInvitation. Every named relation over there requires a matching
+  // field here or Prisma's validator errors out.
+  ownedTeams            Team[]              @relation("TeamOwner")
+  teamMemberships       TeamMembership[]    @relation("TeamMembershipUser")
+  teamMembershipsAdded  TeamMembership[]    @relation("TeamMembershipInvitedBy")
+  teamInvitationsSent   TeamInvitation[]    @relation("TeamInvitedBy")
+  teamInvitesAccepted   TeamInvitation[]    @relation("TeamInviteAcceptedBy")
   // "current subscription details" = this relation
   subscription          Subscription?
   // "current token usage" = usage counters + weekly samples
@@ -742,6 +759,11 @@ model Project {
   id                  String       @id @default(uuid(7)) @db.Uuid
   slug                String       @unique
   ownerId             String       @db.Uuid
+  // Which team OWNS this project. Nullable during the initial backfill
+  // (2026-08) so the migration can run before every row is populated; once
+  // all rows have a teamId a follow-up migration can NOT NULL it. Only a
+  // team's `lead` can create projects under it — see POST /projects.
+  teamId              String?      @db.Uuid
   name                String
   colorHue            Int
   description         String
@@ -800,8 +822,10 @@ model Project {
   reportRecipients  ReportRecipient[]
   reportRuns        ReportRun[]
   findings          Finding[]
+  team              Team?                  @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   @@index([ownerId])
+  @@index([teamId])
 }
 
 // An ACCEPTED member of a project (real User). Pending email invites live in
@@ -2360,4 +2384,80 @@ enum FindingStatus {
   open
   fixed // seen previously, absent from a later scan (or explicitly marked)
   suppressed // muted by a user with a reason recorded in AuditLog
+}
+
+// ── Teams ──────────────────────────────────────────────────────────────────
+//
+// A Team owns Projects. Only a team lead can create projects under the team
+// and invite members. Members inherit access to the team's projects — the
+// per-project Membership table still governs role granularity there, but
+// team-level membership is the gate on WHO gets a Membership at all when a
+// project is created.
+//
+// Added 2026-08 in response to "only team leads should create projects, and
+// the lead should add members by email". Backfilled so no existing project
+// is orphaned: every current owner becomes lead of a personal team, other
+// existing project members become team members.
+model Team {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  slug        String   @unique
+  name        String
+  description String   @default("")
+  // The user who created the team. Kept for provenance + as an initial fallback
+  // lead — do NOT gate permissions off this field alone; check TeamMembership.
+  ownerId     String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner       User             @relation("TeamOwner", fields: [ownerId], references: [id])
+  memberships TeamMembership[]
+  invitations TeamInvitation[]
+  projects    Project[]
+
+  @@index([ownerId])
+}
+
+model TeamMembership {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  teamId      String   @db.Uuid
+  userId      String   @db.Uuid
+  role        TeamRole @default(member)
+  invitedById String?  @db.Uuid
+  joinedAt    DateTime @default(now())
+
+  team      Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User  @relation("TeamMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy User? @relation("TeamMembershipInvitedBy", fields: [invitedById], references: [id])
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@index([teamId, role])
+}
+
+// Email invite to join a Team. Same shape as ProjectInvitation on purpose
+// so the magic-link accept flow can be extended in one place. Kept as a
+// separate table because a Team invite grants team-wide access, not access
+// to one specific project — different lifecycle.
+model TeamInvitation {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  teamId         String           @db.Uuid
+  email          String
+  role           TeamRole         @default(member)
+  status         InvitationStatus @default(pending)
+  invitedById    String           @db.Uuid
+  acceptedUserId String?          @db.Uuid
+  magicLinkId    String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  team          Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  invitedBy     User  @relation("TeamInvitedBy", fields: [invitedById], references: [id])
+  acceptedUser  User? @relation("TeamInviteAcceptedBy", fields: [acceptedUserId], references: [id])
+
+  // One live invite per address per team — reinviting the same email refreshes
+  // this row rather than piling up duplicates, matching ProjectInvitation.
+  @@unique([teamId, email], name: "team_email_unique")
+  @@index([teamId, status])
+  @@index([email, status])
 }

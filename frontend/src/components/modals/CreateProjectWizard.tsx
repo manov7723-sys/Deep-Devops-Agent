@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api/client";
 import {
   Badge,
   Btn,
@@ -69,6 +70,9 @@ type Draft = {
   name: string;
   description: string;
   hue: number;
+  /** Which team OWNS this project. Only teams the current user LEADS are
+   *  offered — that's what makes the server-side gate a formality here. */
+  teamSlug: string;
   ghConnected: boolean;
   /** Which connected GitHub identity (OAuthAccount.id) this project pulls repos from. */
   ghAccountId: string | null;
@@ -86,6 +90,7 @@ const DEFAULT_DRAFT: Draft = {
   name: "",
   description: "",
   hue: 285,
+  teamSlug: "",
   ghConnected: false,
   ghAccountId: null,
   repoIds: {},
@@ -284,7 +289,9 @@ export function CreateProjectWizard({
   const canNext = (() => {
     switch (stepIdx) {
       case 0:
-        return draft.name.trim().length > 0;
+        // Team is required — the server-side gate would reject an empty
+        // teamSlug anyway, so failing fast in the UI is the honest thing.
+        return draft.name.trim().length > 0 && draft.teamSlug.trim().length > 0;
       case 1:
         return draft.ghConnected && selectedRepoIds.length > 0;
       case 2:
@@ -346,6 +353,9 @@ export function CreateProjectWizard({
         name: draft.name.trim(),
         description: draft.description.trim(),
         colorHue: draft.hue,
+        // Server rejects with 403 not_team_lead when the caller doesn't lead
+        // the chosen team — the picker in the Details step is the only source.
+        teamSlug: draft.teamSlug,
         repos: selectedRepos,
         envs: selectedEnvs,
         cloud: null,
@@ -490,6 +500,10 @@ export function CreateProjectWizard({
               placeholder="What does this product do?"
             />
           </Field>
+          <TeamPicker
+            value={draft.teamSlug}
+            onChange={(teamSlug) => setDraft((d) => ({ ...d, teamSlug }))}
+          />
         </div>
       )}
 
@@ -803,5 +817,56 @@ export function CreateProjectWizard({
         </p>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Picker for the Team that will own the new project.
+ *
+ * Only offers teams the caller LEADS — a member can't create projects, so
+ * offering non-lead teams would just produce a 403 after Submit. When the
+ * user leads exactly one team, it's preselected; otherwise the picker forces
+ * a choice. Empty state points at Create Team so a first-time user isn't
+ * stuck (every account is backfilled with a personal team, so this shouldn't
+ * fire in practice — kept as a defensive fallback).
+ */
+function TeamPicker({ value, onChange }: { value: string; onChange: (slug: string) => void }) {
+  const { data, isLoading } = useQuery<{ teams: Array<{ slug: string; name: string; role: "lead" | "member" }> }>({
+    queryKey: ["teams", "entities"],
+    queryFn: () => api.get("/teams/entities"),
+    staleTime: 30_000,
+  });
+  const leadTeams = (data?.teams ?? []).filter((t) => t.role === "lead");
+
+  useEffect(() => {
+    if (!value && leadTeams.length === 1) onChange(leadTeams[0]!.slug);
+  }, [value, leadTeams, onChange]);
+
+  if (isLoading) {
+    return <Field label="Team"><Input value="loading teams…" disabled /></Field>;
+  }
+  if (leadTeams.length === 0) {
+    return (
+      <Field
+        label="Team"
+        hint="You don't lead any team yet. Create one from the Teams page, then come back."
+      >
+        <Input value="No teams you lead" disabled />
+      </Field>
+    );
+  }
+  return (
+    <Field
+      label="Team"
+      required
+      hint="Only leads can create projects. Members join the project through their team."
+    >
+      <Select
+        value={value}
+        placeholder="Pick a team…"
+        options={leadTeams.map((t) => ({ value: t.slug, label: t.name }))}
+        onValueChange={onChange}
+      />
+    </Field>
   );
 }
