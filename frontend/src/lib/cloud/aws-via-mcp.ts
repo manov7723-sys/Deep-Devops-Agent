@@ -24,10 +24,32 @@
  * and every caller silently keeps working through MCP.
  */
 import { prisma } from "@/lib/db/prisma";
-import { callMcpTool } from "@/lib/agent/mcp/client";
+import { callMcpTool, callMcpToolInline } from "@/lib/agent/mcp/client";
 
-/** Well-known connector name registered by dda-mcp-setup.mts. */
+/** Well-known connector name an operator can create to OVERRIDE the default. */
 const AWS_MCP_CONNECTOR_NAME = "aws-labs-cli";
+
+/**
+ * Built-in AWS MCP server. Used when no McpConnector row exists.
+ *
+ * The connector table is for servers a user adds through Admin → MCP. AWS
+ * ships WITH the app, so requiring a row would mean a manual setup step in
+ * every environment — and forgetting it produced "no MCP connector
+ * registered" in production while the identical code worked on a laptop.
+ * The backend's Python agent already defines its MCP servers in code
+ * (backend/app/mcp_servers/aws_mcp.py); this matches that.
+ *
+ * Credentials are NOT listed here on purpose: the stdio subprocess inherits
+ * the app's own environment, so IRSA, an instance profile, or AWS_* env vars
+ * all work with no configuration. An operator who needs something different
+ * creates the connector row and it takes precedence.
+ */
+const AWS_MCP_BUILTIN = {
+  name: AWS_MCP_CONNECTOR_NAME,
+  transport: "stdio" as const,
+  command: "uvx",
+  args: ["awslabs.aws-api-mcp-server@latest"],
+};
 
 type AwsCliResult =
   | { ok: true; via: "mcp" | "cli"; stdout: string }
@@ -119,14 +141,17 @@ function unwrapCallAws(text: string): { ok: true; json: string } | { ok: false; 
  * assumed session must use the CLI path until callMcpTool can forward env.
  */
 export async function runAwsViaMcp(cliCommand: string): Promise<AwsCliResult> {
+  // A configured connector wins — that's how an operator pins a version,
+  // points at a hosted server, or supplies explicit credentials. With no row,
+  // fall back to the built-in default so a fresh deploy works untouched.
   const connectorId = await findAwsMcpConnectorId();
-  if (!connectorId) return { ok: false, via: "none", code: "unavailable", message: "no AWS MCP connector registered" };
-
-  const res = await callMcpTool({
-    connectorId,
-    remoteName: "call_aws",
-    input: { cli_command: cliCommand },
-  });
+  const res = connectorId
+    ? await callMcpTool({ connectorId, remoteName: "call_aws", input: { cli_command: cliCommand } })
+    : await callMcpToolInline({
+        config: AWS_MCP_BUILTIN,
+        remoteName: "call_aws",
+        input: { cli_command: cliCommand },
+      });
   if (!res.ok) return { ok: false, via: "mcp", code: "failed", message: res.error };
 
   const unwrapped = unwrapCallAws(res.text);
@@ -134,7 +159,12 @@ export async function runAwsViaMcp(cliCommand: string): Promise<AwsCliResult> {
   return { ok: true, via: "mcp", stdout: unwrapped.json };
 }
 
-/** True when a functioning AWS MCP connector is registered — cheap sync check. */
+/**
+ * True when an AWS MCP path exists at all — which is now always, since the
+ * built-in default needs no registration. Kept so callers can still branch,
+ * but the honest answer is "yes unless `uvx` is missing from the image", and
+ * that only shows up as a spawn failure at call time.
+ */
 export async function isAwsMcpAvailable(): Promise<boolean> {
-  return (await findAwsMcpConnectorId()) !== null;
+  return true;
 }

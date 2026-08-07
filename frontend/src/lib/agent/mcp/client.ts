@@ -331,26 +331,86 @@ export async function callMcpTool(args: {
     }
   }
 
-  const client = await openClient({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    transport: row.transport,
-    url: row.url,
-    command: row.command,
-    args: row.args,
-    credentials,
-    bearerToken,
-  });
+  return callResolved(
+    {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      transport: row.transport,
+      url: row.url,
+      command: row.command,
+      args: row.args,
+      credentials,
+      bearerToken,
+    },
+    args.remoteName,
+    args.input,
+  );
+}
+
+/**
+ * Call a tool on an MCP server described INLINE, with no McpConnector row.
+ *
+ * The McpConnector table exists for servers a user adds through Admin → MCP.
+ * Servers that ship WITH the app (aws / azure / gcp) shouldn't need that:
+ * requiring a row means every environment has a manual setup step, and
+ * forgetting it produces "no MCP connector registered" in production while
+ * the same code works on a developer's laptop — which is exactly what
+ * happened here. The backend's Python agent already defines its MCP servers
+ * in code (backend/app/mcp_servers/*.py); this brings the Next.js side in
+ * line so built-in servers work out of the box everywhere.
+ *
+ * A DB row for the same server still wins when present — see the resolver in
+ * lib/cloud/aws-via-mcp.ts — so an operator can override the default command,
+ * pin a version, or attach credentials without touching code.
+ */
+export async function callMcpToolInline(args: {
+  config: {
+    name: string;
+    transport: "http" | "sse" | "stdio";
+    url?: string | null;
+    command?: string | null;
+    args?: string[];
+    credentials?: Record<string, string>;
+  };
+  remoteName: string;
+  input: unknown;
+}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  return callResolved(
+    {
+      id: `builtin:${args.config.name}`,
+      name: args.config.name,
+      description: "built-in MCP server",
+      transport: args.config.transport,
+      url: args.config.url ?? null,
+      command: args.config.command ?? null,
+      args: args.config.args ?? [],
+      credentials: args.config.credentials ?? {},
+    },
+    args.remoteName,
+    args.input,
+  );
+}
+
+/** Shared body: open, call, marshal, close. Used by both entry points. */
+async function callResolved(
+  resolved: ResolvedConnector,
+  remoteName: string,
+  input: unknown,
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const client = await openClient(resolved);
   if (!client) {
-    return { ok: false, error: `Could not connect to MCP server "${row.name}". Check its URL/command and credentials on the Admin → MCP page.` };
+    return {
+      ok: false,
+      error: `Could not connect to MCP server "${resolved.name}". Check its URL/command and credentials on the Admin → MCP page.`,
+    };
   }
 
   try {
     const res = await withTimeout(
-      client.callTool({ name: args.remoteName, arguments: (args.input ?? {}) as Record<string, unknown> }),
+      client.callTool({ name: remoteName, arguments: (input ?? {}) as Record<string, unknown> }),
       60_000,
-      `[mcp] ${row.name}.${args.remoteName}`,
+      `[mcp] ${resolved.name}.${remoteName}`,
     );
 
     const content = (res.content ?? []) as Array<Record<string, unknown>>;
@@ -369,13 +429,13 @@ export async function callMcpTool(args: {
 
     // MCP signals tool-level failure via isError, not a thrown exception.
     if (res.isError) {
-      return { ok: false, error: text || `MCP tool "${args.remoteName}" reported an error.` };
+      return { ok: false, error: text || `MCP tool "${remoteName}" reported an error.` };
     }
     return { ok: true, text: text || "(tool returned no content)" };
   } catch (err) {
     return {
       ok: false,
-      error: `MCP tool "${args.remoteName}" on "${row.name}" failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: `MCP tool "${remoteName}" on "${resolved.name}" failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   } finally {
     await client.close().catch(() => {});
