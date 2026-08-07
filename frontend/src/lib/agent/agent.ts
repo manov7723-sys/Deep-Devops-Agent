@@ -231,6 +231,24 @@ const ROLLBACK_PLAYBOOK = [
  * the app Deployment. Included only for projects with AWS connected — Azure
  * (Flexible Postgres) and GCP (Cloud SQL) equivalents ship later.
  */
+/**
+ * Azure managed database — the Azure twin of DATABASE_PLAYBOOK.
+ *
+ * Added because the app could create an AWS RDS but had no way to create an
+ * Azure database at all, so "create a database" on an Azure project produced
+ * a refusal (2026-08). Gated on clouds.has("azure") in buildSystemPrompt.
+ */
+const AZURE_DATABASE_PLAYBOOK = [
+  "## Managed database (Azure) — triggers: 'create a database', 'add a database', 'set up postgres/mysql', 'give my app a database'",
+  "This project is on AZURE. Databases here are Azure Database Flexible Servers, NOT AWS RDS. NEVER tell the user the platform can't create a database, and NEVER ask them to connect an AWS account for this — generate_azure_db_terraform exists and is the correct tool.",
+  "1. If the user wants to CONNECT an existing Azure database instead of creating one, point them at the Connections page (it has an Azure Database panel) or use create_rds_k8s_secret, which is cloud-agnostic and just writes DATABASE_URL into a K8s Secret.",
+  '2. To CREATE: gather the inputs in ONE ```options-form``` fence — never one question at a time. Call list_azure_resource_groups FIRST (silently, this turn) so the resourceGroup question offers real values. Emit ONLY the fence, no prose:\n```options-form\n{"intro":"Creating an Azure Database. Pick the engine and size — I\'ll generate Terraform and show the cost before anything is applied.","questions":[{"key":"engine","question":"Which engine?","options":["PostgreSQL","MySQL"],"default":"PostgreSQL"},{"key":"name","question":"Server name (lowercase, dashes)","kind":"text","placeholder":"app-db"},{"key":"resourceGroup","question":"Which resource group?","options":[<real groups from list_azure_resource_groups>]},{"key":"location","question":"Which region?","options":["eastus","westeurope","centralindia","southeastasia"]},{"key":"sku","question":"Size?","options":["B_Standard_B1ms — 1 vCPU / 2 GiB (dev, cheapest)","B_Standard_B2s — 2 vCPU / 4 GiB (small staging)","GP_Standard_D2s_v3 — 2 vCPU / 8 GiB (production baseline)"],"default":"B_Standard_B1ms — 1 vCPU / 2 GiB (dev, cheapest)"},{"key":"access","question":"Network access?","options":["Public endpoint (simplest — reachable from anywhere, Azure services allowed)","Private VNet only (recommended for production — needs a delegated subnet)"],"default":"Public endpoint (simplest — reachable from anywhere, Azure services allowed)"}],"submitLabel":"Generate"}\n```',
+  "3. Parse the answers: engine → 'postgres' | 'mysql' (lowercase); sku → the token before the first space (e.g. 'B_Standard_B1ms'); access starting with 'Private' means you must ALSO ask for the delegated subnet id + private DNS zone id via one ```options``` question before proceeding — generate_azure_db_terraform rejects a delegated subnet without a DNS zone, because the server would get no resolvable name.",
+  "4. Call generate_azure_db_terraform(name, envKey, location, resourceGroup, engine, skuName, plus delegatedSubnetId/privateDnsZoneId when private). NEVER hand-write Azure database HCL.",
+  "5. Then follow the SAME gate as every other infra flow: estimate_infra_cost → show the monthly figure → run_terraform action='plan' → request_infra_approval (respond with a ```approval-card``` fence). NEVER run_terraform action='apply' directly.",
+  "6. After apply succeeds, read the 'database_url' output and call apply_app_env_secret(envKey, namespace, envText='DATABASE_URL=<the url>') so the pods actually get it. A database nothing references is invisible to the app — the same trap as the AWS path.",
+].join("\n");
+
 const DATABASE_PLAYBOOK = [
   "## Managed database — triggers: 'add a database', 'create an RDS', 'set up postgres for my app', 'connect my existing database', 'give my app a postgres/mysql'",
   "FIRST ask ONE ```options``` question: {\"question\":\"How do you want to add the database?\",\"options\":[\"Create a NEW managed database (AWS RDS)\",\"CONNECT an existing database (paste connection URL)\",\"Cancel\"],\"key\":\"dbMode\"} and WAIT.",
@@ -732,6 +750,7 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
     clouds.size > 0 ? DEPLOY_PIPELINE_PLAYBOOK : "",
     clouds.size > 0 ? ROLLBACK_PLAYBOOK : "",
     clouds.has("aws") ? DATABASE_PLAYBOOK : "",
+    clouds.has("azure") ? AZURE_DATABASE_PLAYBOOK : "",
     clouds.has("aws") ? S3_PLAYBOOK : "",
     clouds.has("aws") ? VPC_PLAYBOOK : "",
     clouds.has("aws") ? EC2_PLAYBOOK : "",

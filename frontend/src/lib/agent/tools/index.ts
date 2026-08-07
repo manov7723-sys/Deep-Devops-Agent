@@ -134,6 +134,7 @@ import { generateVpcPeeringTerraformTool } from "./vpc-peering-tools";
 import { generateClientVpnTerraformTool } from "./client-vpn-tools";
 import { generateVpnCertificatesTerraformTool } from "./vpn-certificates-tools";
 import { generateAzureVnetTerraformTool } from "./azure-vnet-tools";
+import { generateAzureDbTerraformTool } from "./azure-db-tools";
 import { generateAzureVmTerraformTool } from "./azure-vm-tools";
 import { generateGcpVpcTerraformTool } from "./gcp-vpc-tools";
 import { generateGcpVmTerraformTool } from "./gcp-vm-tools";
@@ -325,6 +326,10 @@ export const ALL_TOOLS: Tool[] = [
   generateVpnCertificatesTerraformTool,
   // Azure VNet — Azure's equivalent of AWS VPC (RG + VNet + subnets + optional NAT)
   generateAzureVnetTerraformTool,
+  // Azure managed database (PostgreSQL / MySQL Flexible Server) — the Azure
+  // counterpart to generate_rds_terraform. Before this, 'create a database'
+  // on an Azure project had no tool to call at all.
+  generateAzureDbTerraformTool,
   // Azure VM — single VM in an EXISTING VNet/subnet
   generateAzureVmTerraformTool,
   // GCP VPC — network + subnets + firewalls + optional Cloud NAT
@@ -380,6 +385,9 @@ const TOOL_CLOUD: Record<string, "aws" | "azure" | "gcp" | "proxmox"> = {
   // (AKS/ACR), picking the path from the env's cloud — so it must stay visible
   // on all three, not gated to one.
   list_azure_vms: "azure",
+  // Azure managed database. Gated like every other Azure-only tool so an AWS
+  // project never sees it — and, more importantly, so an AZURE project DOES.
+  generate_azure_db_terraform: "azure",
   setup_azure_monitor_alarms: "azure",
   list_azure_subscriptions: "azure",
   list_azure_resource_groups: "azure",
