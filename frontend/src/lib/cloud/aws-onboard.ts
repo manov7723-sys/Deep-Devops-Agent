@@ -23,6 +23,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { runStage } from "@/lib/runner/exec";
+import { runAwsViaMcp } from "@/lib/cloud/aws-via-mcp";
 import { getDecryptedCloudCreds } from "@/lib/runner/creds";
 
 /** PATH additions so the bundled `aws` CLI is found on dev + container hosts. */
@@ -118,6 +119,30 @@ export async function assumeRoleCreds(args: {
   externalId: string;
   region: string;
 }): Promise<AssumeRoleCredsResult> {
+  const cliArgs = [
+    "sts", "assume-role",
+    "--role-arn", args.roleArn,
+    "--role-session-name", "dda-session",
+    "--external-id", args.externalId,
+    "--duration-seconds", "900",
+    "--region", args.region,
+    "--output", "json",
+  ];
+
+  // MCP-first. When the client registered an AWS MCP connector, the platform's
+  // AssumeRole call runs through it instead of the local `aws` binary — the
+  // whole reason the "install the CLI" error was blocking the console on the
+  // deployed pod. CLI fallback below covers dev machines where MCP isn't wired
+  // yet, and any callers that hit this before the operator has set up MCP.
+  const mcp = await runAwsViaMcp(`aws ${cliArgs.map((a) => (/[\s"']/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)).join(" ")}`);
+  if (mcp.ok) {
+    const parsed = parseAssumeRoleJson(mcp.stdout, args);
+    if (parsed) return parsed;
+    // MCP returned success with an unparseable body — surface as assume_failed,
+    // not "no CLI", so the operator looks at the connector rather than the pod.
+    return { ok: false, code: "assume_failed", message: `MCP returned an AssumeRole response we couldn't parse.` };
+  }
+
   const workdir = await mkdtemp(join(tmpdir(), "dda-sts-"));
   try {
     // Pass through the platform's own AWS creds (the trusted principal) so the
@@ -165,45 +190,21 @@ export async function assumeRoleCreds(args: {
     });
 
     if (res.exitCode === 0) {
-      let assumedAccountId: string | null = accountIdFromRoleArn(args.roleArn);
-      try {
-        const parsed = JSON.parse(res.stdout) as {
-          Credentials?: { AccessKeyId?: string; SecretAccessKey?: string; SessionToken?: string };
-          AssumedRoleUser?: { Arn?: string };
-        };
-        const c = parsed.Credentials;
-        if (!c?.AccessKeyId || !c?.SecretAccessKey) {
-          return {
-            ok: false,
-            code: "assume_failed",
-            message: "AssumeRole returned no credentials.",
-          };
-        }
-        const arn = parsed.AssumedRoleUser?.Arn ?? "";
-        const m = arn.match(/^arn:aws:sts::(\d{12}):/);
-        if (m) assumedAccountId = m[1];
-        return {
-          ok: true,
-          assumedAccountId,
-          env: {
-            AWS_ACCESS_KEY_ID: c.AccessKeyId,
-            AWS_SECRET_ACCESS_KEY: c.SecretAccessKey,
-            ...(c.SessionToken ? { AWS_SESSION_TOKEN: c.SessionToken } : {}),
-            AWS_REGION: args.region,
-            AWS_DEFAULT_REGION: args.region,
-          },
-        };
-      } catch {
-        return { ok: false, code: "assume_failed", message: "Could not parse AssumeRole output." };
-      }
+      const parsed = parseAssumeRoleJson(res.stdout, args);
+      if (parsed) return parsed;
+      return { ok: false, code: "assume_failed", message: "Could not parse AssumeRole output." };
     }
 
-    // The binary isn't installed / not on PATH.
+    // The binary isn't installed / not on PATH. Point the operator at the MCP
+    // path since that's what the deployed app is meant to use — telling them
+    // to install `aws` on the pod would send them the wrong direction.
     if (res.exitCode === -1 && (res.stderr.includes("ENOENT") || res.stderr.includes("[exec]"))) {
       return {
         ok: false,
         code: "cli_not_installed",
-        message: "The `aws` CLI isn't on the server's PATH. Install it on the runner host.",
+        message:
+          "The AWS CLI isn't available on this host, and no AWS MCP connector is registered either. " +
+          "Register an AWS MCP server on the Admin → MCP page (recommended), or install `aws` on the runner.",
         stderr: res.stderr.slice(-1_000),
       };
     }
@@ -655,5 +656,44 @@ export async function detectAwsCallerIdentity(
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Parse an `aws sts assume-role --output json` response into the shape
+ * assumeRoleCreds returns. Shared between the MCP path and the CLI fallback
+ * so both produce byte-identical result envelopes. Returns null on any parse
+ * failure so the caller can classify (assume_failed vs. cli_not_installed).
+ */
+function parseAssumeRoleJson(
+  stdout: string,
+  args: { roleArn: string; region: string },
+): AssumeRoleCredsResult | null {
+  try {
+    const parsed = JSON.parse(stdout) as {
+      Credentials?: { AccessKeyId?: string; SecretAccessKey?: string; SessionToken?: string };
+      AssumedRoleUser?: { Arn?: string };
+    };
+    const c = parsed.Credentials;
+    if (!c?.AccessKeyId || !c?.SecretAccessKey) return null;
+    // The assumed-role ARN is the authoritative account id — the role ARN was
+    // user input and might be malformed. Fall back to that only if the STS
+    // response doesn't include one.
+    let assumedAccountId: string | null = accountIdFromRoleArn(args.roleArn);
+    const m = (parsed.AssumedRoleUser?.Arn ?? "").match(/^arn:aws:sts::(\d{12}):/);
+    if (m) assumedAccountId = m[1]!;
+    return {
+      ok: true,
+      assumedAccountId,
+      env: {
+        AWS_ACCESS_KEY_ID: c.AccessKeyId,
+        AWS_SECRET_ACCESS_KEY: c.SecretAccessKey,
+        ...(c.SessionToken ? { AWS_SESSION_TOKEN: c.SessionToken } : {}),
+        AWS_REGION: args.region,
+        AWS_DEFAULT_REGION: args.region,
+      },
+    };
+  } catch {
+    return null;
   }
 }

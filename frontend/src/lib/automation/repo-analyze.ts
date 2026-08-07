@@ -377,6 +377,60 @@ function classifySpaFromPackageJson(raw: string): { isSpa: boolean; buildDir: st
  *   path="backend", "node backend/server.js"      → "node server.js"
  *   path="api",     "gunicorn api.wsgi:application" → "gunicorn wsgi:application"
  */
+/** Python ASGI/WSGI servers that take a `module:attr` positional argument. */
+const PY_APP_SERVERS = new Set(["uvicorn", "gunicorn", "hypercorn", "daphne", "waitress"]);
+
+/**
+ * Entry files to fall back to, best-first. `main` leads because that is what
+ * FastAPI's own tutorial uses and what these generated backends ship; `app`
+ * follows for the Flask `app.py` convention.
+ */
+const PY_ENTRY_CANDIDATES = ["main", "app", "server", "asgi", "wsgi", "application", "api"];
+
+/**
+ * Make a Python start command's `module:attr` target point at a file that
+ * exists in the service directory.
+ *
+ *   files=[main.py, app/]   "uvicorn app:app"  → "uvicorn main:app"
+ *   files=[app.py]          "uvicorn app:app"  → unchanged (app.py is real)
+ *   files=[main.py]         "uvicorn"          → "uvicorn main:app"
+ *
+ * A dotted module ("config.wsgi:application") is left alone — its first
+ * segment is a package directory, which this flat file listing can't verify,
+ * and rewriting a correct Django target would be worse than leaving it.
+ * Likewise, when no candidate file is present we return the command untouched
+ * rather than guess: a wrong rewrite is harder to debug than the original.
+ */
+export function repairPythonAppTarget(startCommand: string, fileNames: string[]): string {
+  const cmd = startCommand.trim();
+  if (!cmd) return startCommand;
+  const tokens = cmd.split(/\s+/);
+  const bin = (tokens[0] ?? "").split("/").pop() ?? "";
+  if (!PY_APP_SERVERS.has(bin)) return startCommand;
+
+  const has = (mod: string) => fileNames.some((f) => f.toLowerCase() === `${mod}.py`);
+  const firstReal = PY_ENTRY_CANDIDATES.find(has);
+
+  const idx = tokens.findIndex(
+    (t, i) => i > 0 && !t.startsWith("-") && /^[A-Za-z_][\w.]*:[A-Za-z_]\w*$/.test(t),
+  );
+
+  if (idx === -1) {
+    // No target at all. Supplying one here keeps generateDockerArtifacts from
+    // falling back to its hardcoded "app:app", which is only right for Flask.
+    if (!firstReal) return startCommand;
+    return [...tokens, `${firstReal}:app`].join(" ");
+  }
+
+  const [mod, attr] = tokens[idx]!.split(":") as [string, string];
+  if (mod.includes(".")) return startCommand; // package path — can't verify, don't touch
+  if (has(mod)) return startCommand; // already points at a real file
+  if (!firstReal) return startCommand;
+
+  tokens[idx] = `${firstReal}:${attr}`;
+  return tokens.join(" ");
+}
+
 function stripContextPrefix(startCommand: string, path: string): string {
   const seg = path.split("/").pop() ?? path; // last dir segment
   if (!seg) return startCommand;
@@ -436,9 +490,13 @@ export async function analyzeAppServices(
   const probePaths = ["", ...rootDirs.filter((d) => SERVICE_DIR_HINTS.includes(d.toLowerCase()))];
   const dirManifests: Record<string, string[]> = {};
   const dirContents: Record<string, Record<string, string>> = {};
+  /** EVERY file name per probed dir (not just manifests) — used to verify that
+   *  a Python start command's `module:attr` target actually exists. */
+  const dirFileNames: Record<string, string[]> = {};
   for (const dir of probePaths) {
     const files = dir === "" ? rootFiles : await listFilesWithRetry(client, dir, ref, 2);
     const names = files.map((f) => f.name);
+    dirFileNames[dir || "."] = names;
     const manifests = KEY_FILES.filter((k) =>
       names.some((n) => n.toLowerCase() === k.toLowerCase()),
     );
@@ -542,6 +600,28 @@ Respond with ONLY a JSON object, no prose:
     // segment from module references so the command matches the context.
     if (path && typeof params.startCommand === "string") {
       params = { ...params, startCommand: stripContextPrefix(params.startCommand as string, path) };
+    }
+
+    // Verify the ASGI/WSGI target against the files that actually exist.
+    //
+    // Nothing downstream checks this: the LLM picks `module:attr` from
+    // convention, stripContextPrefix only rewrites the service-dir segment,
+    // and generateDockerArtifacts falls back to a hardcoded "app:app" when no
+    // target is given at all. So a FastAPI repo laid out as main.py + an app/
+    // package — the layout FastAPI's own docs use — gets `uvicorn app:app`,
+    // which imports the PACKAGE, finds no `app` attribute in its __init__, and
+    // dies at startup with `Error loading ASGI app` → CrashLoopBackOff. The
+    // image builds and pushes fine, so this only ever surfaces as a failed
+    // rollout minutes later (2026-08). This is the one place that knows the
+    // repo's real contents, so it is the place to check.
+    if (stackId === "python") {
+      params = {
+        ...params,
+        startCommand: repairPythonAppTarget(
+          typeof params.startCommand === "string" ? params.startCommand : "",
+          dirFileNames[dirKey] ?? [],
+        ),
+      };
     }
 
     const stack = getStack(stackId);

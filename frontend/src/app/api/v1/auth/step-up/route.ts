@@ -79,6 +79,10 @@ export async function POST(req: Request) {
     ok: true,
     elevatedUntil: res.elevatedUntil.toISOString(),
     expiresInSec: Math.floor(ELEVATION_MS / 1000),
+    // Returned exactly once. The page holds it in memory and sends it back as
+    // X-Reveal-Token; it is never a cookie, so it cannot ride along on a URL
+    // someone pastes into a terminal.
+    revealToken: res.revealToken,
   });
 }
 

@@ -1,6 +1,9 @@
+import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { verifyTotpForUser } from "@/lib/auth/totp";
 import { consumeBackupCode } from "@/lib/auth/backup-codes";
+
+const hashToken = (raw: string) => createHash("sha256").update(raw).digest("base64url");
 
 /**
  * Step-up authentication ("sudo mode").
@@ -33,7 +36,7 @@ const LOCKOUT_MS = 15 * 60 * 1000;
 export type StepUpFactor = "totp" | "backup_code";
 
 export type StepUpResult =
-  | { ok: true; factor: StepUpFactor; elevatedUntil: Date }
+  | { ok: true; factor: StepUpFactor; elevatedUntil: Date; revealToken: string }
   | { ok: false; code: "locked"; retryAfterSec: number }
   | { ok: false; code: "invalid"; attemptsRemaining: number }
   | { ok: false; code: "setup_required" };
@@ -53,16 +56,34 @@ export async function isElevated(sessionId: string): Promise<boolean> {
 }
 
 /**
- * Guard for routes behind step-up. Returns a discriminated result so callers
- * can answer with `code: "step_up_required"` and let the UI prompt inline
- * instead of bouncing the user to a login page mid-task.
+ * Guard for routes behind step-up.
+ *
+ * Requires BOTH a live elevation window AND the reveal token issued with it.
+ * The window alone is not enough: the session cookie rides along on every
+ * request to this origin, so copying an elevated URL out of devtools into curl
+ * replayed the elevation verbatim and dumped every secret in the namespace. The
+ * token is returned once, lives only in page memory, and travels as a header —
+ * neither a pasted URL nor an automatically-attached cookie can carry it.
  */
 export async function requireStepUp(
   sessionId: string,
+  revealToken?: string | null,
 ): Promise<{ ok: true } | { ok: false; code: "step_up_required" }> {
-  return (await isElevated(sessionId))
-    ? { ok: true }
-    : { ok: false, code: "step_up_required" };
+  const row = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { elevatedUntil: true, revokedAt: true, elevationTokenHash: true },
+  });
+  const denied = { ok: false, code: "step_up_required" } as const;
+  if (!row || row.revokedAt) return denied;
+  if (!row.elevatedUntil || row.elevatedUntil.getTime() <= Date.now()) return denied;
+  if (!row.elevationTokenHash || !revealToken) return denied;
+
+  // Constant-time compare of the hashes — a length-independent equality check
+  // here would leak the token a byte at a time under timing analysis.
+  const a = Buffer.from(hashToken(revealToken));
+  const b = Buffer.from(row.elevationTokenHash);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return denied;
+  return { ok: true };
 }
 
 /**
@@ -117,11 +138,19 @@ export async function grantStepUp(args: {
   }
 
   const elevatedUntil = new Date(now + ELEVATION_MS);
+  // Issued once, returned to the caller, and never stored in the clear. The
+  // page keeps it in memory and echoes it back as a header on reveal requests.
+  const revealToken = randomBytes(32).toString("base64url");
   await prisma.session.update({
     where: { id: args.sessionId },
-    data: { elevatedUntil, stepUpFailures: 0, stepUpLockedUntil: null },
+    data: {
+      elevatedUntil,
+      elevationTokenHash: hashToken(revealToken),
+      stepUpFailures: 0,
+      stepUpLockedUntil: null,
+    },
   });
-  return { ok: true, factor, elevatedUntil };
+  return { ok: true, factor, elevatedUntil, revealToken };
 }
 
 /** Returns the factor that verified, or null if none did. */
@@ -162,6 +191,36 @@ export async function stepUpChallenge(
 /** Drop elevation early — used when the user hits "Hide values". */
 export async function clearElevation(sessionId: string): Promise<void> {
   await prisma.session
-    .update({ where: { id: sessionId }, data: { elevatedUntil: null } })
+    .update({
+      where: { id: sessionId },
+      data: { elevatedUntil: null, elevationTokenHash: null },
+    })
     .catch(() => {});
+}
+
+/**
+ * Reject requests that didn't originate from our own pages.
+ *
+ * Browsers stamp `Sec-Fetch-Site` on every fetch and forbid scripts from
+ * setting it; a URL pasted into curl carries neither it nor an Origin. That
+ * makes this a precise filter for "someone copied a URL out of devtools",
+ * which is the case that leaked a namespace of secrets to a terminal.
+ *
+ * It is NOT a security boundary on its own — curl can forge any header. The
+ * real control for revealed values is the memory-only reveal token, which a
+ * copied URL cannot carry no matter what headers are faked. This check is the
+ * cheap outer layer that also covers the masked view.
+ */
+export function isBrowserRequest(req: Request): boolean {
+  const site = req.headers.get("sec-fetch-site");
+  if (site) return site === "same-origin";
+  // No fetch metadata at all → not a browser fetch we recognise. Accept only
+  // when an Origin/Referer proves it came from a page on this host.
+  const origin = req.headers.get("origin") ?? req.headers.get("referer");
+  if (!origin) return false;
+  try {
+    return new URL(origin).host === new URL(req.url).host;
+  } catch {
+    return false;
+  }
 }

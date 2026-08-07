@@ -72,17 +72,22 @@ def init_dependencies(scheduler: TaskScheduler, aws: AWSConnector):
 
 
 # ── MCP Server Configuration ───────────────────────────────────────────────────
-# MCP servers in use: github, terraform, kubernetes, prometheus, grafana.
-# The cloud-provider MCP servers (aws-core / gcp / azure) were removed — AWS infra
-# is provisioned through Terraform using the access key + secret resolved from Vault.
+# MCP servers in use: github, aws, azure, gcp, terraform, kubernetes,
+# prometheus, grafana. The three cloud servers (aws / azure / gcp) were added
+# 2026-08 after the client requirement to reach cloud APIs via MCP rather than
+# shell-outs. Each returns {} when its credentials aren't present, so a project
+# on only one cloud doesn't pay the token cost for the other two's schemas.
 from app.mcp_servers.github_mcp import get_github_config
 from app.mcp_servers.terraform_mcp import get_terraform_config
 from app.mcp_servers.prometheus_mcp import get_prometheus_config
 from app.mcp_servers.grafana_mcp import get_grafana_config
 from app.mcp_servers.kubernetes_mcp import get_kubernetes_config
+from app.mcp_servers.aws_mcp import get_aws_config
+from app.mcp_servers.azure_mcp import get_azure_config
+from app.mcp_servers.gcp_mcp import get_gcp_config
 
 def _build_mcp_config() -> dict:
-    # Terraform MCP authenticates to AWS from these env vars (access key + secret).
+    # Terraform + AWS MCP servers both authenticate to AWS from these env vars.
     aws_env = {
         "AWS_ACCESS_KEY_ID":     os.getenv("AWS_ACCESS_KEY_ID", ""),
         "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY", ""),
@@ -92,6 +97,9 @@ def _build_mcp_config() -> dict:
     return {
         **get_github_config(),
         **get_terraform_config(aws_env),
+        **get_aws_config(aws_env),
+        **get_azure_config(),
+        **get_gcp_config(),
         **get_prometheus_config(),
         **get_grafana_config(),
         **get_kubernetes_config(),

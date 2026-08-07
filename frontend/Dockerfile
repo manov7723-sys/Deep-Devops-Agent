@@ -22,6 +22,7 @@ RUN if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)";
 FROM node:20-alpine AS runner
 ENV NODE_ENV=production
 WORKDIR /app
+
 # Copy the built app WITH its node_modules from the builder (avoids a second
 # install and guarantees framework binaries + build output are present).
 COPY --from=builder /app ./
