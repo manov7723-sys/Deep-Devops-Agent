@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { requireProjectAccess } from "@/lib/projects/permissions";
+import { requireProjectCloud } from "@/lib/projects/cloud-guard";
 import { getKubeconfigForEnv, kubeExecEnv } from "@/lib/runner/creds";
 import { applyAppSecret } from "@/lib/devops/app-secrets";
 import { wireSecretToWorkloads, type WireOutcome } from "@/lib/devops/wire-secret-to-workloads";
@@ -70,6 +71,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
   const { slug } = await ctx.params;
   const gate = await requireProjectAccess(slug, "developer");
   if (!gate.ok) return NextResponse.json({ ok: false }, { status: gate.status });
+
+  // Refuse a AZURE database on a project that targets another cloud. The UI
+  // hides the panel, but a stale tab or a wrong agent tool call would still
+  // reach here and write an app-db Secret pointing at an unreachable host.
+  const cloudOk = await requireProjectCloud(gate.access.project.id, "azure");
+  if (!cloudOk.ok)
+    return NextResponse.json(
+      { ok: false, code: "wrong_cloud", message: cloudOk.message },
+      { status: cloudOk.status },
+    );
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
