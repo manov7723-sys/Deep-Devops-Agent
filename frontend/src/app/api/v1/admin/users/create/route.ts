@@ -14,6 +14,11 @@ const Body = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   isSuperAdmin: z.boolean().default(false),
+  // Global project-access tier — see GlobalAccess enum. Admin picks this in
+  // the UI. `admin` value here mirrors the isSuperAdmin flag: the backfill
+  // and the /projects gate check either, so either is enough — but setting
+  // both keeps the two in lockstep for callers who query only one.
+  globalAccess: z.enum(["none", "view_all", "full_all", "admin"]).default("none"),
   memberships: z
     .array(
       z.object({
@@ -66,12 +71,22 @@ export async function POST(req: Request) {
 
   // Apply post-create flags + memberships in a single transaction so the
   // user row doesn't appear before its memberships do.
+  // Keep isSuperAdmin and globalAccess in lockstep: picking `admin` in the UI
+  // sets both. The /projects gate and the requireProjectAccess helper each
+  // check ONE of them, so anchoring both here means it doesn't matter which
+  // one a call site reads — a real admin passes either way.
+  const isAdminTier = data.globalAccess === "admin" || data.isSuperAdmin;
+
   await prisma.$transaction(async (tx) => {
-    if (data.isSuperAdmin || data.preVerified) {
+    // The update always runs when we're either setting an admin tier, an
+    // explicit globalAccess, or the pre-verified stamp. Cheaper than an
+    // unconditional update but predictable — one branch, one set of fields.
+    if (isAdminTier || data.preVerified || data.globalAccess !== "none") {
       await tx.user.update({
         where: { id: user.id },
         data: {
-          isSuperAdmin: data.isSuperAdmin,
+          isSuperAdmin: isAdminTier,
+          globalAccess: data.globalAccess,
           emailVerifiedAt: data.preVerified ? new Date() : null,
         },
       });
@@ -98,7 +113,8 @@ export async function POST(req: Request) {
     userAgent: meta.userAgent,
     metadata: {
       email: data.email,
-      isSuperAdmin: data.isSuperAdmin,
+      isSuperAdmin: isAdminTier,
+      globalAccess: data.globalAccess,
       memberships: data.memberships.length,
     },
   });
@@ -109,7 +125,8 @@ export async function POST(req: Request) {
       id: user.id,
       email: user.email,
       name: user.name,
-      isSuperAdmin: data.isSuperAdmin,
+      isSuperAdmin: isAdminTier,
+      globalAccess: data.globalAccess,
       memberships: data.memberships.length,
     },
   });

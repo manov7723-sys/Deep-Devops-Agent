@@ -20,6 +20,7 @@ import {
 } from "@/components/ui";
 import { useAdminUsers } from "@/hooks/queries/admin";
 import { GrantTokensModal } from "@/components/modals/GrantTokensModal";
+import { CreateUserModal } from "@/components/modals/CreateUserModal";
 import type { AdminUserRow } from "@/lib/admin/aggregates";
 
 type AdminPlanTier = "Free" | "Pro" | "Scale" | "Enterprise";
@@ -105,6 +106,7 @@ export function AdminUsersClient() {
     name: string;
     email: string;
   } | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const filtered = useMemo(() => {
     if (!users) return [];
@@ -216,7 +218,7 @@ export function AdminUsersClient() {
         title="Users"
         sub={users ? `${users.length} accounts on the platform.` : ""}
         actions={
-          <Btn variant="primary" icon="plus">
+          <Btn variant="primary" icon="plus" onClick={() => setCreateOpen(true)}>
             Add user
           </Btn>
         }
@@ -256,6 +258,7 @@ export function AdminUsersClient() {
         }}
         user={grantTarget}
       />
+      <CreateUserModal open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
 }
