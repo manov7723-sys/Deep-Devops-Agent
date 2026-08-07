@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import type { Route } from "next";
 import type { ProjectRole } from "@prisma/client";
-import { requireProjectAccess, type ProjectAccess } from "./permissions";
+import { requireProjectPageAccess, type ProjectAccess } from "./permissions";
 
 /**
  * Server-side gate used by every /p/[projectSlug]/* page. Mirrors the
@@ -17,7 +17,7 @@ export async function requireProjectPage(
   nextPath: string,
   minRole: ProjectRole = "viewer",
 ): Promise<ProjectAccess> {
-  const gate = await requireProjectAccess(slug, minRole);
+  const gate = await requireProjectPageAccess(slug, minRole);
   if (!gate.ok) {
     if (gate.status === 401) {
       redirect(`/auth/login?next=${encodeURIComponent(nextPath)}` as Route);

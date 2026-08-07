@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
-import { requireProjectAccess } from "@/lib/projects/permissions";
+import { requireProjectPageAccess } from "@/lib/projects/permissions";
 
 export default async function ProjectLayout({
   children,
@@ -10,7 +10,7 @@ export default async function ProjectLayout({
   params: Promise<{ projectSlug: string }>;
 }) {
   const { projectSlug } = await params;
-  const gate = await requireProjectAccess(projectSlug, "viewer");
+  const gate = await requireProjectPageAccess(projectSlug, "viewer");
   if (!gate.ok) {
     if (gate.status === 401) redirect("/auth/login");
     notFound(); // 404 covers both "no such project" and "not a member"

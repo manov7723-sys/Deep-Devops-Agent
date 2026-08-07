@@ -53,14 +53,39 @@ const MAX_OUTPUT_TOKENS = Number(process.env.DDA_MAX_OUTPUT_TOKENS) || 4096;
 const OPTIONS_RULE =
   'For any question with choices, emit EXACTLY one fenced ```options``` block — a single-line JSON object and nothing after it, e.g. {"question":"Which AWS region?","options":["us-east-1","us-west-2","Custom"],"key":"region"}. One question per message; WAIT for the answer; add "Custom" when free text is OK; never list choices as bullets or output raw JSON outside the block.';
 
-const INFRA_PLAYBOOK = [
+/**
+ * Redirect lines that point at AWS-only playbooks.
+ *
+ * These MUST only be emitted when the corresponding playbook is actually in
+ * the prompt. buildSystemPrompt gates DATABASE_PLAYBOOK / S3_PLAYBOOK / etc.
+ * on `clouds.has("aws")`, but these lines used to be unconditional — so on an
+ * Azure/GCP/unconnected project the model read "NOT HANDLED HERE — see the
+ * '## Managed database' playbook below", found no such section, and concluded
+ * the PLATFORM couldn't create databases at all. It then told users "managed
+ * database creation is handled exclusively by a separate process in this
+ * platform" and fell back to asking for fields one at a time. 8 of 13 projects
+ * were affected (2026-08).
+ */
+function awsRedirectLines(hasAws: boolean): string[] {
+  if (!hasAws) {
+    // No AWS connected → the AWS-only playbooks are absent. Say what IS
+    // possible instead of leaving the model to invent a refusal.
+    return [
+      "MANAGED DATABASES / S3 / VPC / EC2 / VPN — these are provisioned through AWS, and this project has no AWS account connected, so those playbooks are not loaded. If the user asks for one, say plainly that it needs an AWS account connected on the Cloud providers page, and offer what IS available for their connected cloud (e.g. Azure Database via the Connections page, or connecting an EXISTING database with connect_existing_rds / create_rds_k8s_secret, which are cloud-agnostic). Do NOT claim the platform cannot do it, and do NOT invent a question-by-question wizard.",
+    ];
+  }
+  return [
+    "MANAGED DATABASES (RDS, 'add a database', 'create postgres/mysql') ARE NOT HANDLED BY THIS SECTION — that trigger belongs EXCLUSIVELY to the '## Managed database' playbook further down this prompt (its own batch options-form + its own approval flow). Do NOT apply this section's 'ask one at a time' / 'Generate & push vs Submit for approval' flow to a database request — that is a DIFFERENT, incompatible flow and mixing the two is exactly what causes the form to get skipped or asked one field at a time.",
+    "S3 BUCKETS ('create s3 bucket', 'new bucket') ARE NOT HANDLED BY THIS SECTION EITHER — that trigger belongs EXCLUSIVELY to the '## S3 bucket' playbook further down (its own batch options-form + its own approval flow). Same reason as RDS: mixing the two flows breaks the form.",
+    "VPC creation ('create vpc', 'new vpc') is handled EXCLUSIVELY by the '## VPC' playbook further down. EC2 creation ('create ec2', 'new ec2 instance', 'launch an ec2') is handled EXCLUSIVELY by the '## EC2' playbook further down. Same reason as RDS/S3: mixing flows breaks the batch form.",
+    "CROSS-REGION VPC PEERING ('peer two vpcs', 'connect vpc to vpc', 'link vpcs across regions', 'cross region peering') is handled EXCLUSIVELY by the '## Cross-region VPC peering' playbook further down.",
+  ];
+}
+
+const INFRA_PLAYBOOK_HEAD = [
   "## Infrastructure (AWS/cloud) requests",
   "TERRAFORM APPLY SELF-HEAL — when run_terraform action='apply' returns failed status AND the run's error text contains 'EntityAlreadyExists' / 'AlreadyExistsException' / 'ResourceAlreadyExistsException' / 'BucketAlreadyOwnedByYou' / 'InvalidGroup.Duplicate' / similar 'already exists' phrasing, the cause is state drift from a partial earlier apply (some AWS resources got created, then apply died before saving state). CALL heal_terraform_state YOURSELF with commitTo={repoFullName, path} — the tool auto-finds the latest failed run on the env AND commits import.tf into the .tf directory in ONE call. Pass just `envKey` (skip runId — auto-picks latest failed) plus commitTo.repoFullName (the app repo) and commitTo.path (the directory holding main.tf, e.g. terraform/eks/dev). Do NOT tell the user to run terraform import, do NOT tell them to delete resources in the AWS console, do NOT ask them for the runId or file path unless the tool responds saying it couldn't find either. Then re-invoke run_terraform action='apply' with the SAME name + stack + files (now including the committed import.tf — read it from the repo via read_github_file/list_files_in_repo). Terraform 1.5+ imports every orphaned resource on the next plan and the apply succeeds in one pass. After success, optionally delete import.tf in a follow-up commit — future applies without it are no-ops for imported resources. Only after TWO consecutive failed heal+retry cycles for the same error should you surface the failure to the user; even then, name the specific resources that couldn't be healed (from the tool's detected[] response) rather than dumping the raw terraform log.",
   "APP-BROKEN DEBUGGING — NEVER ask the user to open DevTools, look at the Network tab, run `kubectl exec ... env`, or copy status codes from a browser. That workflow was the 2026-08 pain point. Instead: (a) 'the app isn't working / my deploy is broken / it shows an error' → CALL diagnose_deployed_app(envKey, namespace, deployment) FIRST. It runs pod-ready + env-vars + URL-reachable + DB-reachable + log-tail checks and returns a structured verdict + suggestedFixes. Report the summary + the failing layer(s). (b) 'why is X env var set to Y / what DATABASE_URL is the pod using?' → CALL inspect_pod_env(envKey, namespace, deployment, keys:[<the specific keys>]). Never ask 'please run kubectl exec deploy/... -- env'. (c) 'sign-in loops / 2FA won't load / cookies not being sent' → DON'T ask them to check DevTools. Call inspect_pod_env with keys:['SESSION_COOKIE_SECURE'] — if it's not 'false' or missing on an HTTP-only deploy, call apply_app_env_secret to set it and rollout-restart. New deploys generated after the 2026-08 fix auto-inject this env var; older deploys don't have it. (d) 'show / list / what env vars does my app use / show env for namespace X / view all config for <ns>' — the WHOLE-NAMESPACE ask, not one specific key on one pod → CALL show_namespace_env(envKey, namespace). It returns `markdown` holding one fenced .env file per workload container (envFrom Secrets/ConfigMaps expanded into real KEY=value lines), per ConfigMap, and per Secret (values ALWAYS masked — do NOT offer a reveal option); paste that markdown verbatim as your reply. Mention the user can also browse these files in the Env viewer tab. If the user hasn't named the namespace, first call list_kubernetes_resources(envKey, kind:'namespaces') and offer the choices via an options-form — do NOT free-type-guess a namespace. This whole class of bug should be diagnosed AND fixed in ONE tool exchange, without the user opening a terminal or DevTools.",
-  "MANAGED DATABASES (RDS, 'add a database', 'create postgres/mysql') ARE NOT HANDLED HERE — that trigger belongs EXCLUSIVELY to the '## Managed database' playbook below (its own batch options-form + its own approval flow). Do NOT apply this playbook's 'ask one at a time' / 'Generate & push vs Submit for approval' flow to a database request — that is a DIFFERENT, incompatible flow and mixing the two is exactly what causes the form to get skipped or asked one field at a time.",
-  "S3 BUCKETS ('create s3 bucket', 'new bucket') ARE NOT HANDLED HERE EITHER — that trigger belongs EXCLUSIVELY to the '## S3 bucket' playbook below (its own batch options-form + its own approval flow). Same reason as RDS: mixing the two flows breaks the form.",
-  "VPC creation ('create vpc', 'new vpc') is handled EXCLUSIVELY by the '## VPC' playbook below. EC2 creation ('create ec2', 'new ec2 instance', 'launch an ec2') is handled EXCLUSIVELY by the '## EC2' playbook below. Same reason as RDS/S3: mixing flows breaks the batch form.",
-  "CROSS-REGION VPC PEERING ('peer two vpcs', 'connect vpc to vpc', 'link vpcs across regions', 'cross region peering') ARE NOT HANDLED HERE EITHER — that trigger belongs EXCLUSIVELY to the '## Cross-region VPC peering' playbook below.",
   "To create/change ANY OTHER cloud infra (EKS, IAM, Lambda, standalone security groups…), run a guided wizard:",
   `- Ask requirements ONE at a time. ${OPTIONS_RULE} Gather: resource specifics, name (globally-unique where needed), region, environment, repo (for push), prod settings (encryption, HA, tags).`,
   "- COST FIRST: before showing the create/apply options, call estimate_infra_cost with the chosen specs (cloud, instanceType, nodeCount, managedK8s for EKS/AKS/GKE, storageGb, loadBalancers) and show the user the estimated MONTHLY cost + line-item breakdown. Say it's an approximate on-demand estimate. Only proceed once they've seen it.",
@@ -69,7 +94,14 @@ const INFRA_PLAYBOOK = [
   "- EKS → ALWAYS provision_eks; AKS → ALWAYS provision_aks; GKE → ALWAYS provision_gke — each is the console-style wizard for its cloud (Azure Portal: env → resource group → location → node pool → security → optional app pool → mode; GCP Console: env → project → location → node pool → network → security → optional app pool → mode). NEVER hand-write cluster Terraform. Other resources → write production-grade Terraform (encryption, least-privilege, remote state). Push = write_repo_file committed DIRECTLY to the repo's default branch — NEVER pass openPullRequest, NEVER invent a feature/infra branch. Infra files stranded on an unmerged branch are invisible to heal_terraform_state, re-plan and re-apply (all of which read the default branch), which is what forced users to hand-merge PRs before every retry (2026-08 incident). The apply ALWAYS goes through request_infra_approval (the gate), never run_terraform apply directly. Use a stable descriptive `stack` name and REUSE it across runs.",
   "- APPLYING TERRAFORM THAT ALREADY EXISTS IN A REPO — TRIGGERS: 'apply the terraform in <repo>/<path>', 'apply the file in the connected repo', 'run the terraform I pushed', or the user references files an earlier create-cluster form pushed. THIS IS NOT A CREATE-WIZARD REQUEST — do NOT run the 'ask requirements one at a time' flow above, do NOT ask for region/instance type/name/environment settings, do NOT ask 'which action do you want' or 'confirm you want to proceed' more than once, and NEVER ask the user to paste, share, provide, confirm access to, or otherwise re-supply the file contents — the tool reads them itself with the OAuth identity the project already stored. The ONLY thing you may ask is: (a) the target env, and ONLY if the project has more than one env AND no default is set in the system context; (b) the single correct path, and ONLY if the given path is ambiguous or looks like a segment repeated twice (e.g. 'terraform/eks/x/terraform/eks/x') — in that case say so plainly and stop, do NOT silently try both variants. Everything else is ONE tool call: apply_repo_terraform(repoFullName, path, envKey, action). It lists + reads every .tf file at the path with the connected repo's OAuth identity, then plan previews or apply submits to the approval gate. If it errors 'no .tf files found', relay that message verbatim and STOP — do NOT retry with a guessed nearby path and do NOT fall back to asking the user for contents. When action='apply' returns status='pending_approval', respond with a fenced ```approval-card``` block containing {\"approvalId\":\"<the returned approvalId>\"} — the human approves inline and the apply runs automatically; do NOT send them to a separate Approvals page and do NOT claim the apply has started before that.",
   "- FABRICATION IS FORBIDDEN for repo-existing Terraform. Never chain list_files_in_repo + read_github_file + run_terraform/request_infra_approval yourself for the trigger above — that multi-step path is what causes you to (a) loop asking permission, and (b) synthesize plausible-looking planSummary lines / HCL that the user never actually wrote. Every planSummary line, every cost input, every policy input for a repo-existing apply MUST come from bytes apply_repo_terraform actually read from the repo. If you catch yourself composing 'EKS cluster module with version ~> 20.0' or similar without having read the file, STOP — you are hallucinating; call apply_repo_terraform instead. Do NOT narrate 'Terraform plan has started' or 'submitted for approval' unless the corresponding tool call returned successfully in this same turn.",
-].join("\n");
+];
+
+/** Compose the infra playbook for the clouds this project actually has. */
+function infraPlaybook(hasAws: boolean): string {
+  const head = INFRA_PLAYBOOK_HEAD.slice(0, 3);   // title + terraform-heal + app-broken
+  const tail = INFRA_PLAYBOOK_HEAD.slice(3);      // the generic wizard steps
+  return [...head, ...awsRedirectLines(hasAws), ...tail].join("\n");
+}
 
 /**
  * Manifest wizard the agent runs when asked to create a Kubernetes YAML file —
@@ -691,7 +723,7 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
     deployEnvCtx,
     azureCtx,
     gcpCtx,
-    INFRA_PLAYBOOK,
+    infraPlaybook(clouds.has("aws")),
     MANIFEST_PLAYBOOK,
     HELM_PLAYBOOK,
     CI_PLAYBOOK,

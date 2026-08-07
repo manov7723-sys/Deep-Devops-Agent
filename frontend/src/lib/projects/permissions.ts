@@ -39,30 +39,29 @@ export type GateResult =
   | { ok: false; status: 401 | 403 | 404; code?: "not_a_browser" };
 
 /**
- * Server-side authorization gate for project routes.
+ * Authorization gate for project API ROUTE HANDLERS.
  *
- * BROWSER-ONLY BY DEFAULT. Reads `Sec-Fetch-Site` from the ambient request via
- * next/headers — Next.js already gives us the current request's headers there,
- * so this covers all 188 project-gated API routes without touching any call
- * site.
+ * Also enforces browser-only access: reads `Sec-Fetch-Site` via next/headers
+ * and rejects anything that isn't a same-origin fetch. That covers all 188
+ * project-gated API routes without touching a call site.
  *
- * WHY: without this, a session cookie stolen from a browser — or a URL copied
+ * WHY: without it, a session cookie lifted from a browser — or a URL copied
  * out of DevTools into curl — could POST to /rds-connect and write arbitrary
- * K8s Secrets with attacker-supplied passwords. The user reproduced that leak
- * in 2026-08. Sec-Fetch-Site is set by every real browser fetch and forbidden
- * to page scripts, so requiring `same-origin` is a precise filter that curl
- * cannot pass without explicit spoofing — and even then it's rejected unless
- * the value matches exactly. `curl -H 'Sec-Fetch-Site: same-origin'` would
- * bypass this check; that's a known limitation of any header-based control and
- * why sensitive UI actions ALSO get server-side CSRF (see the reveal token in
- * env-viewer). This layer catches the naive attack, which is the vast majority.
+ * K8s Secrets with attacker-supplied passwords. Reproduced in 2026-08.
+ * Sec-Fetch-Site is set by every real browser fetch and is a forbidden header
+ * for page scripts, so requiring `same-origin` is a precise filter curl can't
+ * pass without deliberate spoofing. `curl -H 'Sec-Fetch-Site: same-origin'`
+ * DOES bypass it — a known limit of any header-based control, and why the
+ * credential-returning path (env-viewer) additionally requires a memory-only
+ * reveal token. This layer stops the naive copy-a-URL attack, which is the
+ * one users actually reproduce.
  *
- * SSR EXEMPTION: server components that call this gate use next/headers's
- * built-in cookie/header access and don't emit their own Sec-Fetch-Site header
- * to themselves. Detecting an SSR context is `!headerStore.get("host")` in
- * practice — but the gate is now called from API route handlers only (the
- * SSR page-guard is requireProjectPage in page-guards.ts, a separate path),
- * so this concern doesn't apply here.
+ * DO NOT call this from a server component. Page renders are navigations, not
+ * fetches: an address-bar hit sends `Sec-Fetch-Site: none`, which this
+ * rejects. An earlier version of this comment claimed the SSR guard was "a
+ * separate path" — it is not; requireProjectPage calls straight into here, so
+ * adding the check 404'd every /p/[projectSlug]/* page. Server components must
+ * use requireProjectPageAccess below.
  */
 export async function requireProjectAccess(
   slug: string,
@@ -75,6 +74,26 @@ export async function requireProjectAccess(
     // to a caller we've already decided isn't allowed to be here.
     return { ok: false, status: 403, code: "not_a_browser" };
   }
+  return requireProjectPageAccess(slug, minRole);
+}
+
+/**
+ * The same authorization checks WITHOUT the browser-only gate — for server
+ * components rendering /p/[projectSlug]/* pages.
+ *
+ * A page render is a navigation, not a fetch. Typing the URL or opening it in
+ * a new tab sends `Sec-Fetch-Site: none`, and requiring `same-origin` there
+ * turns every direct page load into a 404. The browser check belongs on API
+ * routes, which are what a copied URL actually targets; a page render can only
+ * happen in a browser by definition.
+ *
+ * Session + membership + role are still enforced here — this exempts ONLY the
+ * transport check.
+ */
+export async function requireProjectPageAccess(
+  slug: string,
+  minRole: ProjectRole = "viewer",
+): Promise<GateResult> {
   const session = await getActiveSession();
   if (!session) return { ok: false, status: 401 };
 
