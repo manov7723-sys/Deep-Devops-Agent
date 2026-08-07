@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api/client";
 import {
   Badge,
   Block,
@@ -62,15 +64,38 @@ const ENGINE_OPTIONS: SelectOption[] = [
 ];
 
 export function ProjectConnectionsClient({ slug }: { slug: string }) {
+  // Show ONLY the database panel for the cloud this project targets.
+  //
+  // All three used to render unconditionally, so an AWS project was offered
+  // "Connect Azure Database" and "Connect Cloud SQL" — panels that can only
+  // fail, since the project has no Azure/GCP provider to authenticate with.
+  // Worse, each one writes a Kubernetes Secret on submit, so a mis-click
+  // created a half-configured `app-db` pointing at a database that doesn't
+  // exist.
+  //
+  // Mirrors the `lockedCloud` pattern already used on the Connection page
+  // (ConnectionClient.tsx) rather than inventing a second mechanism. A project
+  // with no `cloud` set (legacy rows) still sees all three — narrowing those
+  // would hide the only way to connect anything at all.
+  const { data: projectInfo } = useQuery<{ project: { cloud: string | null } }>({
+    queryKey: ["p", slug, "project-cloud"],
+    queryFn: () => api.get<{ project: { cloud: string | null } }>(`/projects/${slug}`),
+    staleTime: 60_000,
+  });
+  const lockedCloud = projectInfo?.project?.cloud ?? null;
+  const shows = (cloud: string) => !lockedCloud || lockedCloud === cloud;
+
   return (
     <div className="col gap-5">
       <PageHead
         title="Connections"
-        sub="Wire an existing RDS into a cluster. Writes a Kubernetes Secret with DATABASE_URL + DB_* keys into the cluster's namespace."
+        sub="Wire an existing managed database into a cluster. Writes a Kubernetes Secret with DATABASE_URL + DB_* keys into the cluster's namespace."
       />
-      <ClusterRdsConnectPanel slug={slug} />
-      <AzureDbConnectPanel slug={slug} />
-      <CloudSqlConnectPanel slug={slug} />
+      {shows("aws") && <ClusterRdsConnectPanel slug={slug} />}
+      {shows("azure") && <AzureDbConnectPanel slug={slug} />}
+      {shows("gcp") && <CloudSqlConnectPanel slug={slug} />}
+      {/* App secrets is cloud-agnostic — it writes a K8s Secret from pasted
+          key=value pairs and never calls a cloud API. Always available. */}
       <AppSecretsPanel slug={slug} />
     </div>
   );

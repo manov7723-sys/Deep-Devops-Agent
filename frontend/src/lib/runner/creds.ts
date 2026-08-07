@@ -16,6 +16,7 @@
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { prisma } from "@/lib/db/prisma";
 import { decryptSecret } from "@/lib/auth/crypto";
 import { getDecryptedAzureCreds } from "@/lib/cloud/azure";
@@ -86,7 +87,52 @@ export type KubeconfigHandle = {
 
 export type KubeconfigResult =
   | { ok: true; handle: KubeconfigHandle; namespace: string }
-  | { ok: false; code: "env_not_found" | "missing_kubeconfig" | "decrypt_failed"; message: string };
+  | {
+      ok: false;
+      code: "env_not_found" | "missing_kubeconfig" | "decrypt_failed" | "cluster_unreachable";
+      message: string;
+      /** Present when code === "cluster_unreachable" — the host that failed to resolve. */
+      host?: string;
+    };
+
+/**
+ * DNS-lookup cache for cluster API-server hostnames.
+ *
+ * WHY THIS EXISTS: getKubeconfigForEnv is called on EVERY kubectl-using request
+ * — the env viewer alone can hit it several times a minute. Doing a DNS lookup
+ * inline would add ~5ms on a hit and ~1-2s on a miss (resolver wait) to every
+ * one of those calls. A 30-second TTL keyed by hostname keeps success paths
+ * effectively free and still catches a deleted cluster within half a minute.
+ *
+ * NEGATIVE results get a shorter TTL (10s) so the UI recovers quickly once the
+ * user reconnects to a new cluster — a longer negative cache would leave them
+ * staring at "cluster gone" for 30s after the fix.
+ */
+const DNS_CACHE = new Map<string, { at: number; ok: boolean }>();
+const DNS_TTL_OK_MS = 30_000;
+const DNS_TTL_FAIL_MS = 10_000;
+
+async function checkClusterReachable(
+  kubeconfigYaml: string,
+): Promise<{ ok: true } | { ok: false; host: string }> {
+  const m = kubeconfigYaml.match(/^\s*server:\s*https?:\/\/([^:/\s]+)/m);
+  if (!m) return { ok: true }; // couldn't extract — don't block; kubectl will surface a real error
+  const host = m[1]!;
+  const now = Date.now();
+  const cached = DNS_CACHE.get(host);
+  if (cached) {
+    const ttl = cached.ok ? DNS_TTL_OK_MS : DNS_TTL_FAIL_MS;
+    if (now - cached.at < ttl) return cached.ok ? { ok: true } : { ok: false, host };
+  }
+  try {
+    await dnsLookup(host);
+    DNS_CACHE.set(host, { at: now, ok: true });
+    return { ok: true };
+  } catch {
+    DNS_CACHE.set(host, { at: now, ok: false });
+    return { ok: false, host };
+  }
+}
 
 /**
  * Resolve an env's kubeconfig: load the encrypted blob, decrypt it, write to
@@ -132,6 +178,25 @@ export async function getKubeconfigForEnv(envId: string): Promise<KubeconfigResu
       const tok = await getGcpAccessToken(env.cloudProviderId);
       if (tok.ok) plaintext = plaintext.replace(/\btoken:\s*\S+/, `token: ${tok.accessToken}`);
     }
+  }
+
+  // Pre-flight the cluster's API server address.
+  //
+  // Without this check, calling kubectl against a deleted cluster leaked the
+  // raw stderr — `dial tcp: lookup XXX.eks.amazonaws.com: no such host` — to
+  // whichever UI made the call, and the user had no way to tell "the network
+  // is flaky" from "the cluster is gone" (2026-08). Failing here with an
+  // actionable code means the 24 kubectl call sites already return a clean
+  // "reconnect the cluster" message without each one having to interpret DNS
+  // errors on its own.
+  const reach = await checkClusterReachable(plaintext);
+  if (!reach.ok) {
+    return {
+      ok: false,
+      code: "cluster_unreachable",
+      host: reach.host,
+      message: `The cluster at ${reach.host} no longer resolves — it was likely deleted. Reconnect a cluster to this env on the Connections page.`,
+    };
   }
 
   const dir = await mkdtemp(join(tmpdir(), `dda-kcfg-`));

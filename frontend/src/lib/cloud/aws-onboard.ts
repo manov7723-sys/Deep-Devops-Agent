@@ -142,6 +142,13 @@ export async function assumeRoleCreds(args: {
     // not "no CLI", so the operator looks at the connector rather than the pod.
     return { ok: false, code: "assume_failed", message: `MCP returned an AssumeRole response we couldn't parse.` };
   }
+  // Remember WHY MCP didn't serve this, so the CLI-fallback error below can
+  // tell the truth. Reporting "no MCP connector is registered" when one IS
+  // registered but failed sends the operator to the wrong page entirely.
+  const mcpDetail =
+    mcp.code === "unavailable"
+      ? "no AWS MCP connector is registered"
+      : `the AWS MCP connector failed (${mcp.message.slice(0, 200)})`;
 
   const workdir = await mkdtemp(join(tmpdir(), "dda-sts-"));
   try {
@@ -203,8 +210,8 @@ export async function assumeRoleCreds(args: {
         ok: false,
         code: "cli_not_installed",
         message:
-          "The AWS CLI isn't available on this host, and no AWS MCP connector is registered either. " +
-          "Register an AWS MCP server on the Admin → MCP page (recommended), or install `aws` on the runner.",
+          `The AWS CLI isn't available on this host, and ${mcpDetail}. ` +
+          "Register or fix an AWS MCP server on the Admin → MCP page (recommended), or install `aws` on the runner.",
         stderr: res.stderr.slice(-1_000),
       };
     }

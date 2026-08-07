@@ -56,28 +56,82 @@ async function findAwsMcpConnectorId(): Promise<string | null> {
 }
 
 /**
- * Run one AWS CLI command through the MCP server. Returns the raw stdout so
- * the caller can JSON-parse the same shape it was already parsing.
+ * Unwrap `call_aws`'s response envelope down to the raw AWS CLI JSON.
  *
- * `extraEnv` is not honoured here — the MCP subprocess inherits credentials
- * from the connector at spawn time. If a caller needs to pass ephemeral
- * credentials into a specific call, that requires a per-call MCP connector
- * or extending callMcpTool to forward env; document as a future issue.
+ * The tool does NOT return CLI stdout directly — it wraps it:
+ *
+ *   [{ "cli_command": "aws sts …",
+ *      "response": { "error": null, "status_code": 200, "error_code": null,
+ *                    "as_json": "{\"Credentials\": …}" },   <- string, not object
+ *      "metadata": {...}, "validation_failures": null,
+ *      "missing_context_failures": null, "failed_constraints": [] }]
+ *
+ * Callers parse the same `{"Credentials":…}` shape they'd get from the shell,
+ * so the unwrap has to happen here rather than in every call site.
+ */
+function unwrapCallAws(text: string): { ok: true; json: string } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: `MCP returned non-JSON: ${text.slice(0, 200)}` };
+  }
+  const first = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (!first || typeof first !== "object") {
+    return { ok: false, error: "MCP returned an empty call_aws envelope." };
+  }
+  const env = first as {
+    response?: { error?: string | null; error_code?: string | null; status_code?: number; as_json?: string };
+    validation_failures?: unknown;
+    missing_context_failures?: unknown;
+    failed_constraints?: unknown[];
+  };
+
+  // The server validates commands before running them; a rejected command
+  // comes back with these populated and NO response body. Surfacing them is
+  // the difference between "your command was malformed" and a silent empty
+  // result the caller would misread as "AWS returned nothing".
+  const vf = env.validation_failures;
+  const mcf = env.missing_context_failures;
+  if ((Array.isArray(vf) && vf.length) || (Array.isArray(mcf) && mcf.length)) {
+    return { ok: false, error: `MCP rejected the command: ${JSON.stringify(vf ?? mcf).slice(0, 300)}` };
+  }
+
+  const r = env.response;
+  if (!r) return { ok: false, error: "MCP call_aws envelope had no `response`." };
+  if (r.error || r.error_code) {
+    return { ok: false, error: `AWS error${r.error_code ? ` (${r.error_code})` : ""}: ${r.error ?? "unknown"}` };
+  }
+  if (typeof r.as_json !== "string") {
+    return { ok: false, error: "MCP call_aws response had no `as_json` payload." };
+  }
+  return { ok: true, json: r.as_json };
+}
+
+/**
+ * Run one AWS CLI command through the MCP server. Returns the raw AWS JSON —
+ * byte-comparable to what `aws … --output json` prints — so callers parse one
+ * shape regardless of which transport served the request.
+ *
+ * Ephemeral per-call credentials are NOT supported: the MCP subprocess picks
+ * up credentials at spawn time from the connector's stored McpCredential rows
+ * (or the host's own AWS config). A caller needing to act as an already-
+ * assumed session must use the CLI path until callMcpTool can forward env.
  */
 export async function runAwsViaMcp(cliCommand: string): Promise<AwsCliResult> {
   const connectorId = await findAwsMcpConnectorId();
   if (!connectorId) return { ok: false, via: "none", code: "unavailable", message: "no AWS MCP connector registered" };
 
-  // `call_aws` returns the CLI JSON as `content[0].text` — callMcpTool
-  // already concatenates all text content, so `res.text` is exactly the
-  // stdout the shell CLI would have printed.
   const res = await callMcpTool({
     connectorId,
     remoteName: "call_aws",
     input: { cli_command: cliCommand },
   });
   if (!res.ok) return { ok: false, via: "mcp", code: "failed", message: res.error };
-  return { ok: true, via: "mcp", stdout: res.text };
+
+  const unwrapped = unwrapCallAws(res.text);
+  if (!unwrapped.ok) return { ok: false, via: "mcp", code: "failed", message: unwrapped.error };
+  return { ok: true, via: "mcp", stdout: unwrapped.json };
 }
 
 /** True when a functioning AWS MCP connector is registered — cheap sync check. */
