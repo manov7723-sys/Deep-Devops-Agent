@@ -799,6 +799,7 @@ model Project {
   tfRuns            TfRun[]
   reportRecipients  ReportRecipient[]
   reportRuns        ReportRun[]
+  findings          Finding[]
 
   @@index([ownerId])
 }
@@ -2306,3 +2307,57 @@ model VpnUserCert {
 //                         aggregations over Invoice.
 // Admin screens read the real tables; they do not get their own copies.
 // =============================================================================
+
+// ── Security findings ──────────────────────────────────────────────────────
+//
+// One row per DISTINCT issue a scanner surfaces, deduped by
+// (scanner, ruleId, target). Rescans update the same row (`lastSeenAt`,
+// severity if it changed); an issue not surfaced by a later scan flips to
+// `fixed` via a separate resolver — a finding disappearing from a scan output
+// is meaningful and shouldn't be treated as "still open".
+//
+// This is deliberately NOT the Alert model: an Alert is "production is on
+// fire right now", a Finding is "a scanner reported this and someone should
+// look at it before the SLA runs out". Notify triggers an Alert only when
+// the SLA breaches (see lib/secops/severity.ts and notify.ts).
+model Finding {
+  id           String            @id @default(uuid(7)) @db.Uuid
+  projectId    String            @db.Uuid
+  envKey       String? // optional: findings from a repo scan aren't env-scoped
+  scanner      String // "trivy" | "gitleaks" | "semgrep" | "npm-audit" | "checkov" | "kube-bench" | "prowler"
+  ruleId       String // CVE / rule id / secret rule — the scanner's stable id
+  target       String // file path, package name, resource ARN — whatever the scanner names
+  severity     FindingSeverity
+  title        String
+  description  String?
+  fixedVersion String? // when scanner suggests one (Trivy vulns, npm-audit)
+  status       FindingStatus     @default(open)
+  firstSeenAt  DateTime          @default(now())
+  lastSeenAt   DateTime          @default(now())
+  fixedAt      DateTime?
+  suppressedAt DateTime?
+  suppressedBy String? // user id who muted this; audit reads through AuditLog
+  slaAlertedAt DateTime? // notify.ts stamps this once so we don't re-alert every scan
+  metadata     Json? // raw scanner-specific fields (package version, cvss, etc.)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, scanner, ruleId, target], name: "finding_dedupe")
+  @@index([projectId, status, severity])
+  @@index([projectId, scanner])
+  @@index([status, severity, firstSeenAt]) // notify.ts SLA sweep
+}
+
+enum FindingSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO // scanner emits this but we don't SLA it
+}
+
+enum FindingStatus {
+  open
+  fixed // seen previously, absent from a later scan (or explicitly marked)
+  suppressed // muted by a user with a reason recorded in AuditLog
+}
