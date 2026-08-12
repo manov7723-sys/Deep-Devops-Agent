@@ -8,6 +8,10 @@ FROM node:24-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Prisma: generate the client before build (added by DeepAgent auto-heal).
+RUN if [ -f prisma/schema.prisma ] || [ -f schema.prisma ]; then \
+      npx --yes prisma generate; \
+    fi
 RUN npm run build
 
 FROM node:24-alpine AS runner
