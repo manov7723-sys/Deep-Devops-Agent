@@ -21,5 +21,8 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules
+# Prisma schema + migrations must ship in the runtime image — the DB-connect
+# flow execs into the pod and runs `prisma migrate deploy || db push`.
+COPY --from=build /app/prisma ./prisma
 EXPOSE 3000
 CMD ["npm", "start"]
