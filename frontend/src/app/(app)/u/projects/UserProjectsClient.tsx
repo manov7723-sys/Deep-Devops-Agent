@@ -33,7 +33,10 @@ export function UserProjectsClient() {
   const params = useSearchParams();
   const wizardOpen = params.get("new") === "1";
   const stepParam = parseInt(params.get("step") ?? "1", 10);
-  const step = Number.isFinite(stepParam) && stepParam >= 1 && stepParam <= 4 ? stepParam : 1;
+  // v4 wizard has 5 steps (Details · Cloud · Repository · Analysis · Environments).
+  // The pre-v4 cap of 4 here silently reset step=5 → step=1 after clicking
+  // Continue on Analysis, sending the user back to Details.
+  const step = Number.isFinite(stepParam) && stepParam >= 1 && stepParam <= 5 ? stepParam : 1;
   const draftId = params.get("draft");
 
   // If wizard is opened without a draft id, mint one and reflect in URL.

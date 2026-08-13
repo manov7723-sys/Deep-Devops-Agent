@@ -13,28 +13,30 @@
  * When invitation links are useful (fewer touchpoints), the team-invite flow
  * at /teams/[slug]/invitations already exists.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Btn, Field, Icon, Input, Modal, Select } from "@/components/ui";
+import { Btn, Field, Icon, Input, Modal } from "@/components/ui";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
-type Project = { id: string; slug: string; name: string };
+export type Project = { id: string; slug: string; name: string };
 
-type ProjectMembership = {
+export type ProjectMembership = {
   projectId: string;
   role: "owner" | "developer" | "viewer";
 };
 
-type CreateResp =
-  | { ok: true; user: { id: string; email: string; name: string } }
-  | { ok: false; code?: string; message?: string };
+export type GlobalAccess = "none" | "view_all" | "full_all" | "admin";
 
-const ACCESS_OPTIONS = [
+export const ACCESS_OPTIONS: Array<{ value: GlobalAccess; label: string }> = [
   { value: "none", label: "None — only selected projects (default)" },
   { value: "view_all", label: "View all projects (read-only)" },
   { value: "full_all", label: "Full access to all projects" },
   { value: "admin", label: "Admin — can do everything, including create users" },
 ];
+
+type CreateResp =
+  | { ok: true; user: { id: string; email: string; name: string } }
+  | { ok: false; code?: string; message?: string };
 
 /**
  * Web-safe random password. Crypto.getRandomValues is available in the
@@ -63,23 +65,19 @@ export function CreateUserModal({
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState(() => generatePassword());
-  const [globalAccess, setGlobalAccess] = useState<"none" | "view_all" | "full_all" | "admin">(
-    "none",
-  );
   const [memberships, setMemberships] = useState<ProjectMembership[]>([]);
   const [showPw, setShowPw] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createdBanner, setCreatedBanner] = useState<string | null>(null);
 
-  // Only meaningful when access = "none" (the "selected projects" case).
-  // For the global tiers the user sees everything anyway, so per-project
-  // rows here would be redundant.
-  const showProjectPicker = globalAccess === "none";
-
+  // Access is granted purely per-project via the picker below — the old
+  // global-access dropdown (none/view_all/full_all/admin) was removed on
+  // request. New users default to globalAccess="none" and only see projects
+  // the admin explicitly ticks. Super-admin promotion is a separate action.
   const projectsQ = useQuery<{ projects: Project[] }>({
     queryKey: ["admin", "all-projects"],
     queryFn: () => api.get<{ projects: Project[] }>("/projects"),
-    enabled: open && showProjectPicker,
+    enabled: open,
     staleTime: 60_000,
   });
   const projects = projectsQ.data?.projects ?? [];
@@ -100,9 +98,9 @@ export function CreateUserModal({
         lastName: lastName.trim(),
         email: email.trim().toLowerCase(),
         password,
-        globalAccess,
-        isSuperAdmin: globalAccess === "admin",
-        memberships: showProjectPicker ? memberships : [],
+        globalAccess: "none",
+        isSuperAdmin: false,
+        memberships,
         preVerified: true,
       });
       if (!res.ok) throw new Error(res.message ?? res.code ?? "Could not create user.");
@@ -126,7 +124,6 @@ export function CreateUserModal({
     setLastName("");
     setEmail("");
     setPassword(generatePassword());
-    setGlobalAccess("none");
     setMemberships([]);
     setShowPw(true);
     setError(null);
@@ -251,30 +248,16 @@ export function CreateUserModal({
           </Field>
 
           <Field
-            label="Access"
-            hint="Choose the broadest access this user needs. Per-project picks below apply only when this is set to None."
+            label="Projects"
+            hint="Pick the projects this user can reach and what they can do in each."
           >
-            <Select
-              value={globalAccess}
-              placeholder="Pick access"
-              options={ACCESS_OPTIONS}
-              onValueChange={(v) => setGlobalAccess(v as typeof globalAccess)}
+            <ProjectMembershipPicker
+              projects={projects}
+              memberships={memberships}
+              onChange={setMemberships}
+              loading={projectsQ.isLoading}
             />
           </Field>
-
-          {showProjectPicker && (
-            <Field
-              label="Projects"
-              hint="Optional — pick projects this user gets access to and what role they hold in each."
-            >
-              <ProjectMembershipPicker
-                projects={projects}
-                memberships={memberships}
-                onChange={setMemberships}
-                loading={projectsQ.isLoading}
-              />
-            </Field>
-          )}
 
           {error && <p style={{ color: "var(--danger)", fontSize: 13, margin: 0 }}>{error}</p>}
         </div>
@@ -351,7 +334,7 @@ const ROLE_LABEL: Record<ProjectMembership["role"], string> = {
   owner: "Owner",
 };
 
-function ProjectMembershipPicker({
+export function ProjectMembershipPicker({
   projects,
   memberships,
   onChange,
@@ -362,14 +345,31 @@ function ProjectMembershipPicker({
   onChange: (next: ProjectMembership[]) => void;
   loading: boolean;
 }) {
-  // Per-project checkbox state, keyed by projectId. Kept local to this
-  // component so the modal-level state stays flat (memberships[]) — the two
-  // sync via a useEffect at the end of every capability change.
+  // Per-project checkbox state, keyed by projectId. Kept local so the
+  // modal-level state stays flat (memberships[]) — the two are kept in
+  // sync by a useEffect below when the memberships prop changes identity
+  // (e.g. after the Edit modal refetches).
   const [caps, setCaps] = useState<Map<string, Set<Capability>>>(() => {
     const out = new Map<string, Set<Capability>>();
     for (const m of memberships) out.set(m.projectId, roleToCapabilities(m.role));
     return out;
   });
+
+  // Sync caps ← memberships whenever the prop identity changes. Without
+  // this the Edit-user modal would preload developer/owner state on first
+  // fetch and never redraw the checkboxes even after the admin saved a
+  // demotion and the query refetched — the reopened modal would still
+  // show all boxes ticked from the first mount's initializer.
+  //
+  // Deriving is equivalent (no capabilities exist outside a role tier), so
+  // overwriting local caps with the derived-from-role set is honest: it
+  // shows the admin what capabilities the current role actually grants.
+  useEffect(() => {
+    const out = new Map<string, Set<Capability>>();
+    for (const m of memberships) out.set(m.projectId, roleToCapabilities(m.role));
+    setCaps(out);
+  }, [memberships]);
+
   const [expanded, setExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 

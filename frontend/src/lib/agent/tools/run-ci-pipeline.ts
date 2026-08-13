@@ -14,6 +14,8 @@ type Output =
       commitSha: string;
       runId: string | null;
       runUrl: string | null;
+      /** Workflow file basename (e.g. "ci-frontend.yml") — pass to wait_for_workflow_run. */
+      workflowFile: string | null;
       message: string;
     }
   | { needsDisambiguation: true; candidates: string[] };
@@ -61,7 +63,7 @@ export const runCiPipelineTool: Tool<Input, Output> = {
     const rows = await prisma.ciPipeline.findMany({
       where: { projectId: ctx.projectId, repoId: repo.id },
       orderBy: { createdAt: "desc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, workflowPath: true },
     });
     if (rows.length === 0) {
       return {
@@ -70,22 +72,36 @@ export const runCiPipelineTool: Tool<Input, Output> = {
       };
     }
 
-    let match = rows[0];
+    // Disambiguation is only meaningful across DISTINCT names. Historical
+    // duplicate rows (same project+repo+name from repeated redeploys before
+    // the upsert fix) would otherwise produce a candidates list of N
+    // identical strings — an unanswerable question. Rows are newest-first,
+    // so first-seen per name is the freshest copy.
+    const distinct: typeof rows = [];
+    const seenNames = new Set<string>();
+    for (const r of rows) {
+      const k = r.name.toLowerCase();
+      if (seenNames.has(k)) continue;
+      seenNames.add(k);
+      distinct.push(r);
+    }
+
+    let match = distinct[0];
     if (input.name) {
       const needle = input.name.toLowerCase();
-      const filtered = rows.filter((r) => r.name.toLowerCase().includes(needle));
+      const filtered = distinct.filter((r) => r.name.toLowerCase().includes(needle));
       if (filtered.length === 0) {
         return {
           ok: false,
-          error: `No pipeline matching "${input.name}" — available: ${rows.map((r) => r.name).join(", ")}.`,
+          error: `No pipeline matching "${input.name}" — available: ${distinct.map((r) => r.name).join(", ")}.`,
         };
       }
       if (filtered.length > 1) {
         return { ok: true, output: { needsDisambiguation: true, candidates: filtered.map((r) => r.name) } };
       }
       match = filtered[0];
-    } else if (rows.length > 1) {
-      return { ok: true, output: { needsDisambiguation: true, candidates: rows.map((r) => r.name) } };
+    } else if (distinct.length > 1) {
+      return { ok: true, output: { needsDisambiguation: true, candidates: distinct.map((r) => r.name) } };
     }
 
     const result = await runCiPipeline(match.id, ctx.projectId);
@@ -98,6 +114,9 @@ export const runCiPipelineTool: Tool<Input, Output> = {
         commitSha: result.commitSha,
         runId: result.runId,
         runUrl: result.runUrl,
+        // The REAL committed workflow file — watchers must use this (or the
+        // runId) instead of guessing names like "build-and-push-<svc>.yml".
+        workflowFile: match.workflowPath ? (match.workflowPath.split("/").pop() ?? null) : null,
         message: result.message,
       },
     };

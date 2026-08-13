@@ -245,19 +245,24 @@ function nodeServiceDockerfile(p: Record<string, string>): string {
   // (previous version used `|| echo skipping` which silently masked real
   // build errors — a broken build then only surfaced at container start).
   //
-  // Also auto-run `prisma generate` if the app uses Prisma. Without it,
-  // @prisma/client has no generated types → any `.ts` file importing them
-  // fails the TS check (e.g. "Module '@prisma/client' has no exported member
-  // 'BillingPeriod'"). Prisma is one of the most common Node/TS deps and
-  // `npm ci` alone doesn't run the generator — this makes the build robust.
-  const buildLine = p.buildCommand
-    ? `RUN ${p.buildCommand}\n`
-    : `# Prisma: generate client BEFORE build so TS type checks see the enums.
-# Skipped when the app doesn't use Prisma.
+  // Also auto-run `prisma generate` if the app uses Prisma — in BOTH branches.
+  // Without it, @prisma/client has no generated client, and `next build` dies
+  // collecting page data with "@prisma/client did not initialize yet. Please
+  // run prisma generate" (or, for plain TS, the type check fails on missing
+  // enums). The deps-install layer only sees package.json — the postinstall
+  // generator can't run there because the schema isn't copied yet — so this
+  // MUST happen after `COPY . .`. It previously lived only in the
+  // no-buildCommand branch, which is exactly the branch Next.js repos DON'T
+  // take (the analyzer supplies "npm run build") — every Prisma+Next repo got
+  // a Dockerfile that failed in CI while building fine locally.
+  const prismaGuard = `# Prisma: generate the client BEFORE build (no-op without a schema).
 RUN if [ -f prisma/schema.prisma ] || [ -f schema.prisma ]; then \\
       npx --yes prisma generate; \\
     fi
-# Auto-build when the app defines a build script (Next.js needs it).
+`;
+  const buildLine = p.buildCommand
+    ? `${prismaGuard}RUN ${p.buildCommand}\n`
+    : `${prismaGuard}# Auto-build when the app defines a build script (Next.js needs it).
 # Fails the image build if the script exists and errors — surfaces bugs early.
 RUN if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then \\
       npm run build; \\

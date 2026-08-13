@@ -263,19 +263,21 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
             </span>
           </Block.Title>
         </Block.Header>
-        {connectedEnvs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            No cluster connected yet. Connect one below.
-          </span>
-        ) : (
-          <div className="row gap-2 wrap">
-            {connectedEnvs.map((e) => (
-              <Badge key={e.id} tone="ok" withDot>
-                {e.name || e.key} · connected
-              </Badge>
-            ))}
-          </div>
-        )}
+        <Block.Body>
+          {connectedEnvs.length === 0 ? (
+            <span className="muted" style={{ fontSize: 13 }}>
+              No cluster connected yet. Connect one below.
+            </span>
+          ) : (
+            <div className="row gap-2 wrap">
+              {connectedEnvs.map((e) => (
+                <Badge key={e.id} tone="ok" withDot>
+                  {e.name || e.key} · connected
+                </Badge>
+              ))}
+            </div>
+          )}
+        </Block.Body>
       </Block>
 
       {/* ── Terraform state backend ──────────────────────────────────────── */}
@@ -293,12 +295,13 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
           </Block.Title>
         </Block.Header>
 
-        {!envs || envs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            Create an environment first to store the cluster connection.
-          </span>
-        ) : (
-          <div className="col gap-3" style={{ maxWidth: 520 }}>
+        <Block.Body>
+          {!envs || envs.length === 0 ? (
+            <span className="muted" style={{ fontSize: 13 }}>
+              Create an environment first to store the cluster connection.
+            </span>
+          ) : (
+            <div className="col gap-3" style={{ maxWidth: 520 }}>
             {/* Cloud provider pills — scoped to the project's target cloud. */}
             <Field label="Cloud provider">
               <div className="row gap-2 wrap">
@@ -693,7 +696,8 @@ export function ProjectConnectionClient({ slug }: { slug: string }) {
               )}
             </div>
           </div>
-        )}
+          )}
+        </Block.Body>
       </Block>
     </div>
   );
@@ -870,7 +874,8 @@ function TerraformStateSection({
           </span>
         </Block.Title>
       </Block.Header>
-      <div className="col gap-3" style={{ maxWidth: 480 }}>
+      <Block.Body>
+        <div className="col gap-3" style={{ maxWidth: 480 }}>
         <Field label="Environment">
           <Select
             value={envKey}
@@ -1077,7 +1082,8 @@ function TerraformStateSection({
             </span>
           )}
         </div>
-      </div>
+        </div>
+      </Block.Body>
     </Block>
   );
 }

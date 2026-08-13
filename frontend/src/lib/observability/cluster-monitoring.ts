@@ -15,6 +15,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getKubeconfigForEnv, kubeExecEnv } from "@/lib/runner/creds";
 import { runStage } from "@/lib/runner/exec";
 import { appDashboard } from "@/lib/observability/grafana-dashboard";
+import { getPrometheusForwardBase } from "@/lib/observability/kube-proxy";
 
 export const NS = "monitoring";
 const RELEASE = "monitoring";
@@ -959,7 +960,37 @@ export async function monitoringStatus(envId: string): Promise<MonitoringStatus>
       note: res.error,
     };
   if (res.exitCode !== 0) {
-    // Namespace missing = not installed (not an error to surface loudly).
+    // The comment used to say "Namespace missing = not installed" and swallow
+    // every non-zero exit as such — but kubectl also returns non-zero for
+    // auth failures, unreachable clusters, RBAC denials and timeouts. Silence
+    // there made the panel say "not installed", the user clicked Install, that
+    // failed for the SAME reason (no cluster / no auth), and the panel kept
+    // saying "not installed" forever with zero explanation.
+    //
+    // Distinguish the two: only the literal `(NotFound)` on `namespaces
+    // "monitoring"` means genuinely-not-installed. Anything else is an error
+    // the user needs to see, so surface it in `note`.
+    const stderrLc = res.stderr.toLowerCase();
+    const isNamespaceMissing =
+      /namespaces?\s+"?monitoring"?\s+not found/.test(stderrLc) ||
+      /error from server \(notfound\).*namespaces?\s+"?monitoring"?/.test(stderrLc);
+    if (isNamespaceMissing) {
+      return {
+        installed: false,
+        ready: 0,
+        total: 0,
+        prometheusReady: false,
+        grafanaReady: false,
+        loggingReady: false,
+      };
+    }
+    // Real error — surface the tail so the UI's status.note tells the user
+    // what actually went wrong (auth, RBAC, unreachable, timed out, …).
+    const detail =
+      (res.timedOut ? "timed out — the cluster took too long to respond. " : "") +
+      (res.stderr.trim() || res.stdout.trim() || "kubectl returned a non-zero exit code.").slice(
+        -400,
+      );
     return {
       installed: false,
       ready: 0,
@@ -967,6 +998,7 @@ export async function monitoringStatus(envId: string): Promise<MonitoringStatus>
       prometheusReady: false,
       grafanaReady: false,
       loggingReady: false,
+      note: `Couldn't check monitoring status — ${detail}`,
     };
   }
 
@@ -1008,36 +1040,65 @@ export type PromSample = {
 export type ClusterPromResult =
   { ok: true; resultType: string; result: PromSample[] } | { ok: false; error: string };
 
-/** Query the in-cluster Prometheus via the kube API-server proxy (no exposed URL). */
+/**
+ * Query the in-cluster Prometheus via an authenticated `kubectl port-forward`
+ * tunnel (same mechanism the Grafana embed uses).
+ *
+ * The original implementation hit the kube API-server service-proxy
+ * (`/api/v1/namespaces/monitoring/services/monitoring-kube-prometheus-prometheus:9090/proxy/…`).
+ * On some EKS clusters that path silently HANGS specifically for Prometheus —
+ * Grafana on the same proxy works fine, and port-forwarding Prometheus
+ * responds instantly. Reproduced locally on the aws-project's cluster in
+ * 2026-08: kubectl `--raw` to the service-proxy hits the client-timeout, the
+ * same PromQL via port-forward returns in ~10 ms. Rather than fight the
+ * API-server proxy, use the tunnel the Grafana proxy already relies on.
+ */
 export async function queryClusterPrometheus(
   envId: string,
   query: string,
   opts?: { range?: boolean; nowSec?: number; minutes?: number; step?: number },
 ): Promise<ClusterPromResult> {
-  let promPath: string;
+  let path: string;
   if (opts?.range) {
     const now = opts.nowSec ?? Math.floor(Date.now() / 1000);
     const start = now - (opts.minutes ?? 60) * 60;
-    promPath = `/api/v1/query_range?query=${encodeURIComponent(query)}&start=${start}&end=${now}&step=${opts.step ?? 60}`;
+    path = `/api/v1/query_range?query=${encodeURIComponent(query)}&start=${start}&end=${now}&step=${opts.step ?? 60}`;
   } else {
-    promPath = `/api/v1/query?query=${encodeURIComponent(query)}`;
+    path = `/api/v1/query?query=${encodeURIComponent(query)}`;
   }
-  const rawPath = `/api/v1/namespaces/${NS}/services/${PROM_SVC}:${PROM_PORT}/proxy${promPath}`;
 
-  const res = await runWithKubeconfig(envId, "kubectl", ["get", "--raw", rawPath], 20_000);
-  if (!res.ok) return { ok: false, error: res.error };
-  if (res.exitCode !== 0) {
-    const stderr = res.stderr.toLowerCase();
-    if (stderr.includes("not found") || stderr.includes("could not find")) {
+  let base: string;
+  try {
+    base = await getPrometheusForwardBase(envId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/not found|could not find|no such/i.test(msg)) {
       return {
         ok: false,
         error: "Monitoring isn't installed in this cluster yet — click “Install monitoring”.",
       };
     }
-    return { ok: false, error: res.stderr.slice(-300) || "Prometheus proxy query failed." };
+    return { ok: false, error: `Prometheus tunnel unavailable: ${msg.slice(-300)}` };
   }
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  let text: string;
   try {
-    const body = JSON.parse(res.stdout) as {
+    const r = await fetch(`${base}${path}`, { signal: ctrl.signal });
+    text = await r.text();
+    if (!r.ok) return { ok: false, error: text.slice(-300) || `Prometheus HTTP ${r.status}` };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message.slice(0, 300) : "Prometheus tunnel fetch failed",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  try {
+    const body = JSON.parse(text) as {
       status?: string;
       error?: string;
       data?: { resultType?: string; result?: PromSample[] };

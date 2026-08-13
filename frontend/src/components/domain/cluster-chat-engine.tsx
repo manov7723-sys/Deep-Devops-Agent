@@ -22,6 +22,7 @@ import {
   useTerraformRun,
 } from "@/hooks/queries/connectivity";
 import { TerraformStageView, apiErrorMessage } from "@/components/domain/cluster-chat-shared";
+import type { RepoAnalysisReport } from "@/lib/analysis/repo-analyzer";
 
 export type EnvRow = { id: string; key: string; name: string };
 export type RepoRow = { id: string; fullName: string; name: string; defaultBranch: string };
@@ -49,6 +50,24 @@ export type StepCtx = {
   opts: Record<string, unknown> | undefined;
   /** Results of `config.extraQueries`, keyed by their `key` (e.g. live GCP projects). */
   sources: Record<string, unknown>;
+  /**
+   * Saved DeploymentPlan report from the create-project Analysis step, when
+   * one exists. Steps can use it to pre-fill sized defaults (cluster node type,
+   * min/desired/max nodes) so the wizard opens with the analysis values instead
+   * of generic ones. undefined when the project skipped analysis.
+   */
+  plan?: RepoAnalysisReport;
+};
+
+/** Response shape of GET /projects/[slug]/deployment-plan (subset used here). */
+type DeploymentPlanResp = {
+  ok: boolean;
+  plan: {
+    repoFullName: string;
+    analyzedAt: string;
+    updatedAt: string;
+    data: { report?: RepoAnalysisReport };
+  } | null;
 };
 
 type BaseStep = {
@@ -183,6 +202,17 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
     queryFn: () => api.get<RepoRow[]>(`/projects/${slug}/repos`),
     staleTime: 60_000,
   });
+  // DeploymentPlan is best-effort: if the project skipped analysis or the
+  // endpoint 404s / errors, plan stays undefined and every step falls back to
+  // its non-plan default. Reused query key so this piggybacks the same cache
+  // the RecommendedSetupPanel uses — no duplicate fetch.
+  const planQ = useQuery<DeploymentPlanResp>({
+    queryKey: ["p", slug, "deployment-plan"],
+    queryFn: () => api.get<DeploymentPlanResp>(`/projects/${slug}/deployment-plan`),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const plan = planQ.data?.plan?.data?.report;
   const extra = config.extraQueries ?? [];
   const [values, setValues] = useState<Answers>({});
   const extraResults = useQueries({
@@ -228,8 +258,15 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
   }, [JSON.stringify(extraResults.map((r) => r.dataUpdatedAt))]);
 
   const ctx: StepCtx = useMemo(
-    () => ({ answers: values, envs: envs ?? [], repos: repos ?? [], opts: opts.data, sources }),
-    [values, envs, repos, opts.data, sources],
+    () => ({
+      answers: values,
+      envs: envs ?? [],
+      repos: repos ?? [],
+      opts: opts.data,
+      sources,
+      plan,
+    }),
+    [values, envs, repos, opts.data, sources, plan],
   );
 
   const pages = useMemo(() => {
@@ -271,7 +308,7 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
       return changed ? next : prev;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [envs, repos, opts.data, sources, pageIdx]);
+  }, [envs, repos, opts.data, sources, pageIdx, plan]);
 
   function setVal(key: string, v: string | number | boolean) {
     setValues((p) => ({ ...p, [key]: v }));
@@ -393,15 +430,16 @@ export function ClusterChat({ slug, config }: { slug: string; config: ClusterCha
         repoFullName,
         basePath: ghPath,
         files: gen.files,
+        // Server ignores this and commits to the repo's default branch —
+        // infra pushes go straight to main so heal_terraform_state / plan /
+        // apply (all of which read the default branch) can see the files
+        // immediately without waiting for a PR merge.
         branch: `infra/${config.branchPrefix}-${name}`,
         message: `Add ${config.cloudLabel} ${config.resourceNoun ?? "cluster"} ${name} (Terraform)`,
-        pullRequestBody: `Deterministic ${config.cloudLabel} blueprint for \`${name}\`.`,
       });
       setGenerated({ files: gen.files, clusterName: gen.clusterName });
       setNote(
-        pushed.pullRequest
-          ? `✅ Generated ${gen.fileCount} files → ${repoFullName} · PR #${pushed.pullRequest.number}: ${pushed.pullRequest.url}`
-          : `✅ Generated ${gen.fileCount} files → ${repoFullName} (branch infra/${config.branchPrefix}-${name}).`,
+        `✅ Generated ${gen.fileCount} files → ${repoFullName} · committed to ${pushed.branch ?? "default"} branch.`,
       );
     } catch (e) {
       setNote(`❌ Generate/push failed: ${apiErrorMessage(e)}`);

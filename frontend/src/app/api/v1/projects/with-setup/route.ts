@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { CloudKind, RepoKind, RepoVisibility } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { getActiveSession } from "@/lib/auth/session";
 import { createProject } from "@/lib/projects/projects";
@@ -49,6 +50,12 @@ const EnvChoice = z.object({
   autoDeploy: z.boolean().default(false),
   promotionRank: z.number().int().min(0).max(99).default(0),
   region: z.string().trim().max(40).optional(),
+  /**
+   * Branch this env deploys from — display default for the deploy flow.
+   * Chosen from the repo's branch dropdown in the wizard's Environments step.
+   * Null / omitted → deploys from the repo's default branch (current behaviour).
+   */
+  deployBranch: z.string().trim().max(200).optional(),
 });
 
 const CloudChoice = z.object({
@@ -82,6 +89,20 @@ const Body = z.object({
   cloud: CloudChoice.nullable().default(null),
   // The project's intended cloud (records the wizard pick; locks the Connect UI).
   cloudKind: z.enum(["aws", "gcp", "azure", "proxmox"]).nullable().default(null),
+  /**
+   * Saved Deployment Plan from the wizard's Analysis step. Advisory only —
+   * stored on the project so the in-project "Recommended setup" panel and
+   * the cluster/RDS wizards can pre-fill from it. Free-shape JSON validated
+   * only for size; the analysis engine owns the structure.
+   */
+  deploymentPlan: z
+    .object({
+      repoFullName: z.string().min(3),
+      analyzedAt: z.string(),
+      plan: z.unknown(),
+    })
+    .nullable()
+    .default(null),
 });
 
 type StepReport = {
@@ -289,6 +310,7 @@ export async function POST(req: Request) {
       promotionRank: e.promotionRank,
       ...(cloudProviderId ? { cloudProviderId } : {}),
       ...(e.region ? { region: e.region } : {}),
+      ...(e.deployBranch ? { deployBranch: e.deployBranch } : {}),
     });
     if (!result.ok) {
       steps.push({
@@ -334,6 +356,23 @@ export async function POST(req: Request) {
           message: `Could not set Terraform state backend for ${key}.`,
         });
       }
+    }
+  }
+
+  // Step 6 — Deployment Plan from the Analysis step. Best-effort: a plan
+  // save failure must never fail project creation.
+  if (data.deploymentPlan) {
+    try {
+      await prisma.deploymentPlan.create({
+        data: {
+          projectId: project.id,
+          repoFullName: data.deploymentPlan.repoFullName,
+          analyzedAt: new Date(data.deploymentPlan.analyzedAt),
+          plan: data.deploymentPlan.plan as Prisma.InputJsonValue,
+        },
+      });
+    } catch (e) {
+      console.error("[with-setup] deployment plan save failed:", e);
     }
   }
 

@@ -5,6 +5,7 @@
  */
 import dns from "node:dns";
 import { startScheduler } from "@/lib/scheduler/scheduler";
+import { startPipelineSweeper } from "@/lib/ci/pipeline-sweeper";
 
 // Prefer IPv4 DNS results for outbound fetches (GitHub/OpenAI/cloud APIs).
 // On networks with broken IPv6, Node otherwise tries IPv6 first and stalls
@@ -13,3 +14,8 @@ import { startScheduler } from "@/lib/scheduler/scheduler";
 dns.setDefaultResultOrder("ipv4first");
 
 startScheduler();
+
+// CI/CD review agent: sweeps every pipeline's GitHub runs on an interval and
+// arms watchers/heals for runs the app didn't start itself (client pushes,
+// github.com re-runs, workflow_run chains, runs from before a restart).
+startPipelineSweeper();

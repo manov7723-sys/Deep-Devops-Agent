@@ -145,6 +145,50 @@ export type CicdPipelineSpec = {
    * repos must pass false (repo vars can't differ per workflow).
    */
   registryUseVars?: boolean;
+  /**
+   * Application env vars come from GITHUB, not from files in the repo.
+   *
+   * When set, the CD job is scoped to the GitHub Actions **environment**
+   * `ghEnvironment` (dev/staging/prod — created automatically on first
+   * reference), and a step materializes the named values into a Kubernetes
+   * Secret called `app-env` right before the manifests apply:
+   *   • secretNames → `${{ secrets.NAME }}` — encrypted GitHub environment
+   *     secrets (API keys, DATABASE_URL, JWT keys…), masked in logs;
+   *   • varNames    → `${{ vars.NAME }}`    — plain GitHub environment
+   *     variables (NODE_ENV, NEXT_PUBLIC_*, feature flags…).
+   * The generated Deployment already envFroms `app-env` with optional=true,
+   * so everything materialized here reaches the pod env on that same
+   * rollout — no manifest edit, no .env file in the repo.
+   *
+   * The environment scoping also turns on GitHub's native protection rules:
+   * add Required Reviewers on the prod environment and every prod deploy
+   * pauses for approval before the job starts.
+   */
+  appEnv?: {
+    ghEnvironment?: string;
+    secretNames?: string[];
+    varNames?: string[];
+    /**
+     * Service names in this deploy (monorepo). Enables PER-SERVICE env:
+     * a GitHub name prefixed `<SERVICE>__` is routed to that service alone.
+     *
+     *   DATABASE_URL              → app-env            (both services)
+     *   FRONTEND__API_URL         → app-env-frontend   (pod sees API_URL)
+     *   BACKEND__JWT_SECRET       → app-env-backend    (pod sees JWT_SECRET)
+     *
+     * Each Deployment envFroms the shared Secret AND its own, so a
+     * service-specific value overrides the shared one of the same name
+     * (Kubernetes gives the later envFrom precedence).
+     */
+    serviceNames?: string[];
+    /**
+     * Explicit per-name routing from the deploy wizard's env selector:
+     * `{ DATABASE_URL: "backend", NODE_ENV: "" }` — "" means shared. Takes
+     * precedence over the `<SERVICE>__` prefix convention, so users assign
+     * in the UI and GitHub keeps clean, unprefixed names.
+     */
+    assignment?: Record<string, string>;
+  };
 };
 
 /** The `name:` each registry's CI generator emits — the CD workflow_run keys off it. */
@@ -417,12 +461,115 @@ function cdWorkflowAfterCi(opts: {
     clusterName: string;
     resourceGroup: string;
   };
+  /** See CicdPipelineSpec.appEnv — GitHub-sourced app env for the pods. */
+  appEnv?: {
+    ghEnvironment?: string;
+    secretNames?: string[];
+    varNames?: string[];
+    serviceNames?: string[];
+    assignment?: Record<string, string>;
+  };
 }): GeneratedFile {
   const app = sanitizeAppName(opts.appName);
   const ns = opts.namespace || "default";
   const dir = opts.manifestDir;
   const workflowName = opts.workflowName || "Deploy to Kubernetes (CD)";
   const fileName = opts.fileName || "deploy.yml";
+
+  // GitHub-sourced application env. Names must satisfy GitHub's rules
+  // (A-Z, 0-9, _). GitHub RESERVES the GITHUB_ prefix (the API rejects such
+  // secret/variable names), so those are stored ALIASED as APP_<name> and
+  // mapped back to the real name here — the pod still sees
+  // GITHUB_OAUTH_CLIENT_ID etc. even though GitHub stores APP_GITHUB_….
+  const validName = (n: string) => /^[A-Z_][A-Z0-9_]*$/.test(n);
+  const ghAlias = (n: string) => (n.startsWith("GITHUB_") ? `APP_${n}` : n);
+  const envSecretNames = Array.from(new Set((opts.appEnv?.secretNames ?? []).filter(validName)));
+  const envVarNames = Array.from(new Set((opts.appEnv?.varNames ?? []).filter(validName)))
+    // A name in both lists is a secret — don't also read it from vars.
+    .filter((n) => !envSecretNames.includes(n));
+  const ghEnvironment = (opts.appEnv?.ghEnvironment ?? "").trim();
+  // `environment:` opts this job into the GitHub environment's secret scope
+  // AND its protection rules (required reviewers on prod = built-in deploy gate).
+  const environmentLine = ghEnvironment ? `\n    environment: ${ghEnvironment}` : "";
+  const allEnvNames = [...envSecretNames, ...envVarNames];
+
+  // ── Route each name to a Secret: shared, or one service's own ──────────
+  // A name prefixed `<SERVICE>__` belongs to that service only and lands in
+  // `app-env-<service>` WITHOUT the prefix; everything else is shared and
+  // lands in `app-env`. Bucketing happens here (TypeScript) rather than in
+  // shell so the generated script stays a simple loop per Secret.
+  const svcToken = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const k8sName = (s: string) => s.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const services = (opts.appEnv?.serviceNames ?? []).filter((s) => s.trim());
+  type Pair = { real: string; src: string };
+  const buckets = new Map<string, Pair[]>([["", []]]);
+  for (const svc of services) buckets.set(svc, []);
+  const assignment = opts.appEnv?.assignment ?? {};
+  for (const name of allEnvNames) {
+    // 1 — explicit assignment from the wizard's env selector wins outright.
+    //     "" (or a service that isn't in this deploy) means shared.
+    const assigned = assignment[name];
+    if (assigned !== undefined) {
+      const target = assigned && services.includes(assigned) ? assigned : "";
+      buckets.get(target)!.push({ real: name, src: ghAlias(name) });
+      continue;
+    }
+    // 2 — otherwise fall back to the `<SERVICE>__` prefix convention.
+    const owner = services.find((s) => name.startsWith(`${svcToken(s)}__`));
+    const real = owner ? name.slice(svcToken(owner).length + 2) : name;
+    // A prefix that strips to nothing ("FRONTEND__") is malformed — keep the
+    // raw name in the shared bucket rather than writing an empty key.
+    if (owner && real) buckets.get(owner)!.push({ real, src: ghAlias(name) });
+    else buckets.get("")!.push({ real: name, src: ghAlias(name) });
+  }
+  const nonEmpty = [...buckets.entries()].filter(([, pairs]) => pairs.length > 0);
+
+  /** One merge-patch block per target Secret. */
+  const secretBlock = (secretName: string, pairs: Pair[]) => {
+    const pairList = pairs.map((p) => `${p.real}=${p.src}`).join(" ");
+    return `          ARGS=()
+          for PAIR in ${pairList}; do
+            REAL="\${PAIR%%=*}"; SRC="\${PAIR#*=}"
+            VAL="\${!SRC:-}"
+            if [ -n "$VAL" ]; then
+              ARGS+=("--from-literal=$REAL=$VAL")
+            else
+              echo "::warning::$SRC is not set in GitHub${ghEnvironment ? ` environment '${ghEnvironment}'` : ""} — the pod will not see $REAL."
+            fi
+          done
+          if [ \${#ARGS[@]} -gt 0 ]; then
+            DOC=$(kubectl -n ${ns} create secret generic ${secretName} "\${ARGS[@]}" --dry-run=client -o json)
+            if kubectl -n ${ns} get secret ${secretName} >/dev/null 2>&1; then
+              kubectl -n ${ns} patch secret ${secretName} --type merge -p "$DOC"
+            else
+              printf '%s' "$DOC" | kubectl -n ${ns} create -f -
+            fi
+            echo "${secretName}: \${#ARGS[@]} key(s)"
+          fi`;
+  };
+
+  const materializeStep = allEnvNames.length
+    ? `
+      - name: Materialize app env from GitHub → Kubernetes Secret(s)
+        # Application config lives in GitHub${ghEnvironment ? ` (environment: ${ghEnvironment})` : ""} — encrypted secrets for
+        # sensitive values, plain variables for the rest.
+        #
+        # Routing: a name prefixed <SERVICE>__ goes to that service's own
+        # Secret with the prefix stripped; everything else is shared.
+        #   DATABASE_URL         -> app-env          (every service)
+        #   FRONTEND__API_URL    -> app-env-frontend (pod sees API_URL)
+        #
+        # Values are MERGED (not replaced) so keys written by other flows —
+        # the DB-connect's DATABASE_URL, Connections-tab extras — survive
+        # every deploy. GITHUB_*-named values arrive via their APP_* alias.
+        # Unset names are skipped with a warning instead of failing the deploy.
+        env:
+${envSecretNames.map((n) => `          ${ghAlias(n)}: \${{ secrets.${ghAlias(n)} }}`).join("\n")}${envSecretNames.length && envVarNames.length ? "\n" : ""}${envVarNames.map((n) => `          ${ghAlias(n)}: \${{ vars.${ghAlias(n)} }}`).join("\n")}
+        run: |
+          set -euo pipefail
+${nonEmpty.map(([svc, pairs]) => secretBlock(svc ? `app-env-${k8sName(svc)}` : "app-env", pairs)).join("\n")}
+`
+    : "";
   const auth = opts.eks
     ? `      - name: Configure AWS credentials (OIDC — no stored secrets)
         uses: aws-actions/configure-aws-credentials@v4
@@ -491,7 +638,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest${environmentLine}
     if: \${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout
@@ -569,7 +716,7 @@ ${
 `
     : ""
 }
-      - name: Apply manifests
+${materializeStep}      - name: Apply manifests
         # Prefer manifest.yaml — deploy_my_app writes exactly that file, and
         # applying the whole dir picks up any stale *.yaml (e.g. a
         # hand-committed service.yaml from an older scaffold) that
@@ -728,6 +875,7 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
         eks,
         gke,
         aks,
+        appEnv: spec.appEnv,
       }),
     );
     notes.push(
@@ -735,6 +883,19 @@ export function buildCicdArtifacts(spec: CicdPipelineSpec): CicdArtifacts {
         ? "CD deploys keyless (OIDC/WIF) after CI succeeds."
         : "CD needs the KUBECONFIG_B64 repo secret (the app sets it).",
     );
+    if (spec.appEnv && (spec.appEnv.secretNames?.length || spec.appEnv.varNames?.length)) {
+      const nSecrets = spec.appEnv.secretNames?.length ?? 0;
+      const nVars = spec.appEnv.varNames?.length ?? 0;
+      const svcs = spec.appEnv.serviceNames ?? [];
+      notes.push(
+        `App env comes from GitHub${spec.appEnv.ghEnvironment ? ` environment "${spec.appEnv.ghEnvironment}"` : ""}: ` +
+          `${nSecrets} secret(s) + ${nVars} variable(s) → materialized into Kubernetes Secret(s) on every deploy. ` +
+          `Set the values under Settings → Environments${spec.appEnv.ghEnvironment ? ` → ${spec.appEnv.ghEnvironment}` : ""} in the GitHub repo.` +
+          (svcs.length > 1
+            ? ` Per-service: prefix a name with ${svcs.map((s) => `${s.toUpperCase().replace(/[^A-Z0-9]/g, "_")}__`).join(" or ")} to give it to that service only (the prefix is stripped before the pod sees it); unprefixed names go to every service.`
+            : ""),
+      );
+    }
   }
 
   if (image) notes.push(`Deployed image: ${image}.`);

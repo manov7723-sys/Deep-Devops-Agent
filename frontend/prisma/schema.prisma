@@ -855,9 +855,32 @@ model Project {
   findings          Finding[]
   team              Team?                  @relation(fields: [teamId], references: [id], onDelete: SetNull)
   peopleMessages    ProjectMessage[]
+  deploymentPlan    DeploymentPlan?
 
   @@index([ownerId])
   @@index([teamId])
+}
+
+/**
+ * The saved Deployment Plan produced by the repo-analysis step of project
+ * creation. One per project (latest wins — re-analyze overwrites). `plan` is
+ * the full RepoAnalysisReport JSON plus per-item acceptance/status:
+ *   { report: RepoAnalysisReport,
+ *     items: { [recommendationId]: "accepted"|"skipped"|"applied" } }
+ * The in-project "Recommended setup" panel reads/updates this; the wizards
+ * consume accepted values as pre-fills. Advisory only — nothing provisions
+ * from this row directly.
+ */
+model DeploymentPlan {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  projectId    String   @unique @db.Uuid
+  repoFullName String
+  analyzedAt   DateTime
+  plan         Json
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 // An ACCEPTED member of a project (real User). Pending email invites live in
@@ -1060,6 +1083,13 @@ model Env {
   tfBackendAzureStorageAccount String?
   tfBackendAzureContainer      String?
   promotionRank                Int      @default(0) // ordering: alpha(0) -> beta(1) -> release(2)
+  /**
+   * Optional branch this env deploys from — used as a DISPLAY DEFAULT by the
+   * deploy flow (not a hard rule). Null = "use the repo's default branch",
+   * which is the existing branchless behaviour and stays backward-compatible.
+   * Populated by the create-project wizard's Environments step (v4).
+   */
+  deployBranch                 String?
   currentDeploymentId          String?  @unique @db.Uuid // active deployment; re-point to roll back
   createdAt                    DateTime @default(now())
   updatedAt                    DateTime @updatedAt
@@ -1258,7 +1288,7 @@ model CiPipeline {
   workflowPath String? // path of the workflow file within `files`
   branch       String   @default("main")
   status       String   @default("draft") // draft | committed | committing | running | success | failed | error
-  agentReview  Boolean  @default(false) // auto-heal failed runs with the agent
+  agentReview  Boolean  @default(true) // auto-heal failed runs with the agent (on by default — the "review agent" monitors every pipeline)
   healAttempts Int      @default(0) // bounds the auto-heal loop
   commitSha    String?
   runId        String? // GitHub Actions run id
@@ -2518,6 +2548,25 @@ model ProjectMessage {
   body              String
   /** User ids resolved from @name mentions at send time. Empty for none. */
   mentionedUserIds  String[] @default([]) @db.Uuid
+  /**
+   * Attachment list — objects of shape:
+   *   { id: string, name: string, mime: string, size: number, path: string, kind: "image"|"file" }
+   * `path` is a server-local relative path under uploads/team-chat/.
+   * Streamed back to browsers via the attachment endpoint (project-ACL gated),
+   * never as a direct URL — the disk path is not web-served.
+   */
+  attachments       Json?
+  /**
+   * Reply target — id of the ProjectMessage this one is replying to, WhatsApp
+   * style. Null for top-level messages. Kept on the same table (not a thread
+   * subresource) because replies belong on the linear timeline: the quoted
+   * excerpt renders inline above the reply body.
+   *
+   * No FK on purpose: the parent may be soft-deleted (`deletedAt`), and we
+   * still want to render "reply to a deleted message" instead of the reply
+   * disappearing. Resolved at read-time from the id.
+   */
+  replyToId         String?  @db.Uuid
   createdAt         DateTime @default(now())
   editedAt          DateTime?
   deletedAt         DateTime?

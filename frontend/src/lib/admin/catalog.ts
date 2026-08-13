@@ -484,12 +484,45 @@ function mcpRow(
   };
 }
 
+/**
+ * Name the built-in AWS MCP synthetic row registers under. Kept identical to
+ * `AWS_MCP_CONNECTOR_NAME` in `lib/cloud/aws-via-mcp.ts` so an operator who
+ * registers a real row with this name automatically REPLACES the synthetic one
+ * in the admin listing (the real DB row wins the merge below).
+ */
+const AWS_MCP_BUILTIN_NAME = "aws-labs-cli";
+
+/** The always-on AWS MCP row that appears when no DB row exists for it. */
+const AWS_MCP_BUILTIN_ROW: McpRow = {
+  id: "builtin:aws-labs-cli",
+  name: AWS_MCP_BUILTIN_NAME,
+  description:
+    "AWS Labs AWS-API MCP server (awslabs.aws-api-mcp-server) — built in. Spawned via `uvx` when any AWS operation needs it; no registration required. Uses the app's own AWS credentials (IRSA / instance profile / AWS_* env). Register a custom row with this name to override.",
+  status: "ok",
+  authType: "none",
+  avgCallsPerDay: null,
+  avgLatencyMs: null,
+  credentialKeys: [],
+  createdAt: new Date(0).toISOString(),
+  transport: "stdio",
+  url: null,
+  command: "uvx",
+  args: ["awslabs.aws-api-mcp-server@latest"],
+  enabled: true,
+};
+
 export async function listMcp(): Promise<McpRow[]> {
   const rows = await prisma.mcpConnector.findMany({
     orderBy: { name: "asc" },
     include: { credentials: { select: { key: true, isSecret: true } } },
   });
-  return rows.map(mcpRow);
+  const dbRows = rows.map(mcpRow);
+  // If the operator hasn't registered a row for the built-in AWS MCP, surface
+  // it as a synthetic entry so admins can SEE that the AWS MCP is wired up
+  // (previously it was invisible on this page even though every AWS call in
+  // the app routes through it). A real row with the same name takes over.
+  const hasAwsMcp = dbRows.some((r) => r.name === AWS_MCP_BUILTIN_NAME);
+  return hasAwsMcp ? dbRows : [AWS_MCP_BUILTIN_ROW, ...dbRows];
 }
 
 export type CreateMcpArgs = {

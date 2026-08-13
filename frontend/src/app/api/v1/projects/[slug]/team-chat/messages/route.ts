@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import {
@@ -7,7 +8,10 @@ import {
   resolveMentions,
   unreadCount,
   CHAT_PAGE_SIZE,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  attachmentKindFor,
 } from "@/lib/chat/project-chat";
+import { recordTypingActivity } from "@/lib/chat/typing";
 
 /**
  * Project people-chat messages. Membership is the ONLY gate — a user with
@@ -45,9 +49,30 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   return NextResponse.json({ ok: true, messages, unread });
 }
 
-const SendBody = z.object({
-  body: z.string().trim().min(1, "Message can't be empty").max(4000, "Message too long"),
+/**
+ * Attachment schema matches what /upload returns — id + name + mime + size +
+ * server-local path. The client passes this array verbatim; the server never
+ * trusts `kind` from the client (recomputed from mime) and stores the record
+ * onto the message row.
+ */
+const AttachmentInput = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(300),
+  mime: z.string().min(1).max(200),
+  size: z.number().int().min(0),
+  path: z.string().min(1).max(500),
 });
+
+const SendBody = z
+  .object({
+    body: z.string().trim().max(4000, "Message too long").optional(),
+    attachments: z.array(AttachmentInput).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
+    replyToId: z.string().uuid().optional(),
+  })
+  .refine(
+    (v) => (v.body && v.body.length > 0) || (v.attachments && v.attachments.length > 0),
+    { message: "Message needs text or at least one attachment." },
+  );
 
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
@@ -62,20 +87,56 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     );
   }
 
-  const mentionedUserIds = await resolveMentions({
-    projectId: gate.access.project.id,
-    body: parsed.data.body,
-    authorId: gate.access.session.userId,
-  });
+  const body = parsed.data.body ?? "";
+  const mentionedUserIds = body
+    ? await resolveMentions({
+        projectId: gate.access.project.id,
+        body,
+        authorId: gate.access.session.userId,
+      })
+    : [];
+
+  // Validate replyToId belongs to this project so a caller can't quote a
+  // message from another project by supplying its id — cheap findFirst.
+  let replyToId: string | null = null;
+  if (parsed.data.replyToId) {
+    const parent = await prisma.projectMessage.findFirst({
+      where: { id: parsed.data.replyToId, projectId: gate.access.project.id },
+      select: { id: true },
+    });
+    if (parent) replyToId = parent.id;
+  }
+
+  // Recompute `kind` from mime server-side — the client never sets it directly.
+  const attachments = (parsed.data.attachments ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    mime: a.mime,
+    size: a.size,
+    kind: attachmentKindFor(a.mime),
+    path: a.path,
+  }));
 
   const message = await prisma.projectMessage.create({
     data: {
       projectId: gate.access.project.id,
       userId: gate.access.session.userId,
-      body: parsed.data.body,
+      body,
       mentionedUserIds,
+      attachments: attachments.length
+        ? (attachments as unknown as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+      replyToId,
     },
     select: { id: true, createdAt: true },
+  });
+
+  // Clear the sender's own "typing" state — they just sent the message.
+  recordTypingActivity({
+    projectId: gate.access.project.id,
+    userId: gate.access.session.userId,
+    userName: gate.access.session.user.name,
+    stop: true,
   });
 
   // Fire Notification rows for each mentioned user. Not in the same
@@ -93,7 +154,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
               category: "mention",
               icon: "chat",
               title: `${gate.access.session.user.name} mentioned you`,
-              subtitle: parsed.data.body.slice(0, 120),
+              subtitle: body.slice(0, 120),
               linkHref,
             },
           })

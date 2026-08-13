@@ -72,6 +72,8 @@ export type EnvChoiceInput = {
   autoDeploy?: boolean;
   promotionRank?: number;
   region?: string;
+  /** Branch this env deploys from — display default for the deploy flow. */
+  deployBranch?: string;
 };
 
 export type CloudChoiceInput = {
@@ -97,6 +99,12 @@ export type CreateProjectWithSetupInput = {
   cloud?: CloudChoiceInput | null;
   /** Which cloud the project targets ("aws"|"gcp"|"azure"|"proxmox"); locks the Connect-provider UI. */
   cloudKind?: "aws" | "gcp" | "azure" | "proxmox" | null;
+  /** Saved plan from the wizard's Analysis step — advisory, stored on the project. */
+  deploymentPlan?: {
+    repoFullName: string;
+    analyzedAt: string;
+    plan: unknown;
+  } | null;
 };
 
 export type CreateProjectWithSetupStep = {

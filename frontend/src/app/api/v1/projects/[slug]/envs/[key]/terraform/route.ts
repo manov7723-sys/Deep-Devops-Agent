@@ -60,6 +60,28 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   });
   if (!env) return NextResponse.json({ ok: false, code: "not_found" }, { status: 404 });
 
+  // Env not linked to a cloud provider yet? When the project has EXACTLY one,
+  // adopt it automatically — users connect AWS at the project level and
+  // reasonably expect envs to inherit it. Without this, an env with a saved
+  // S3 state backend still failed the backend gate below (pickBackendForEnv
+  // keys off the LINK's kind, not the saved bucket) with a message blaming
+  // the backend the user had just configured. Ambiguity (2+ providers) still
+  // requires an explicit link on the Cluster connection page.
+  if (!env.cloudProviderId) {
+    const providers = await prisma.cloudProvider.findMany({
+      where: { projectId: gate.access.project.id },
+      select: { id: true, kind: true },
+    });
+    if (providers.length === 1) {
+      await prisma.env.update({
+        where: { id: env.id },
+        data: { cloudProviderId: providers[0]!.id },
+      });
+      env.cloudProviderId = providers[0]!.id;
+      env.cloudProvider = { kind: providers[0]!.kind };
+    }
+  }
+
   const parsed = StartBody.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
@@ -77,13 +99,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string; 
   // it reads an empty local state, decides "nothing to destroy", and returns
   // green while resources remain in the cloud. Same guard as apply.
   if ((action === "apply" || action === "destroy") && !backend) {
+    // Two distinct failure modes share this gate — name the right one. A
+    // saved bucket with NO cloud link used to produce the backend message,
+    // sending users back to a form they had already filled in.
+    const hasSavedBackend = Boolean(
+      env.tfBackendBucket || env.tfBackendGcsBucket || env.tfBackendAzureStorageAccount,
+    );
+    const message = !env.cloudProviderId
+      ? `Environment "${env.key}" isn't linked to a cloud provider. Link one on the Cluster connection page (or Cloud providers tab) — the project has ${hasSavedBackend ? "a state backend saved already; it activates once the env is linked" : "no usable state backend until then"}.`
+      : "Set a Terraform state backend for this environment before running apply/destroy (Cluster connection page → Terraform state backend).";
     return NextResponse.json(
-      {
-        ok: false,
-        code: "no_state_backend",
-        message:
-          "Set a Terraform state backend for this environment before running apply/destroy (Cluster connection page → Terraform state backend).",
-      },
+      { ok: false, code: "no_state_backend", message },
       { status: 409 },
     );
   }

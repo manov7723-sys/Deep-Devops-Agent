@@ -21,6 +21,7 @@ import {
 import { useAdminUsers } from "@/hooks/queries/admin";
 import { GrantTokensModal } from "@/components/modals/GrantTokensModal";
 import { CreateUserModal } from "@/components/modals/CreateUserModal";
+import { EditUserModal } from "@/components/modals/EditUserModal";
 import type { AdminUserRow } from "@/lib/admin/aggregates";
 
 type AdminPlanTier = "Free" | "Pro" | "Scale" | "Enterprise";
@@ -107,6 +108,11 @@ export function AdminUsersClient() {
     email: string;
   } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<{
+    id: string;
+    name: string;
+    email: string;
+  } | null>(null);
 
   const filtered = useMemo(() => {
     if (!users) return [];
@@ -132,7 +138,32 @@ export function AdminUsersClient() {
         id: "user",
         header: "User",
         cell: ({ row }) => (
-          <div className="row gap-3">
+          // The row target is what Edit-user opens — same modal serves as
+          // the "who has what access" viewer, since it prefills global
+          // access + per-project memberships. Kept as <button> so keyboard
+          // + screen readers pick it up as an action, not a heading.
+          <button
+            type="button"
+            onClick={() =>
+              setEditTarget({
+                id: row.original.id,
+                name: row.original.name,
+                email: row.original.email,
+              })
+            }
+            className="row gap-3"
+            style={{
+              background: "transparent",
+              border: 0,
+              padding: 0,
+              cursor: "pointer",
+              color: "inherit",
+              font: "inherit",
+              textAlign: "left",
+              width: "100%",
+            }}
+            aria-label={`Open ${row.original.name}'s access`}
+          >
             <Avatar name={row.original.name} size={34} />
             <div className="col" style={{ lineHeight: 1.3 }}>
               <span style={{ fontWeight: 600 }}>{row.original.name}</span>
@@ -140,7 +171,7 @@ export function AdminUsersClient() {
                 {row.original.email}
               </span>
             </div>
-          </div>
+          </button>
         ),
       },
       {
@@ -187,8 +218,18 @@ export function AdminUsersClient() {
               </Btn>
             }
           >
-            <MenuItem icon="eye">View</MenuItem>
-            <MenuItem icon="edit">Edit plan</MenuItem>
+            <MenuItem
+              icon="edit"
+              onSelect={() =>
+                setEditTarget({
+                  id: row.original.id,
+                  name: row.original.name,
+                  email: row.original.email,
+                })
+              }
+            >
+              Edit user
+            </MenuItem>
             <MenuItem
               icon="zap"
               onSelect={() =>
@@ -259,6 +300,13 @@ export function AdminUsersClient() {
         user={grantTarget}
       />
       <CreateUserModal open={createOpen} onOpenChange={setCreateOpen} />
+      <EditUserModal
+        open={editTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditTarget(null);
+        }}
+        user={editTarget}
+      />
     </div>
   );
 }

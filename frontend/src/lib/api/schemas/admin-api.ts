@@ -92,10 +92,44 @@ export type AdminUserRow = z.infer<typeof AdminUserRow>;
 
 export const PatchAdminUserRequest = z
   .object({
+    firstName: z.string().trim().min(1).max(80).optional(),
+    lastName: z.string().trim().min(1).max(80).optional(),
     isSuperAdmin: z.boolean().optional(),
+    globalAccess: z.enum(["none", "view_all", "full_all", "admin"]).optional(),
+    // When provided, replaces the user's per-project memberships wholesale
+    // (add / remove / role changes). Omit to leave memberships untouched.
+    memberships: z
+      .array(
+        z.object({
+          projectId: z.string().uuid(),
+          role: z.enum(["owner", "developer", "viewer"]),
+        }),
+      )
+      .max(200)
+      .optional(),
+    // Optional password reset. When present, must be at least 8 chars.
+    newPassword: z.string().min(8).max(200).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: "At least one field is required" });
 export type PatchAdminUserRequest = z.infer<typeof PatchAdminUserRequest>;
+
+/** Payload returned by GET /admin/users/[id] — used to prefill the edit modal. */
+export const AdminUserDetail = z.object({
+  id: z.string(),
+  email: z.string().email(),
+  firstName: z.string(),
+  lastName: z.string(),
+  name: z.string(),
+  isSuperAdmin: z.boolean(),
+  globalAccess: z.enum(["none", "view_all", "full_all", "admin"]),
+  memberships: z.array(
+    z.object({
+      projectId: z.string().uuid(),
+      role: z.enum(["owner", "developer", "viewer"]),
+    }),
+  ),
+});
+export type AdminUserDetail = z.infer<typeof AdminUserDetail>;
 
 // ──────────────────────────────────────────────────────────────────
 // Admin subscriptions

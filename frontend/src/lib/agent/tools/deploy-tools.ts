@@ -209,7 +209,14 @@ export const deployAppTool: Tool<
 
 // ── wait_for_workflow_run ────────────────────────────────────────────────────
 export const waitForWorkflowRunTool: Tool<
-  { repoFullName: string; workflowFile?: string; branch?: string; timeoutSeconds?: number },
+  {
+    repoFullName: string;
+    workflowFile?: string;
+    branch?: string;
+    timeoutSeconds?: number;
+    /** Exact run id (from run_ci_pipeline) — preferred over workflowFile. */
+    runId?: number;
+  },
   {
     done: boolean;
     status: string;
@@ -241,10 +248,18 @@ export const waitForWorkflowRunTool: Tool<
     type: "object",
     properties: {
       repoFullName: { type: "string", description: 'The repo as "owner/name".' },
+      runId: {
+        type: "number",
+        description:
+          "EXACT GitHub Actions run id to watch — ALWAYS prefer this when you have one (run_ci_pipeline " +
+          "returns it). Watching by runId can never miss: workflow file names you guess may not match what " +
+          "is committed in the repo, which 404s even though the run is visibly running.",
+      },
       workflowFile: {
         type: "string",
         description:
-          "Workflow file name to watch, e.g. 'build-and-push.yml'. Omit for the latest run of any workflow.",
+          "Workflow file name to watch, e.g. 'build-and-push.yml'. Use the `workflowFile` returned by " +
+          "run_ci_pipeline — do NOT invent a name. Ignored when runId is set. Omit for the latest run of any workflow.",
       },
       branch: {
         type: "string",
@@ -263,6 +278,7 @@ export const waitForWorkflowRunTool: Tool<
       workflowFile: input.workflowFile,
       branch: input.branch,
       timeoutMs: input.timeoutSeconds ? input.timeoutSeconds * 1000 : undefined,
+      runId: typeof input.runId === "number" && Number.isFinite(input.runId) ? input.runId : undefined,
     });
     if (!res.ok) return { ok: false, error: res.error };
     const run = res.data.run;

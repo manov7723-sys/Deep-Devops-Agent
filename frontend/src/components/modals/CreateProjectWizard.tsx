@@ -13,7 +13,6 @@ import {
   Modal,
   Select,
   Textarea,
-  Toggle,
   WizardSteps,
 } from "@/components/ui";
 import { HuePicker } from "@/components/ui/HuePicker";
@@ -25,20 +24,44 @@ import {
   type RepoChoiceInput,
   type EnvChoiceInput,
 } from "@/hooks/queries/projects";
+import { useConnectAwsAccount } from "@/hooks/queries/connectivity";
+import { RepoAnalysisStep, type PlanItems } from "@/components/domain/RepoAnalysisStep";
+import type { RepoAnalysisReport } from "@/lib/analysis/repo-analyzer";
 
-const STEPS = ["Details", "Repository", "Environments", "Cloud"] as const;
+// Step order chosen for the create-project wizard (v4), in order:
+//   1. Details       — who owns this and what's it called
+//   2. Cloud         — pick cloud + region AND connect the account inline
+//                      (required-but-skippable — "I'll connect later" escape
+//                      hatch, so a failed connect never traps the wizard)
+//   3. Repository    — pick the repo the analyzer will read
+//   4. Analysis      — verdict + language deep detection + capacity slider
+//                      + missing-file scaffolding + README gate
+//   5. Environments  — dev / staging / prod toggles + per-env branch dropdown
+//                      populated from the repo's actual branches
+const STEPS = ["Details", "Cloud", "Repository", "Analysis", "Environments"] as const;
 type EnvKey = "dev" | "staging" | "prod";
 
-// Env metadata for the wizard. `branch` is only shown as a hint; the actual
-// deploy branch is picked per-deploy on the batch form and defaults to the
-// repo's default branch — the wizard never asks the user to choose a branch.
-const ENV_META: Record<EnvKey, { tone: "info" | "warn" | "ok"; branch: string; label: string }> = {
-  dev:     { tone: "info", branch: "main", label: "Dev" },
-  staging: { tone: "warn", branch: "main", label: "Staging" },
-  prod:    { tone: "ok",   branch: "main", label: "Prod" },
+// Env metadata for the wizard. Suggested branch names are just heuristics —
+// the actual dropdown values come from the repo's real branch list. Each
+// env's `suggested` matches the common GitOps convention and is auto-picked
+// only when a branch with that name exists in the repo.
+const ENV_META: Record<
+  EnvKey,
+  { tone: "info" | "warn" | "ok"; suggested: string[]; label: string; autoDeploy: boolean }
+> = {
+  dev:     { tone: "info", suggested: ["develop", "dev", "main"],    label: "Dev",     autoDeploy: true  },
+  staging: { tone: "warn", suggested: ["staging", "stage", "main"],  label: "Staging", autoDeploy: true  },
+  prod:    { tone: "ok",   suggested: ["main", "master", "release"], label: "Prod",    autoDeploy: false },
 };
 
-const CLOUDS = ["AWS", "GCP", "Azure"] as const;
+/**
+ * Proxmox joins AWS/GCP/Azure as a first-class chip so on-prem doesn't need a
+ * separate first-screen fork. The chip flow gates the Continue button and inline
+ * connect card the same way it does for the clouds — Proxmox specifically defers
+ * connect to the Cloud providers tab after creation (needs projectSlug for the
+ * host URL + API token form).
+ */
+const CLOUDS = ["AWS", "GCP", "Azure", "Proxmox"] as const;
 
 /**
  * Per-provider strings for the wizard's step 4. The wizard only PICKS the cloud
@@ -47,22 +70,69 @@ const CLOUDS = ["AWS", "GCP", "Azure"] as const;
  * afterward on the project's "Cloud providers" tab (ConnectCloudModal), or from
  * chat via the ```cloud-connect``` fence (CloudConnectBox).
  */
-const CLOUD_FIELD_META: Record<string, { regionPlaceholder: string; note: string }> = {
+/**
+ * Region catalog per cloud. The wizard offers only the regions the app has
+ * proven creation flows for (EKS/RDS on AWS, GKE on GCP, AKS on Azure). Add a
+ * region here once the cluster + DB creation flows have been verified against
+ * it — anything unlisted is either unsupported or unused in the wild.
+ * For Proxmox the "region" is really a node name; free-text is more useful
+ * than a fixed list, so the Select falls back to Input when cloud === Proxmox.
+ */
+const CLOUD_FIELD_META: Record<
+  string,
+  { regionPlaceholder: string; note: string; regions: { value: string; label: string }[] }
+> = {
   AWS: {
     regionPlaceholder: "us-east-1",
     note: "Deep Agent will assume a scoped AWS IAM role via STS (no long-lived keys).",
+    regions: [
+      { value: "us-east-1", label: "us-east-1 · N. Virginia" },
+      { value: "us-east-2", label: "us-east-2 · Ohio" },
+      { value: "us-west-1", label: "us-west-1 · N. California" },
+      { value: "us-west-2", label: "us-west-2 · Oregon" },
+      { value: "eu-west-1", label: "eu-west-1 · Ireland" },
+      { value: "eu-west-2", label: "eu-west-2 · London" },
+      { value: "eu-central-1", label: "eu-central-1 · Frankfurt" },
+      { value: "ap-south-1", label: "ap-south-1 · Mumbai" },
+      { value: "ap-southeast-1", label: "ap-southeast-1 · Singapore" },
+      { value: "ap-southeast-2", label: "ap-southeast-2 · Sydney" },
+      { value: "ap-northeast-1", label: "ap-northeast-1 · Tokyo" },
+    ],
   },
   GCP: {
     regionPlaceholder: "us-central1",
     note: "Deep Agent will impersonate a GCP service account (workload-identity supported).",
+    regions: [
+      { value: "us-central1", label: "us-central1 · Iowa" },
+      { value: "us-east1", label: "us-east1 · S. Carolina" },
+      { value: "us-west1", label: "us-west1 · Oregon" },
+      { value: "europe-west1", label: "europe-west1 · Belgium" },
+      { value: "europe-west2", label: "europe-west2 · London" },
+      { value: "asia-south1", label: "asia-south1 · Mumbai" },
+      { value: "asia-southeast1", label: "asia-southeast1 · Singapore" },
+      { value: "asia-northeast1", label: "asia-northeast1 · Tokyo" },
+    ],
   },
   Azure: {
     regionPlaceholder: "eastus",
     note: "Deep Agent will sign in as an Azure service principal.",
+    regions: [
+      { value: "eastus", label: "eastus · Virginia" },
+      { value: "eastus2", label: "eastus2 · Virginia" },
+      { value: "westus", label: "westus · California" },
+      { value: "westus2", label: "westus2 · Washington" },
+      { value: "westeurope", label: "westeurope · Netherlands" },
+      { value: "northeurope", label: "northeurope · Ireland" },
+      { value: "uksouth", label: "uksouth · London" },
+      { value: "southindia", label: "southindia · Chennai" },
+      { value: "southeastasia", label: "southeastasia · Singapore" },
+      { value: "japaneast", label: "japaneast · Tokyo" },
+    ],
   },
   Proxmox: {
     regionPlaceholder: "pve",
     note: "On-prem: after creating the project, connect your Proxmox server (host URL + API token) on the Cloud providers tab, then create VMs with Terraform.",
+    regions: [], // node names are user-defined; keep the free-text Input for Proxmox
   },
 };
 
@@ -78,12 +148,32 @@ type Draft = {
   ghAccountId: string | null;
   repoIds: Record<string, boolean>;
   envs: Record<EnvKey, boolean>;
-  // Step 4 is selection-only: which cloud this project targets + a default
-  // region. No account is connected here — that happens on the Cloud tab.
+  /**
+   * Branch each env deploys from. Empty string = "use repo default"; the
+   * server persists that as `deployBranch: null` (backward-compatible with
+   * the pre-v4 branchless flow).
+   */
+  envBranches: Record<EnvKey, string>;
+  // Step 2: cloud pick + inline connect.
   cloud: string;
   region: string;
-  /** First-screen choice: cloud (AWS/GCP/Azure) vs on-prem (Proxmox). null = not chosen yet. */
-  mode: "cloud" | "onprem" | null;
+  /**
+   * Inline-connect state on the Cloud step. `cloudConnected` flips true once
+   * the connect API returned ok. `cloudSkipped` flips true when the user
+   * clicked "I'll connect later" — either one unlocks Continue. Kept on the
+   * draft so localStorage-resume preserves the connected state (the actual
+   * CloudProvider row is created out-of-band by the connect API itself).
+   */
+  cloudConnected: boolean;
+  cloudSkipped: boolean;
+  /**
+   * Infra-repo pick from Step 4 (Analysis). Empty string = same as app repo
+   * (Terraform lives in ./infra/). Any other value is the GitHub fullName of
+   * a separate repo the user picked to receive generated Terraform + manifests.
+   * Persisted into the DeploymentPlan under items.__infraRepo so the
+   * in-project RecommendedSetupPanel shows the correct target in its banner.
+   */
+  infraRepo: string;
 };
 
 const DEFAULT_DRAFT: Draft = {
@@ -98,9 +188,12 @@ const DEFAULT_DRAFT: Draft = {
   // (main)" reality of a fresh project. Users opt-in to Dev/Staging only when
   // they need pre-production environments.
   envs: { dev: false, staging: false, prod: true },
+  envBranches: { dev: "", staging: "", prod: "" },
   cloud: "AWS",
   region: "us-east-1",
-  mode: null,
+  cloudConnected: false,
+  cloudSkipped: false,
+  infraRepo: "",
 };
 
 const DRAFT_KEY_PREFIX = "dda-create-project-draft:";
@@ -129,10 +222,19 @@ export function CreateProjectWizard({
   const ghAccounts = useConnectedOAuthAccounts();
   const githubAccounts = ghAccounts.data?.filter((a) => a.provider === "github") ?? [];
   const create = useCreateProjectWithSetup();
+  const connectAws = useConnectAwsAccount();
   const [serverError, setServerError] = useState<string | null>(null);
   const [ghNote, setGhNote] = useState<string | null>(null);
+  const [awsRoleArn, setAwsRoleArn] = useState("");
+  const [awsExternalIdOverride, setAwsExternalIdOverride] = useState("");
+  const [awsConnectMsg, setAwsConnectMsg] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT);
+  // Analysis report + per-recommendation acceptance. Session state only (NOT
+  // in the localStorage draft — a report can be hundreds of KB and re-running
+  // the analysis on resume is cheap and always fresher).
+  const [analysis, setAnalysis] = useState<RepoAnalysisReport | null>(null);
+  const [planItems, setPlanItems] = useState<PlanItems>({});
 
   // Open GitHub OAuth in a POPUP so the wizard never navigates away (no redirect
   // to the home page). The popup hits the start route with `popup=1`; on success
@@ -233,6 +335,71 @@ export function CreateProjectWizard({
   const repos = ghQuery.data ?? [];
   const repoError = ghQuery.error;
 
+  // First selected repo drives the Analysis + Environments-branches queries.
+  const primaryRepoFullName = useMemo(
+    () => repos.find((r) => !!draft.repoIds[r.id])?.fullName ?? null,
+    [repos, draft.repoIds],
+  );
+  const primaryRepoDefaultBranch = useMemo(
+    () => repos.find((r) => !!draft.repoIds[r.id])?.defaultBranch ?? null,
+    [repos, draft.repoIds],
+  );
+  /** Every repo the user could commit infra to, except the app repo itself. */
+  const availableInfraRepos = useMemo(
+    () =>
+      repos
+        .filter((r) => r.fullName !== primaryRepoFullName)
+        .map((r) => ({
+          value: r.fullName,
+          label:
+            r.lang && r.lang.trim().length > 0
+              ? `${r.fullName} · ${r.lang}${r.kind === "private" ? " · private" : ""}`
+              : `${r.fullName}${r.kind === "private" ? " · private" : ""}`,
+        })),
+    [repos, primaryRepoFullName],
+  );
+
+  // Branches list for the Environments step's per-env dropdown. Only enabled
+  // when we've actually reached the Env step AND a repo is picked — no point
+  // hitting GitHub earlier. Small cache (60 s) so hopping back to step 3 and
+  // forward again doesn't re-fetch.
+  const branchesQ = useQuery<{ ok: boolean; branches?: Array<{ name: string; protected: boolean }> }>(
+    {
+      queryKey: ["gh", "branches", primaryRepoFullName, effectiveGhAccountId],
+      enabled: open && step === 5 && !!primaryRepoFullName,
+      queryFn: () =>
+        api.get(
+          `/integrations/github/repos/${encodeURIComponent(primaryRepoFullName!)}/branches` +
+            (effectiveGhAccountId ? `?accountId=${effectiveGhAccountId}` : ""),
+        ),
+      staleTime: 60_000,
+    },
+  );
+  const availableBranches = branchesQ.data?.branches ?? [];
+
+  // Auto-pick a sensible default branch per env the first time we see the
+  // repo's branch list: pick the first ENV_META.suggested that actually
+  // exists, else the repo's default branch. Only fills a slot when the user
+  // hasn't already chosen one — never overwrites their pick.
+  useEffect(() => {
+    if (availableBranches.length === 0) return;
+    setDraft((d) => {
+      const names = new Set(availableBranches.map((b) => b.name));
+      const next: Draft["envBranches"] = { ...d.envBranches };
+      let changed = false;
+      for (const k of ["dev", "staging", "prod"] as EnvKey[]) {
+        if (next[k]) continue; // user already picked
+        const suggested = ENV_META[k].suggested.find((s) => names.has(s));
+        const picked = suggested ?? primaryRepoDefaultBranch ?? availableBranches[0]!.name;
+        if (picked) {
+          next[k] = picked;
+          changed = true;
+        }
+      }
+      return changed ? { ...d, envBranches: next } : d;
+    });
+  }, [availableBranches, primaryRepoDefaultBranch]);
+
   // Reflect the REAL GitHub connection: once a github OAuthAccount exists (after
   // the user returns from the OAuth redirect), mark the step connected so the
   // "Connected as" view + Continue gating work. Without this the connect button
@@ -288,16 +455,30 @@ export function CreateProjectWizard({
 
   const canNext = (() => {
     switch (stepIdx) {
-      case 0:
+      case 0: // Details
         // Team is required — the server-side gate would reject an empty
         // teamSlug anyway, so failing fast in the UI is the honest thing.
         return draft.name.trim().length > 0 && draft.teamSlug.trim().length > 0;
-      case 1:
+      case 1: // Cloud
+        // For AWS we ship inline "Connect & verify" (uses the same endpoint
+        // the Cloud tab uses). For GCP/Azure/Proxmox the wizard defers to
+        // the project's Cloud providers tab — those flows are OAuth-popup /
+        // form-heavy and need a projectSlug we don't have yet. Continue is
+        // gated ONLY for AWS: connected or explicitly skipped. The wizard
+        // NEVER hard-blocks even AWS — "I'll connect later" is always there.
+        if (draft.cloud !== "AWS") return true;
+        return draft.cloudConnected || draft.cloudSkipped;
+      case 2: // Repository
         return draft.ghConnected && selectedRepoIds.length > 0;
-      case 2:
-        return selectedEnvs.length > 0;
-      case 3:
+      case 3: // Analysis
+        // Fail-soft for ERRORS (continue without a report), but two hard
+        // gates: missing README (blocking file), or a `not_fit` verdict
+        // (no HTTP surface / no worker — not a Kubernetes workload).
+        if (analysis?.missingFiles.some((f) => f.blocking)) return false;
+        if (analysis?.deployability?.status === "not_fit") return false;
         return true;
+      case 4: // Environments — at least one env selected (Prod defaults on)
+        return selectedEnvs.length > 0;
       default:
         return false;
     }
@@ -333,15 +514,20 @@ export function CreateProjectWizard({
           oauthAccountId: effectiveGhAccountId ?? undefined,
         }));
 
+      // v4: the Environments step is back. User picked which of dev / staging
+      // / prod to create, and (per env) which branch it deploys from. Empty
+      // branch → server persists as null (deploy uses repo default — the
+      // pre-v4 branchless behaviour, so no regression).
       const envOrder: EnvKey[] = ["dev", "staging", "prod"];
-      const selectedEnvs: EnvChoiceInput[] = envOrder
+      const selectedEnvsPayload: EnvChoiceInput[] = envOrder
         .filter((k) => draft.envs[k])
         .map((k, i) => ({
           key: k,
           name: ENV_META[k].label,
           isProduction: k === "prod",
-          autoDeploy: k !== "prod",
+          autoDeploy: ENV_META[k].autoDeploy,
           promotionRank: i,
+          deployBranch: draft.envBranches[k]?.trim() || undefined,
         }));
 
       // Step 4 is selection-only — the project records which cloud it targets,
@@ -357,11 +543,34 @@ export function CreateProjectWizard({
         // the chosen team — the picker in the Details step is the only source.
         teamSlug: draft.teamSlug,
         repos: selectedRepos,
-        envs: selectedEnvs,
+        envs: selectedEnvsPayload,
         cloud: null,
         // Record which cloud the project targets so the Connect-provider UI
         // locks to it. Selection-only — no provider is provisioned here.
         cloudKind: draft.cloud.toLowerCase() as "aws" | "gcp" | "azure" | "proxmox",
+        // Saved Deployment Plan from the Analysis step — advisory. Absent when
+        // the user skipped analysis or it failed (fail-soft by design).
+        deploymentPlan: analysis
+          ? {
+              repoFullName: analysis.repoFullName,
+              analyzedAt: analysis.analyzedAt,
+              plan: {
+                report: analysis,
+                // Merge the infra-repo pick into `items` under the reserved
+                // sentinel key so RecommendedSetupPanel's banner reads it
+                // back without a schema change. Skipped when the user left
+                // the default (same-repo).
+                // NOTE: __infraRepo is a repo fullName string, not a status,
+                // so the merged object escapes PlanItems' status union. Cast
+                // to unknown → object; the server accepts `plan` as
+                // `z.unknown()` (see /projects/with-setup route), and slice-2's
+                // panel reads `items["__infraRepo"]` as a plain string.
+                items: (draft.infraRepo && draft.infraRepo !== "__pending__"
+                  ? { ...planItems, __infraRepo: draft.infraRepo }
+                  : planItems) as unknown as Record<string, string>,
+              },
+            }
+          : null,
       });
 
       // Surface partial failures so the user isn't blindsided when, say, a
@@ -393,14 +602,12 @@ export function CreateProjectWizard({
       title="Create a project"
       footer={
         <>
-          {draft.mode && (
+          {stepIdx > 0 && (
             <Btn
               variant="ghost"
               icon="chevL"
               style={{ marginRight: "auto" }}
-              onClick={() =>
-                stepIdx === 0 ? setDraft((d) => ({ ...d, mode: null })) : onStepChange(stepIdx)
-              }
+              onClick={() => onStepChange(stepIdx)}
             >
               Back
             </Btn>
@@ -408,72 +615,22 @@ export function CreateProjectWizard({
           <Btn variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Btn>
-          {draft.mode && (
-            <Btn
-              variant="primary"
-              icon={last ? "check" : undefined}
-              iconRight={last ? undefined : "chevR"}
-              disabled={!canNext}
-              loading={create.isPending}
-              onClick={next}
-            >
-              {last ? "Create project" : "Continue"}
-            </Btn>
-          )}
+          <Btn
+            variant="primary"
+            icon={last ? "check" : undefined}
+            iconRight={last ? undefined : "chevR"}
+            disabled={!canNext}
+            loading={create.isPending}
+            onClick={next}
+          >
+            {last ? "Create project" : "Continue"}
+          </Btn>
         </>
       }
     >
-      {/* First screen: where will this project run? Cloud runs the usual
-          wizard; on-prem targets a self-hosted Proxmox server. */}
-      {!draft.mode && (
-        <div className="col gap-3">
-          <p className="muted" style={{ fontSize: 13 }}>
-            Where will this project run? Pick one — you&apos;ll connect the account or server in the
-            following steps.
-          </p>
-          <div className="row gap-3 wrap">
-            {(
-              [
-                { m: "cloud", icon: "cloud", title: "Cloud", sub: "AWS · GCP · Azure" },
-                { m: "onprem", icon: "server", title: "On-prem", sub: "Proxmox VE (self-hosted)" },
-              ] as const
-            ).map((o) => (
-              <button
-                key={o.m}
-                type="button"
-                onClick={() =>
-                  setDraft((d) =>
-                    o.m === "onprem"
-                      ? { ...d, mode: "onprem", cloud: "Proxmox", region: "pve" }
-                      : { ...d, mode: "cloud", cloud: "AWS", region: "us-east-1" },
-                  )
-                }
-                className="col gap-2"
-                style={{
-                  flex: "1 1 200px",
-                  alignItems: "flex-start",
-                  textAlign: "left",
-                  border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  padding: 16,
-                  cursor: "pointer",
-                  background: "var(--surface-2, transparent)",
-                }}
-              >
-                <Icon name={o.icon} size={22} />
-                <strong style={{ fontSize: 15 }}>{o.title}</strong>
-                <span className="muted" style={{ fontSize: 12.5 }}>
-                  {o.sub}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <WizardSteps steps={STEPS as unknown as string[]} current={stepIdx} />
 
-      {draft.mode && <WizardSteps steps={STEPS as unknown as string[]} current={stepIdx} />}
-
-      {draft.mode && stepIdx === 0 && (
+      {stepIdx === 0 && (
         <div className="col gap-4">
           <div className="row gap-4" style={{ alignItems: "center" }}>
             <ProjectAvatar name={initial} hue={draft.hue} size={60} radius={15} />
@@ -507,7 +664,7 @@ export function CreateProjectWizard({
         </div>
       )}
 
-      {draft.mode && stepIdx === 1 && (
+      {stepIdx === 2 && (
         <div className="col gap-4">
           {!draft.ghConnected ? (
             <div className="col center gap-3 dda-wizard-gh-card">
@@ -662,96 +819,157 @@ export function CreateProjectWizard({
         </div>
       )}
 
-      {draft.mode && stepIdx === 2 && (
+      {stepIdx === 3 && (
+        <RepoAnalysisStep
+          repoFullName={primaryRepoFullName}
+          accountId={effectiveGhAccountId}
+          report={analysis}
+          onReport={setAnalysis}
+          planItems={planItems}
+          onPlanItems={setPlanItems}
+          infraRepo={draft.infraRepo}
+          onInfraRepoChange={(v) => setDraft((d) => ({ ...d, infraRepo: v }))}
+          availableInfraRepos={availableInfraRepos}
+        />
+      )}
+
+      {stepIdx === 4 && (
         <div className="col gap-4">
           <p className="muted" style={{ fontSize: 13 }}>
-            Each environment is a separate cluster + state file. Deploys go to whichever env you
-            pick at deploy time (there's no branch-to-env mapping — every deploy commits to the
-            repo's default branch and the agent picks the target env from the chat form).{" "}
-            <b>Prod</b> is on by default; enable Dev and Staging only if you need pre-production
-            environments. You can add more envs later on the Environments tab.
+            Turn on the environments you need. For each one, pick the repo
+            branch it deploys from — the default matches the common convention
+            when a matching branch exists (main → prod, staging → staging,
+            develop → dev), otherwise falls back to the repo&apos;s default branch.
           </p>
+          {branchesQ.isLoading && (
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              Loading branches from {primaryRepoFullName ?? "the selected repo"}…
+            </span>
+          )}
+          {branchesQ.isError && (
+            <span style={{ fontSize: 12.5, color: "var(--warn, #f5a524)" }}>
+              Couldn&apos;t load branches — you can still continue and type a branch
+              name below.
+            </span>
+          )}
           <div className="col gap-2">
             {(Object.keys(ENV_META) as EnvKey[]).map((e) => {
               const on = draft.envs[e];
               const meta = ENV_META[e];
+              const branchValue = draft.envBranches[e] ?? "";
               return (
-                <div key={e} className="row gap-3 between dda-wizard-env-row" data-on={on}>
-                  <div className="row gap-3">
+                <div
+                  key={e}
+                  className="row gap-3 between dda-wizard-env-row"
+                  data-on={on}
+                  style={{ alignItems: "center", flexWrap: "wrap" }}
+                >
+                  <div className="row gap-3" style={{ alignItems: "center", flex: "1 1 200px" }}>
                     <span className={`dot ${meta.tone}`} />
                     <div className="col" style={{ lineHeight: 1.3 }}>
                       <span style={{ fontWeight: 700, fontSize: 13 }}>{meta.label}</span>
-                      <span className="faint mono" style={{ fontSize: 11.5 }}>
-                        {meta.branch}
+                      <span className="faint" style={{ fontSize: 11.5 }}>
+                        {meta.autoDeploy ? "auto-deploy on push" : "manual promote (approval-gated)"}
                       </span>
                     </div>
                   </div>
-                  <Toggle
-                    checked={on}
-                    onCheckedChange={(v) =>
-                      setDraft((d) => ({ ...d, envs: { ...d.envs, [e]: v } }))
-                    }
-                    ariaLabel={meta.label}
-                  />
+                  <div
+                    className="row gap-2"
+                    style={{ alignItems: "center", flex: "1 1 260px", justifyContent: "flex-end" }}
+                  >
+                    <span className="muted" style={{ fontSize: 11.5 }}>
+                      deploys from
+                    </span>
+                    {on && availableBranches.length > 0 ? (
+                      <Select
+                        value={branchValue || (primaryRepoDefaultBranch ?? "")}
+                        placeholder={primaryRepoDefaultBranch ?? "branch"}
+                        options={availableBranches.map((b) => ({
+                          value: b.name,
+                          label: b.protected ? `${b.name} · protected` : b.name,
+                        }))}
+                        ariaLabel={`Branch for ${meta.label}`}
+                        onValueChange={(v) =>
+                          setDraft((d) => ({
+                            ...d,
+                            envBranches: { ...d.envBranches, [e]: v },
+                          }))
+                        }
+                      />
+                    ) : (
+                      // No repo picked (or branches list failed) → free-text
+                      // fallback so the step never traps the user. Server
+                      // validates the branch at deploy time.
+                      <Input
+                        disabled={!on}
+                        value={branchValue}
+                        onChange={(ev) =>
+                          setDraft((d) => ({
+                            ...d,
+                            envBranches: { ...d.envBranches, [e]: ev.target.value },
+                          }))
+                        }
+                        placeholder={primaryRepoDefaultBranch ?? "main"}
+                        style={{ maxWidth: 220 }}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className={`btn ${on ? "outline" : "primary"} sm`}
+                      onClick={() =>
+                        setDraft((d) => ({ ...d, envs: { ...d.envs, [e]: !on } }))
+                      }
+                    >
+                      {on ? "on" : "off"}
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
+          <span className="muted" style={{ fontSize: 11.5, lineHeight: 1.5 }}>
+            Branch pick is a display default — the deploy flow still confirms
+            it at deploy time, so you can override any time without editing
+            the env. Leave a branch blank to use the repo&apos;s default.
+          </span>
         </div>
       )}
 
-      {draft.mode && stepIdx === 3 && (
+      {stepIdx === 1 && (
         <div className="col gap-4">
-          {draft.mode === "onprem" ? (
-            <Field label="On-prem infrastructure">
-              <div
-                className="row gap-2"
-                style={{
-                  alignItems: "center",
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                  padding: 12,
-                }}
-              >
-                <Icon name="server" size={18} style={{ flex: "none" }} />
-                <span style={{ fontSize: 13 }}>
-                  <strong>Proxmox VE</strong> — after creating the project, connect your server
-                  (host URL + API token) on the <b>Cloud providers</b> tab, then create VMs with
-                  Terraform.
-                </span>
-              </div>
-            </Field>
-          ) : (
-            <Field label="Cloud provider">
-              <div className="row gap-2 wrap">
-                {CLOUDS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    className={`chip ${draft.cloud === c ? "active" : ""}`}
-                    style={{ height: 38 }}
-                    onClick={() =>
-                      setDraft((d) => ({
-                        ...d,
-                        cloud: c,
-                        // Reset region to the chosen cloud's typical default if
-                        // the user hadn't customized it.
-                        region: CLOUD_FIELD_META[c]?.regionPlaceholder ?? d.region,
-                      }))
-                    }
-                  >
-                    <Icon name="cloud" size={15} />
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </Field>
-          )}
+          <Field label="Cloud provider">
+            <div className="row gap-2 wrap">
+              {CLOUDS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`chip ${draft.cloud === c ? "active" : ""}`}
+                  style={{ height: 38 }}
+                  onClick={() =>
+                    setDraft((d) => ({
+                      ...d,
+                      cloud: c,
+                      // Reset region to the chosen cloud's typical default if
+                      // the user hadn't customized it.
+                      region: CLOUD_FIELD_META[c]?.regionPlaceholder ?? d.region,
+                      // Switching provider clears the inline AWS connect state
+                      // — the AWS card only applies when the AWS chip is active.
+                      cloudConnected: c === "AWS" ? d.cloudConnected : false,
+                      cloudSkipped: c === "AWS" ? d.cloudSkipped : false,
+                    }))
+                  }
+                >
+                  <Icon name={c === "Proxmox" ? "server" : "cloud"} size={15} />
+                  {c === "Proxmox" ? "Proxmox (on-prem)" : c}
+                </button>
+              ))}
+            </div>
+          </Field>
           {(() => {
             const meta = CLOUD_FIELD_META[draft.cloud] ?? CLOUD_FIELD_META.AWS;
             return (
               <>
-                <div style={{ maxWidth: 240 }}>
+                <div style={{ maxWidth: 320 }}>
                   <Field
                     label={draft.cloud === "Proxmox" ? "Default node" : "Default region"}
                     hint={
@@ -760,20 +978,187 @@ export function CreateProjectWizard({
                         : "You can change this per environment later."
                     }
                   >
-                    <Input
-                      value={draft.region}
-                      onChange={(e) => setDraft((d) => ({ ...d, region: e.target.value }))}
-                      placeholder={meta.regionPlaceholder}
-                    />
+                    {meta.regions.length > 0 ? (
+                      <Select
+                        value={draft.region}
+                        onValueChange={(v) => setDraft((d) => ({ ...d, region: v }))}
+                        options={meta.regions}
+                        ariaLabel="Default region"
+                      />
+                    ) : (
+                      <Input
+                        value={draft.region}
+                        onChange={(e) => setDraft((d) => ({ ...d, region: e.target.value }))}
+                        placeholder={meta.regionPlaceholder}
+                      />
+                    )}
                   </Field>
                 </div>
                 <div className="row gap-2 dda-wizard-iam-note">
                   <Icon name="shield" size={16} style={{ flex: "none" }} />
-                  <span style={{ fontSize: 12.5 }}>
-                    {meta.note} You&apos;ll connect the account itself on the project&apos;s{" "}
-                    <b>Cloud providers</b> tab right after creation.
-                  </span>
+                  <span style={{ fontSize: 12.5 }}>{meta.note}</span>
                 </div>
+
+                {/* AWS: inline Connect &amp; verify (required-but-skippable).
+                    Other clouds defer to the Cloud providers tab — they need
+                    a projectSlug the wizard doesn't have yet. */}
+                {draft.cloud === "AWS" && !draft.cloudConnected && !draft.cloudSkipped && (
+                  <div
+                    className="col gap-2"
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 10,
+                      padding: 12,
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>Connect your AWS account</span>
+                    <Field label="IAM role ARN" required>
+                      <Input
+                        className="mono"
+                        value={awsRoleArn}
+                        onChange={(e) => setAwsRoleArn(e.target.value)}
+                        placeholder="arn:aws:iam::123456789012:role/deep-agent"
+                      />
+                    </Field>
+                    <Field
+                      label="External ID override (optional)"
+                      hint="Leave blank to use the default DeepAgent-generated ExternalId shown on the AWS trust-policy help. Paste your existing one if the role's trust policy uses a different value."
+                    >
+                      <Input
+                        className="mono"
+                        value={awsExternalIdOverride}
+                        onChange={(e) => setAwsExternalIdOverride(e.target.value)}
+                        placeholder="dda-<hex>"
+                      />
+                    </Field>
+                    <div className="row gap-2" style={{ alignItems: "center" }}>
+                      <Btn
+                        variant="primary"
+                        icon="check"
+                        loading={connectAws.isPending}
+                        disabled={!awsRoleArn.trim() || connectAws.isPending}
+                        onClick={async () => {
+                          setAwsConnectMsg(null);
+                          try {
+                            await connectAws.mutateAsync({
+                              roleArn: awsRoleArn.trim(),
+                              region: draft.region.trim() || "us-east-1",
+                              externalId: awsExternalIdOverride.trim() || undefined,
+                              // No projectSlug — project doesn't exist yet. The
+                              // provider is created user-scoped and will be
+                              // re-referenced (by role ARN) after project create.
+                            });
+                            setAwsConnectMsg("✅ Connected. Continue to pick your repo.");
+                            setDraft((d) => ({ ...d, cloudConnected: true }));
+                          } catch (e) {
+                            setAwsConnectMsg(
+                              e instanceof Error
+                                ? `❌ ${e.message}`
+                                : "❌ AWS connect failed — check the role ARN + trust policy, or skip and connect later.",
+                            );
+                          }
+                        }}
+                      >
+                        Connect &amp; verify
+                      </Btn>
+                      <button
+                        type="button"
+                        className="btn ghost sm"
+                        onClick={() => {
+                          setDraft((d) => ({ ...d, cloudSkipped: true }));
+                          setAwsConnectMsg(
+                            "Skipped — you can connect AWS from the project's Cloud providers tab after creation.",
+                          );
+                        }}
+                      >
+                        I&apos;ll connect later
+                      </button>
+                    </div>
+                    {awsConnectMsg && (
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: awsConnectMsg.startsWith("❌")
+                            ? "var(--danger)"
+                            : "var(--muted)",
+                        }}
+                      >
+                        {awsConnectMsg}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* AWS connected/skipped confirmation strip. */}
+                {draft.cloud === "AWS" && (draft.cloudConnected || draft.cloudSkipped) && (
+                  <div
+                    className="row gap-2"
+                    style={{
+                      alignItems: "center",
+                      border: `1px solid ${draft.cloudConnected ? "var(--ok, #30a46c)" : "var(--border)"}`,
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      fontSize: 12.5,
+                    }}
+                  >
+                    <Icon
+                      name={draft.cloudConnected ? "check" : "clock"}
+                      size={14}
+                      style={{
+                        flex: "none",
+                        color: draft.cloudConnected ? "var(--ok, #30a46c)" : undefined,
+                      }}
+                    />
+                    <span style={{ flex: 1 }}>
+                      {draft.cloudConnected
+                        ? `AWS connected — role ${awsRoleArn || "assumed"} in ${draft.region}.`
+                        : "AWS connect skipped — will be available from the Cloud providers tab after creation."}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      onClick={() => {
+                        setDraft((d) => ({ ...d, cloudConnected: false, cloudSkipped: false }));
+                        setAwsConnectMsg(null);
+                      }}
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+
+                {/* GCP / Azure / Proxmox — inline connect deferred (needs a
+                    projectSlug we don't have yet). Note that this doesn't
+                    block Continue for those clouds. */}
+                {draft.cloud !== "AWS" && (
+                  <div
+                    className="row gap-2"
+                    style={{
+                      alignItems: "center",
+                      border: "1px dashed var(--border)",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      fontSize: 12.5,
+                    }}
+                  >
+                    <Icon name="clock" size={14} style={{ flex: "none" }} />
+                    <span>
+                      {draft.cloud === "Proxmox" ? (
+                        <>
+                          Proxmox server connection (host URL + API token) happens on the
+                          project&apos;s <b>Cloud providers</b> tab right after creation — it needs
+                          the project to exist first.
+                        </>
+                      ) : (
+                        <>
+                          {draft.cloud} account connection happens on the project&apos;s{" "}
+                          <b>Cloud providers</b> tab right after creation — it needs the project to
+                          exist first.
+                        </>
+                      )}
+                    </span>
+                  </div>
+                )}
               </>
             );
           })()}

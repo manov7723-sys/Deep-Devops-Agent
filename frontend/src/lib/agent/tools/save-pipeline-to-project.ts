@@ -55,19 +55,32 @@ export async function registerCommittedPipeline(params: {
 }): Promise<{ id: string; workflowPath: string | null }> {
   const files = params.files.map((f) => ({ path: f.path.replace(/^\/+/, ""), content: f.content }));
   const workflowPath = params.workflowPath !== undefined ? params.workflowPath : findWorkflowPath(files);
-  const row = await prisma.ciPipeline.create({
-    data: {
-      projectId: params.projectId,
-      repoId: params.repoId,
-      name: params.name,
-      files,
-      workflowPath,
-      branch: params.branch,
-      status: "committed",
-      commitSha: params.commitSha,
-    },
+  // UPSERT on (projectId, repoId, name) — deploy_my_app calls this on EVERY
+  // redeploy, and a blind create meant each attempt stacked another identical
+  // row. Five redeploys → five pipelines named "app — frontend", and
+  // run_ci_pipeline then asked the user to choose between five identical
+  // strings. Same identity → refresh the row instead.
+  const existing = await prisma.ciPipeline.findFirst({
+    where: { projectId: params.projectId, repoId: params.repoId, name: params.name },
+    orderBy: { createdAt: "desc" },
     select: { id: true },
   });
+  const data = {
+    files,
+    workflowPath,
+    branch: params.branch,
+    status: "committed",
+    commitSha: params.commitSha,
+    // Review agent on by default: every pipeline is monitored and failed
+    // runs get auto-reviewed + fixed + re-run (bounded by healAttempts).
+    agentReview: true,
+  };
+  const row = existing
+    ? await prisma.ciPipeline.update({ where: { id: existing.id }, data, select: { id: true } })
+    : await prisma.ciPipeline.create({
+        data: { projectId: params.projectId, repoId: params.repoId, name: params.name, ...data },
+        select: { id: true },
+      });
   return { id: row.id, workflowPath };
 }
 
@@ -136,19 +149,31 @@ export const savePipelineToProjectTool: Tool<Input, Output> = {
     }));
     const workflowPath = findWorkflowPath(files);
 
-    const row = await prisma.ciPipeline.create({
-      data: {
-        projectId: ctx.projectId,
-        repoId: repo.id,
-        name: input.name,
-        files,
-        workflowPath,
-        branch: repo.defaultBranch || "main",
-        status: "draft",
-        agentReview: input.agentReview ?? false,
-      },
-      select: { id: true, name: true, status: true },
+    // Same upsert-by-(project, repo, name) as registerCommittedPipeline —
+    // saving the "same" pipeline twice refreshes it instead of duplicating.
+    const dup = await prisma.ciPipeline.findFirst({
+      where: { projectId: ctx.projectId, repoId: repo.id, name: input.name },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
     });
+    const data = {
+      files,
+      workflowPath,
+      branch: repo.defaultBranch || "main",
+      status: "draft",
+      // Default ON — pass agentReview:false explicitly to opt a pipeline out.
+      agentReview: input.agentReview ?? true,
+    };
+    const row = dup
+      ? await prisma.ciPipeline.update({
+          where: { id: dup.id },
+          data,
+          select: { id: true, name: true, status: true },
+        })
+      : await prisma.ciPipeline.create({
+          data: { projectId: ctx.projectId, repoId: repo.id, name: input.name, ...data },
+          select: { id: true, name: true, status: true },
+        });
 
     return {
       ok: true,

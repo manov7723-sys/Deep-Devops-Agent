@@ -159,6 +159,11 @@ export function CloudConnectBox({ slug }: { slug: string }) {
   const [region, setRegion] = useState(REGION_DEFAULTS.aws);
   const [values, setValues] = useState<Partial<Record<FieldSpec["schemaColumn"], string>>>({});
   const [awsRoleArn, setAwsRoleArn] = useState("");
+  // Optional AWS External ID override. When set, the connect route uses this
+  // value (which is what the user pasted into their IAM trust policy) instead
+  // of the per-user derived one. Fixes the classic "the role was set up when
+  // signed in as a different DeepAgent user, now AssumeRole rejects" case.
+  const [awsExternalIdOverride, setAwsExternalIdOverride] = useState("");
   const [serverError, setServerError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [azureBusy, setAzureBusy] = useState(false);
@@ -259,6 +264,7 @@ export function CloudConnectBox({ slug }: { slug: string }) {
     setKind(k);
     setValues({});
     setAwsRoleArn("");
+    setAwsExternalIdOverride("");
     setRegion(REGION_DEFAULTS[k]);
     setServerError(null);
     setNotice(null);
@@ -279,6 +285,7 @@ export function CloudConnectBox({ slug }: { slug: string }) {
           region: region.trim() || REGION_DEFAULTS.aws,
           accountRef: name.trim() || undefined,
           projectSlug: slug,
+          externalId: awsExternalIdOverride.trim() || undefined,
         });
         await qc.invalidateQueries({ queryKey: ["cloud-providers"] });
         await qc.invalidateQueries({ queryKey: ["p", slug] });
@@ -417,6 +424,17 @@ export function CloudConnectBox({ slug }: { slug: string }) {
                   placeholder="arn:aws:iam::461298145672:role/deep-agent"
                   value={awsRoleArn}
                   onChange={(e) => setAwsRoleArn(e.target.value)}
+                />
+              </Field>
+              <Field
+                label="External ID override (optional)"
+                hint="Leave blank to use the External ID shown above. Fill this in ONLY if the trust policy already in AWS uses a different ExternalId — then paste that value here so this Connect matches it."
+              >
+                <Input
+                  className="mono"
+                  placeholder="dda-<hex> — leave blank to use the default"
+                  value={awsExternalIdOverride}
+                  onChange={(e) => setAwsExternalIdOverride(e.target.value)}
                 />
               </Field>
             </div>

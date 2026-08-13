@@ -218,6 +218,17 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
   const isPopup = isPopupFlow;
   jar.delete(POPUP_COOKIE);
   if (activeSess) {
+    // If the same provider account is already linked to a DIFFERENT DeepAgent
+    // user, TRANSFER ownership to the currently-signed-in user rather than
+    // blocking. Rationale: completing OAuth proves the caller controls that
+    // provider identity right now, and it's more common for admin-issued
+    // accounts to share a corporate GitHub than for a real identity conflict
+    // to occur. The previous linkholder can re-authorize to reclaim.
+    //
+    // Consequence: "Sign in with GitHub" now logs in as the most recent
+    // linker. Password sign-in is unaffected. The transfer is auditable
+    // (auth.oauth.linked with mode=transfer) so the previous owner can see
+    // when it happened.
     const conflict = await prisma.oAuthAccount.findUnique({
       where: {
         provider_providerAccountId: {
@@ -227,23 +238,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       },
       select: { userId: true },
     });
-    if (conflict && conflict.userId !== activeSess.userId) {
-      await audit({
-        userId: activeSess.userId,
-        action: "auth.oauth.failed",
-        ipAddress: meta.ipAddress,
-        userAgent: meta.userAgent,
-        metadata: { provider: providerId, reason: "already_linked_to_other_user" },
-      });
-      return failureResponse(
-        "already_linked",
-        "That GitHub account is already linked to a different DeepAgent user.",
-        url,
-        req.headers,
-        undefined,
-        isPopupFlow,
-      );
-    }
+    const isTransfer = conflict !== null && conflict.userId !== activeSess.userId;
+
     const accessTokenRef = encryptSecret(ex.profile.accessToken);
     const refreshTokenRef = ex.profile.refreshToken ? encryptSecret(ex.profile.refreshToken) : null;
     const linkedAccount = await prisma.oAuthAccount.upsert({
@@ -266,6 +262,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
         providerBaseUrl: provider.baseUrl ?? null,
       },
       update: {
+        // Reassign ownership when transferring — the update block previously
+        // left userId untouched, which meant even without the block above
+        // the row still belonged to the old user.
+        userId: activeSess.userId,
         login: ex.profile.login || null,
         avatarUrl: ex.profile.avatarUrl ?? null,
         accessTokenRef,
@@ -301,7 +301,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       action: "auth.oauth.linked",
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
-      metadata: { provider: providerId, mode: "attach" },
+      metadata: {
+        provider: providerId,
+        mode: isTransfer ? "transfer" : "attach",
+        // When transferring, record who the link previously belonged to so
+        // the affected user can audit-trail the change (they'll see their
+        // GitHub sign-in stop working and this row explains why).
+        ...(isTransfer && conflict ? { transferredFromUserId: conflict.userId } : {}),
+      },
     });
     if (isMockMode()) {
       return NextResponse.json({ ok: true, mode: "attach", linkedProvider: providerId });

@@ -1155,6 +1155,96 @@ export const deployMyAppTool: Tool<Input, Output> = {
         }
       }
     }
+    // ── Application env from GitHub ─────────────────────────────────────────
+    // The analyzer's DeploymentPlan carries every env var the code reads
+    // (name + secret/plain flag). We split them for the CD workflow: secret
+    // ones resolve from `${{ secrets.NAME }}`, plain ones from
+    // `${{ vars.NAME }}`, both scoped to the GitHub environment named after
+    // the target env (dev/staging/prod). The CD run materializes them into
+    // the `app-env` Kubernetes Secret the Deployment already envFroms — so
+    // the repo needs NO .env file, and rotating a value is a GitHub-settings
+    // edit + redeploy. Best-effort: projects that skipped analysis just get
+    // the environment scoping with no materialize step.
+    // serviceNames enables PER-SERVICE routing in the CD materialize step:
+    // a GitHub name prefixed `<SERVICE>__` lands in that service's own
+    // `app-env-<service>` Secret (prefix stripped); unprefixed names stay
+    // shared in `app-env`. Essential for a monorepo where frontend and
+    // backend each own their config.
+    let appEnvForCd: {
+      ghEnvironment: string;
+      secretNames: string[];
+      varNames: string[];
+      serviceNames: string[];
+      assignment: Record<string, string>;
+    } = {
+      ghEnvironment: input.envKey,
+      secretNames: [],
+      varNames: [],
+      serviceNames: plans.map((p) => p.svc.name),
+      assignment: {},
+    };
+    try {
+      const planRow = await prisma.deploymentPlan.findUnique({
+        where: { projectId: ctx.projectId },
+        select: { plan: true },
+      });
+      const planObj = planRow?.plan as {
+        report?: { envVars?: { name: string; secret: boolean }[] };
+        items?: Record<string, string>;
+      } | null;
+      const envVars = planObj?.report?.envVars ?? [];
+      // Per-service assignment saved by the deploy wizard's env selector.
+      let assignment: Record<string, string> = {};
+      try {
+        const raw = planObj?.items?.["__envAssign"];
+        if (raw) assignment = JSON.parse(raw) as Record<string, string>;
+      } catch {
+        // malformed assignment → fall back to prefix convention
+      }
+
+      const secretNames = new Set(envVars.filter((v) => v.secret).map((v) => v.name));
+      const varNames = new Set(envVars.filter((v) => !v.secret).map((v) => v.name));
+
+      // UNION with what's actually stored in GitHub. The analyzer only sees
+      // names the code references; anything the user added by hand (or that
+      // lives in a config the scan didn't sample) would otherwise never be
+      // forwarded to the pods — the value would sit in GitHub doing nothing.
+      try {
+        const { listEnvActionsSecrets, listEnvActionsVariables } = await import(
+          "@/lib/github/secrets"
+        );
+        const tokenRes = await resolveTokenForRepo(repo.id);
+        if (tokenRes.ok) {
+          const [ghSecrets, ghVars] = await Promise.all([
+            listEnvActionsSecrets(tokenRes.accessToken, input.repoFullName, input.envKey),
+            listEnvActionsVariables(tokenRes.accessToken, input.repoFullName, input.envKey),
+          ]);
+          // GitHub stores GITHUB_*-named values under an APP_ alias; strip it
+          // so the pod-side name matches what the app actually reads.
+          const deAlias = (n: string) => (n.startsWith("APP_GITHUB_") ? n.slice(4) : n);
+          if (ghSecrets.ok) for (const n of ghSecrets.names) secretNames.add(deAlias(n));
+          if (ghVars.ok) for (const v of ghVars.vars) if (!secretNames.has(deAlias(v.name))) varNames.add(deAlias(v.name));
+        }
+      } catch {
+        // GitHub unreachable → analyzer-only list still deploys.
+      }
+
+      appEnvForCd = {
+        ghEnvironment: input.envKey,
+        secretNames: [...secretNames],
+        varNames: [...varNames],
+        serviceNames: plans.map((p) => p.svc.name),
+        assignment,
+      };
+      if (envVars.length) {
+        cdNotes.push(
+          `App env wired from GitHub environment "${input.envKey}": ${appEnvForCd.secretNames.length} secret(s) + ${appEnvForCd.varNames.length} variable(s) flow into the "app-env" Secret on every deploy. Add the values under the repo's Settings → Environments → ${input.envKey}.`,
+        );
+      }
+    } catch {
+      // No plan (analysis skipped) — CD still gets the environment scoping.
+    }
+
     for (const { svc, imageName, expose, host, exposeMode } of plans) {
       const appName = multi ? sanitizeAppName(`${baseApp}-${svc.name}`) : baseApp;
       // Combined mode uses one shared cd.yml across all services; per-service
@@ -1189,6 +1279,10 @@ export const deployMyAppTool: Tool<Input, Output> = {
         // that Argo watches for. See CicdPipelineSpec.gitops.
         gitops: useArgo,
         autoDeployOnPush: input.autoDeployOnPush === true,
+        // GitHub-sourced app env → `app-env` k8s Secret (see block above the
+        // service loop). Same env-var set for every service in a monorepo —
+        // envFrom is optional, unused keys are just ignored by each app.
+        appEnv: appEnvForCd,
         include: {
           dockerfile: !keepDockerfile,
           nginx: needsNginxConf || !keepDockerfile,
@@ -1248,9 +1342,17 @@ export const deployMyAppTool: Tool<Input, Output> = {
           // the next roll picks it up.
           //   app-db  — DATABASE_URL + DB_* (written by the Connections page)
           //   app-env — application config/secrets (APP_SECRET_KEY, JWT keys, …)
+          // Order matters: Kubernetes gives LATER envFrom entries precedence
+          // on a key collision, so a service's own value wins over the shared
+          // one of the same name.
+          //   app-db          — DATABASE_URL + DB_* (written by the DB-connect flow)
+          //   app-env         — shared config (every service in this deploy)
+          //   app-env-<svc>   — this service's own config, from GitHub names
+          //                     prefixed <SERVICE>__ (prefix stripped)
           envFromSecrets: [
             { name: "app-db", optional: true },
             { name: "app-env", optional: true },
+            { name: `app-env-${svc.name.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`, optional: true },
           ],
           expose,
           host,

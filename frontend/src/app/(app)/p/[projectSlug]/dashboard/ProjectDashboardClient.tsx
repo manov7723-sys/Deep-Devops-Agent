@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import { Badge, Block, Btn, Donut, PageHead, RowList, Stat, StatusDot } from "@/components/ui";
 import { EnvFilter, type EnvFilterValue } from "@/components/domain/EnvFilter";
+import { RecommendedSetupPanel } from "@/components/domain/RecommendedSetupPanel";
 import { PipeIcon } from "@/components/domain/PipeIcon";
 import { ActivityRow } from "@/components/domain/ActivityRow";
 import {
@@ -88,6 +89,10 @@ export function ProjectDashboardClient({
         }
       />
       <EnvFilter />
+
+      {/* Saved Deployment Plan from the create-project analysis step — renders
+          nothing when the project has no plan. */}
+      <RecommendedSetupPanel slug={slug} />
 
       <div className="dda-stat-row">
         <Stat

@@ -48,8 +48,16 @@ export async function wireSecretToWorkloads(args: {
   namespace: string;
   secretName: string;
   only?: string[];
+  /**
+   * Match by SERVICE name rather than exact Deployment name: wires only the
+   * Deployment called `<suffix>` or `<anything>-<suffix>`. Callers that know
+   * the service ("frontend") but not the deployed name
+   * ("deep-devops-agent-frontend") use this — required for per-service
+   * Secrets, where wiring every Deployment would defeat the isolation.
+   */
+  onlyServiceSuffix?: string;
 }): Promise<{ ok: true; outcomes: WireOutcome[] } | { ok: false; error: string }> {
-  const { kubeconfigPath, execEnv, namespace, secretName, only } = args;
+  const { kubeconfigPath, execEnv, namespace, secretName, only, onlyServiceSuffix } = args;
   const env = { ...execEnv, KUBECONFIG: kubeconfigPath };
 
   // 1 — List Deployments WITH their existing envFrom so we can be idempotent.
@@ -75,14 +83,23 @@ export async function wireSecretToWorkloads(args: {
   const targets = items.filter((d) => {
     const name = d.metadata?.name;
     if (!name) return false;
-    return !only || only.includes(name);
+    if (only && !only.includes(name)) return false;
+    if (onlyServiceSuffix) {
+      const s = onlyServiceSuffix.toLowerCase();
+      if (name.toLowerCase() !== s && !name.toLowerCase().endsWith(`-${s}`)) return false;
+    }
+    return true;
   });
   if (targets.length === 0) {
     return {
       ok: false,
       error:
         `No Deployments found in namespace "${namespace}"` +
-        (only ? ` matching ${only.join(", ")}.` : ". Deploy the app first, then connect the database."),
+        (only
+          ? ` matching ${only.join(", ")}.`
+          : onlyServiceSuffix
+            ? ` for service "${onlyServiceSuffix}".`
+            : ". Deploy the app first, then connect the database."),
     };
   }
 

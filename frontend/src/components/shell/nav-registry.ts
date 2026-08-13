@@ -24,7 +24,6 @@ export const NAV: Record<LayoutArea, NavEntry[]> = {
       hrefSegment: "dashboard",
     },
     { kind: "link", id: "projects", label: "Projects", icon: "projects", hrefSegment: "projects" },
-    { kind: "link", id: "teams", label: "Teams", icon: "teams", hrefSegment: "teams" },
     {
       kind: "link",
       id: "subscription",
@@ -73,6 +72,9 @@ export const NAV: Record<LayoutArea, NavEntry[]> = {
     // "Chat" above. Members auto-join via Project Membership.
     { kind: "link", id: "team-chat", label: "Team chat", icon: "chat", hrefSegment: "team-chat" },
     { kind: "link", id: "cicd", label: "CI/CD & Repos", icon: "cicd", hrefSegment: "cicd" },
+    // Live view of every GitHub Actions run across attached repos, whatever
+    // triggered it (Run button, chat agent, git push). Read-only.
+    { kind: "link", id: "actions", label: "GitHub Actions", icon: "zap", hrefSegment: "actions" },
     {
       kind: "link",
       id: "environments",

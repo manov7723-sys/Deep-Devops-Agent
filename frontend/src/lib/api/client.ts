@@ -59,10 +59,17 @@ async function request<T>(
       if (v !== undefined) url.searchParams.set(k, String(v));
     }
   }
+  // FormData bodies MUST NOT carry a Content-Type from us — the browser has
+  // to attach it with the multipart boundary. Setting application/json here
+  // silently breaks every multipart upload we do (e.g. team-chat attachments).
+  const isFormBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const baseHeaders: Record<string, string> = isFormBody
+    ? {}
+    : { "Content-Type": "application/json" };
   const res = await fetch(url.toString(), {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...baseHeaders,
       ...(init?.headers ?? {}),
     },
   });
@@ -125,6 +132,12 @@ export const api = {
   ) => request<T>(path, { method: "GET", params, headers }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  /**
+   * multipart/form-data POST — for file uploads. Skips the JSON Content-Type
+   * so the browser can attach the boundary itself.
+   */
+  postForm: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: "POST", body: form }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>

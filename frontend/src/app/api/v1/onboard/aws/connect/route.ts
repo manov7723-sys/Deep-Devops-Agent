@@ -28,6 +28,21 @@ const Body = z.object({
   region: z.string().trim().min(1).max(40).default("us-east-1"),
   accountRef: z.string().trim().max(120).optional(),
   projectSlug: z.string().trim().optional(),
+  // Optional caller-supplied External ID — matches what the user actually
+  // pasted into their IAM role's trust policy. When present it OVERRIDES the
+  // per-user derived value. The derived ExternalId breaks whenever the
+  // user's DeepAgent identity differs from the one that first wrote the
+  // trust policy (e.g. the trust policy was set up when signed in as admin,
+  // then the user resigned in as a teammate, then hit Connect again).
+  // Accepting the pasted value lets a demo work without editing IAM.
+  externalId: z
+    .string()
+    .trim()
+    .regex(
+      /^dda-[a-f0-9]{16,64}$/i,
+      "External ID must match the shape shown in the trust-policy help panel (dda-<hex>).",
+    )
+    .optional(),
 });
 
 export async function POST(req: Request) {
@@ -42,7 +57,10 @@ export async function POST(req: Request) {
     );
   }
   const { roleArn, region } = parsed.data;
-  const externalId = getUserExternalId(sess.userId);
+  // Prefer the caller-supplied value (the one they actually put in AWS)
+  // over the per-user derived default. Non-secret by design — it's just an
+  // anti-confused-deputy nonce, so no encryption needed.
+  const externalId = parsed.data.externalId ?? getUserExternalId(sess.userId);
   const customerAccountId = accountIdFromRoleArn(roleArn);
 
   // ISOLATION: bind the provider to the project it's connected in.
@@ -60,9 +78,21 @@ export async function POST(req: Request) {
   // cluster-connect flow with kubectl.
   const verify = await verifyAssumeRole({ roleArn, externalId, region });
   if (!verify.ok && verify.code === "assume_failed") {
+    // Log the raw STS error to server console so we can diagnose without
+    // asking the user to open DevTools. The `message` is intentionally
+    // generic; `stderr` is the real thing AWS returned.
+    console.error(
+      `[aws-connect] AssumeRole rejected for role=${roleArn} externalId=${externalId} region=${region}\n  STS stderr:\n${(verify as { stderr?: string }).stderr ?? "(none)"}`,
+    );
     // A genuine rejection (bad ARN / trust policy) — surface it, don't persist.
+    // Merge stderr into the message so the UI (which only shows `message`)
+    // gets the real cause without needing DevTools.
+    const stderr = (verify as { stderr?: string }).stderr?.trim();
+    const richMessage = stderr
+      ? `${verify.message}\n\nSTS said:\n${stderr.split("\n").slice(-4).join("\n")}`
+      : verify.message;
     return NextResponse.json(
-      { ok: false, code: verify.code, message: verify.message, stderr: verify.stderr },
+      { ok: false, code: verify.code, message: richMessage, stderr },
       { status: 400 },
     );
   }

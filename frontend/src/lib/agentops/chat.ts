@@ -156,13 +156,21 @@ export async function postUserMessage(
 }
 
 /**
- * Always-available starter prompts so users know they can just ASK the agent to
- * do things (deploy, CI/CD, scan). Shown first; DB suggestions fill the rest.
+ * Always-available starter prompts. These map 1:1 to the create-flows the
+ * console actually supports today, matching the pill launcher in the mockup:
+ * click any one and the agent runs the matching create-box wizard. Ordered
+ * from most-common (Deploy) to least (SSL cert). DB-backed suggestions fill
+ * any remaining slots up to the 8-item cap.
  */
 const BUILTIN_SUGGESTIONS: Array<{ id: string; icon: string; text: string }> = [
-  { id: "builtin-deploy", icon: "rocket", text: "Deploy my application to the cluster" },
-  { id: "builtin-pipeline", icon: "zap", text: "Set up CI/CD and deploy my app" },
-  { id: "builtin-scan", icon: "shield", text: "Scan my repo for vulnerabilities" },
+  { id: "builtin-deploy",       icon: "rocket", text: "Deploy my application to the cluster" },
+  { id: "builtin-pipeline",     icon: "zap",    text: "Set up CI/CD and deploy my app" },
+  { id: "builtin-cluster",      icon: "server", text: "Create a Kubernetes cluster" },
+  { id: "builtin-postgres",     icon: "db",     text: "Create a PostgreSQL database" },
+  { id: "builtin-s3",           icon: "box",    text: "Create an S3 bucket" },
+  { id: "builtin-vpn",          icon: "shield", text: "Create a Client VPN" },
+  { id: "builtin-domain",       icon: "globe",  text: "Add a custom domain" },
+  { id: "builtin-ssl",          icon: "lock",   text: "Add an SSL certificate" },
 ];
 
 export async function listSuggestions(

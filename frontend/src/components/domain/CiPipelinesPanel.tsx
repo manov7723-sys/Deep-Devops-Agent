@@ -62,15 +62,23 @@ export function CiPipelinesPanel({ slug }: { slug: string }) {
     );
   }
 
+  // Show only the single most recent pipeline (mirrors the Terraform pipeline
+  // card on the Infra tab). Older ones stay in the DB but don't render — the
+  // list endpoint already returns them ordered by updatedAt DESC, so the head
+  // of the array IS "the most recent". A small note surfaces the hidden count.
+  const RECENT_LIMIT = 1;
+  const visible = pipelines.slice(0, RECENT_LIMIT);
+  const hiddenCount = pipelines.length - visible.length;
+
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub="Generated in chat. Edit the script, then Run to commit + trigger on GitHub.">
+        <Block.Title sub="Most recent CI/CD pipeline generated in chat. Edit the script, then Run to commit + trigger on GitHub.">
           CI/CD Pipelines
         </Block.Title>
       </Block.Header>
       <div className="col" style={{ gap: 0 }}>
-        {pipelines.map((p) => (
+        {visible.map((p) => (
           <PipelineRow
             key={p.id}
             slug={slug}
@@ -84,6 +92,20 @@ export function CiPipelinesPanel({ slug }: { slug: string }) {
             onToggle={() => setOpenId(openId === p.id ? null : p.id)}
           />
         ))}
+        {hiddenCount > 0 && (
+          <div
+            className="muted"
+            style={{
+              fontSize: 12,
+              padding: "10px 16px",
+              borderTop: "1px solid var(--border)",
+              textAlign: "right",
+            }}
+          >
+            {hiddenCount} older pipeline{hiddenCount === 1 ? "" : "s"} hidden — showing only the
+            most recent one.
+          </div>
+        )}
       </div>
     </Block>
   );

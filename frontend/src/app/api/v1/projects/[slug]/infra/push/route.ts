@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/lib/db/prisma";
 import { requireProjectAccess } from "@/lib/projects/permissions";
 import { writeRepoFileTool } from "@/lib/agent/tools/write-repo-file";
 import { audit } from "@/lib/audit/log";
@@ -9,9 +10,18 @@ import { extractRequestMeta } from "@/lib/auth/request-meta";
  * POST /projects/[slug]/infra/push
  *
  * Commit a set of generated infra files (e.g. an EKS Terraform tree) to a repo
- * under a custom base path, on a feature branch, and open ONE PR. Each file is
- * committed via the existing write_repo_file flow (same repo scoping + branch
- * creation); the PR is opened on the first file and the rest land on the branch.
+ * directly on its DEFAULT branch (main/master). No feature branch, no PR.
+ *
+ * The route used to accept a branch + open a PR on the first file. That
+ * violated INFRA_PLAYBOOK's explicit rule ("Push = write_repo_file committed
+ * DIRECTLY to the repo's default branch — NEVER pass openPullRequest, NEVER
+ * invent a feature/infra branch") and forced every user to hand-merge a PR
+ * before an apply could see the file (heal_terraform_state / apply both read
+ * the default branch). It also mismatched the agent's own behaviour — the
+ * agent commits terraform to main; only the wizard-fence path landed on a
+ * feature branch. Now both paths land the same place.
+ *
+ * The caller may still pass `branch` for backwards compat, but we ignore it.
  */
 const Body = z.object({
   repoFullName: z.string().trim().min(3),
@@ -20,8 +30,10 @@ const Body = z.object({
   files: z
     .record(z.string(), z.string())
     .refine((f) => Object.keys(f).length > 0, "No files to push."),
-  branch: z.string().trim().min(1).max(200),
+  /** Accepted but ignored — commits always land on the repo's default branch. */
+  branch: z.string().trim().min(1).max(200).optional(),
   message: z.string().trim().min(1).max(200),
+  /** Accepted but ignored — no PR is opened. */
   pullRequestBody: z.string().trim().max(4000).optional(),
 });
 
@@ -37,13 +49,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       { status: 400 },
     );
   }
-  const { repoFullName, basePath, files, branch, message, pullRequestBody } = parsed.data;
+  const { repoFullName, basePath, files, message } = parsed.data;
   const base = basePath.replace(/^\/+|\/+$/g, "");
   const toolCtx = { projectId: gate.access.project.id, userId: gate.access.session.userId };
 
+  // Resolve the repo's default branch — that's where every file lands.
+  // Fallback to "main" only if the repo row is somehow missing that field
+  // (shouldn't happen in practice; the projectRepo attach flow captures it).
+  const repo = await prisma.repo.findFirst({
+    where: { fullName: repoFullName, deletedAt: null },
+    select: { defaultBranch: true },
+  });
+  const defaultBranch = repo?.defaultBranch?.trim() || "main";
+
   const committed: string[] = [];
-  let pullRequest: { number: number; url: string } | undefined;
-  let first = true;
 
   for (const [rel, content] of Object.entries(files)) {
     // Preserve the file's relative path (e.g. "templates/deployment.yaml") so
@@ -56,10 +75,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
         repoFullName,
         path,
         content,
-        branch,
+        branch: defaultBranch,
         message,
-        openPullRequest: first, // open the PR once; later files land on the branch
-        pullRequestBody,
+        // openPullRequest omitted — direct-commit to default branch.
       },
       toolCtx,
     );
@@ -70,8 +88,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       );
     }
     committed.push(path);
-    if (first && res.output.pullRequest) pullRequest = res.output.pullRequest;
-    first = false;
   }
 
   const meta = extractRequestMeta(req);
@@ -83,15 +99,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     targetId: repoFullName,
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
-    metadata: { basePath: base, branch, fileCount: committed.length },
+    metadata: { basePath: base, branch: defaultBranch, fileCount: committed.length, direct: true },
   });
 
   return NextResponse.json({
     ok: true,
     repoFullName,
-    branch,
+    branch: defaultBranch,
     basePath: base,
     committed,
-    pullRequest,
   });
 }

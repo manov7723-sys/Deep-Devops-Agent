@@ -109,6 +109,14 @@ export async function discoverDeployedApps(projectId: string): Promise<Discovere
         cwd: process.cwd(),
         env: kexec,
         timeoutMs: 45_000,
+        // Cluster-wide deployment JSON runs to tens/hundreds of KB — annotations,
+        // pod-template specs and imagePullSecrets add up fast. runStage's default
+        // 32 KB cap truncated mid-string on an ECR image URL like
+        // `…dkr.ecr.us-east-1.amazonaws.com/dynamic-app:latest`, so JSON.parse
+        // failed with "Unexpected token 'a', \"aws.com/dy\"... is not valid JSON"
+        // and every namespace in the daily report showed "Cluster unreachable".
+        // Same 4 MB cap the Prometheus report call already uses.
+        maxBufferBytes: 4 * 1024 * 1024,
       });
 
       if (deps.exitCode !== 0) {
@@ -151,6 +159,11 @@ export async function discoverDeployedApps(projectId: string): Promise<Discovere
         cwd: process.cwd(),
         env: kexec,
         timeoutMs: 45_000,
+        // Same reason as the deployments query above — pod JSON is even
+        // bigger (containerStatuses per replica). Without this cap, the
+        // report degraded to "Cluster unreachable" via a JSON.parse failure
+        // mid-string on a truncated image URL.
+        maxBufferBytes: 4 * 1024 * 1024,
       });
       if (pods.exitCode === 0) {
         type Pod = {

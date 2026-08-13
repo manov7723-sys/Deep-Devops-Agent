@@ -134,46 +134,62 @@ function friendlyQueries(namespace: string): QueryPreset[] {
 }
 
 /**
- * SERVICE-level metrics — the app's OWN /metrics (scraped via a ServiceMonitor/
- * PodMonitor), using the standard names most Prometheus client libraries expose.
- * `up` and `process_*` exist on any scraped target; the HTTP ones appear if the
- * app instruments them. Anything missing shows "—" (use Query Prometheus for
- * custom names).
+ * SERVICE-level metrics.
+ *
+ * The FIRST version of this used `http_requests_total`, `process_*` etc. —
+ * standard prom-client names that only exist when the app itself exposes
+ * `/metrics`. On the common case (an app that hasn't been instrumented yet,
+ * as in the demo cluster) every tile stayed at "—" with no signal that the
+ * problem was app-side, not cluster-side.
+ *
+ * Rewired to metrics that are ALWAYS available for any pod without
+ * instrumentation — kube-state-metrics + cAdvisor + node-exporter, all of
+ * which kube-prometheus-stack already installs. Same panel, always populated.
+ * True app-level HTTP metrics (req/s, p95 latency, 5xx rate) still need
+ * `/metrics` — the diagnostic strip below the panel says so.
  */
 function servicePresets(namespace: string): MetricPreset[] {
   const ns = `namespace="${namespace}"`;
+  const container = `${ns},container!="",container!="POD"`;
   return [
-    { key: "up", label: "Targets up", unit: "", query: `sum(up{${ns}})` },
     {
-      key: "req",
-      label: "Request rate (req/s)",
-      unit: "/s",
-      query: `sum(rate(http_requests_total{${ns}}[5m]))`,
+      key: "ready",
+      label: "Replicas ready",
+      unit: "",
+      query: `sum(kube_deployment_status_replicas_ready{${ns}}) or sum(kube_statefulset_status_replicas_ready{${ns}})`,
     },
     {
-      key: "err",
-      label: "5xx errors (req/s)",
-      unit: "/s",
-      query: `sum(rate(http_requests_total{${ns},status=~"5.."}[5m]))`,
+      key: "traffic_in",
+      label: "Network in (KB/s)",
+      unit: "KB/s",
+      scale: 1 / 1024,
+      query: `sum(rate(container_network_receive_bytes_total{${ns}}[5m]))`,
     },
     {
-      key: "p95",
-      label: "p95 latency (s)",
-      unit: "s",
-      query: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{${ns}}[5m])) by (le))`,
+      key: "traffic_out",
+      label: "Network out (KB/s)",
+      unit: "KB/s",
+      scale: 1 / 1024,
+      query: `sum(rate(container_network_transmit_bytes_total{${ns}}[5m]))`,
+    },
+    {
+      key: "netErr",
+      label: "Network errors (/s)",
+      unit: "/s",
+      query: `sum(rate(container_network_receive_errors_total{${ns}}[5m])) + sum(rate(container_network_transmit_errors_total{${ns}}[5m]))`,
     },
     {
       key: "appcpu",
       label: "App CPU (cores)",
       unit: "cores",
-      query: `sum(rate(process_cpu_seconds_total{${ns}}[5m]))`,
+      query: `sum(rate(container_cpu_usage_seconds_total{${container}}[5m]))`,
     },
     {
       key: "appmem",
       label: "App memory (MiB)",
       unit: "MiB",
       scale: 1 / 1024 ** 2,
-      query: `sum(process_resident_memory_bytes{${ns}})`,
+      query: `sum(container_memory_working_set_bytes{${container}})`,
     },
   ];
 }
@@ -461,7 +477,7 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
             slug={slug}
             connected
             queryPath={queryPath}
-            source={`the app's scraped /metrics (namespace "${namespace}")`}
+            source={`in-cluster metrics for pods in namespace "${namespace}" (no app instrumentation required)`}
             presets={servicePresets(namespace)}
             title="Service metrics (app)"
             queryPresets={friendlyQueries(namespace)}
@@ -510,3 +526,4 @@ export function ClusterMonitoringPanel({ slug, env }: { slug: string; env: EnvFi
     </div>
   );
 }
+

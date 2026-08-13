@@ -74,6 +74,8 @@ export type CreateEnvArgs = {
   promotionRank: number;
   kubeconfig?: string;
   namespace?: string;
+  /** Default branch this env deploys from — display default for the deploy flow. */
+  deployBranch?: string;
 };
 
 export type CreateEnvResult =
@@ -109,6 +111,7 @@ export async function createEnv(args: CreateEnvArgs): Promise<CreateEnvResult> {
         promotionRank: args.promotionRank,
         kubeconfigRef,
         ...(args.namespace && { namespace: args.namespace }),
+        ...(args.deployBranch ? { deployBranch: args.deployBranch } : {}),
       },
     });
     return { ok: true, env: row(created) };

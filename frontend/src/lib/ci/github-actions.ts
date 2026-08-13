@@ -27,6 +27,23 @@ export type CommitResult = { ok: true; sha: string } | { ok: false; error: strin
  * Commit all `files` to `branch` as a single commit via the git data API
  * (blobs → tree → commit → move ref). One clean commit instead of N.
  */
+/** Decoded UTF-8 file contents from the repo (contents API), or null on 404. */
+export async function readRepoFile(gh: GH, path: string, ref?: string): Promise<string | null> {
+  const clean = path.replace(/^\/+/, "");
+  const url =
+    `${API}/repos/${gh.repoFullName}/contents/${clean.split("/").map(encodeURIComponent).join("/")}` +
+    (ref ? `?ref=${encodeURIComponent(ref)}` : "");
+  try {
+    const res = await fetch(url, { headers: headers(gh.token), cache: "no-store" });
+    if (!res.ok) return null;
+    const j = (await res.json().catch(() => null)) as { content?: string; encoding?: string } | null;
+    if (!j?.content) return null;
+    return Buffer.from(j.content, "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
 export async function commitFiles(
   gh: GH,
   branch: string,

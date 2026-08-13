@@ -21,6 +21,15 @@ import { prisma } from "@/lib/db/prisma";
 import { getKubeconfigForEnv, kubeExecEnv } from "@/lib/runner/creds";
 import { NS, GRAFANA_SVC, GRAFANA_PORT } from "@/lib/observability/cluster-monitoring";
 
+/**
+ * Prometheus service name + port (mirrors the constants in cluster-monitoring
+ * so a single change moves both the Grafana and Prometheus proxies). Kept here
+ * to avoid a cluster-monitoring → kube-proxy → cluster-monitoring import cycle
+ * that would kick in if we imported these from that module.
+ */
+const PROM_SVC_LOCAL = "monitoring-kube-prometheus-prometheus";
+const PROM_PORT_LOCAL = "9090";
+
 const IDLE_MS = 5 * 60_000; // reap a proxy this long after its last use
 const START_TIMEOUT_MS = 15_000;
 
@@ -35,24 +44,31 @@ type Entry = {
 };
 
 // Module-level cache — survives across requests in the long-running Node server.
+// Keyed by `${envId}:${kind}` so an env can hold BOTH a Grafana and a Prometheus
+// tunnel without them competing for the same slot.
+type ProxyKind = "grafana" | "prometheus";
 const proxies = new Map<string, Entry>();
 // In-flight starts, so concurrent requests for the same env share one spawn.
 const starting = new Map<string, Promise<Entry>>();
 
-function scheduleReap(envId: string, entry: Entry) {
+function key(envId: string, kind: ProxyKind) {
+  return `${envId}:${kind}`;
+}
+
+function scheduleReap(k: string, entry: Entry) {
   clearTimeout(entry.reaper);
   entry.reaper = setTimeout(() => {
-    if (Date.now() - entry.lastUsed >= IDLE_MS) void kill(envId);
-    else scheduleReap(envId, entry);
+    if (Date.now() - entry.lastUsed >= IDLE_MS) void kill(k);
+    else scheduleReap(k, entry);
   }, IDLE_MS + 1_000);
   // Don't keep the process alive just for the reaper.
   entry.reaper.unref?.();
 }
 
-async function kill(envId: string) {
-  const entry = proxies.get(envId);
+async function kill(k: string) {
+  const entry = proxies.get(k);
   if (!entry) return;
-  proxies.delete(envId);
+  proxies.delete(k);
   clearTimeout(entry.reaper);
   try {
     entry.proc.kill("SIGTERM");
@@ -62,7 +78,7 @@ async function kill(envId: string) {
   await entry.cleanupKubeconfig().catch(() => {});
 }
 
-async function start(envId: string): Promise<Entry> {
+async function start(envId: string, kind: ProxyKind): Promise<Entry> {
   const env = await prisma.env.findUnique({
     where: { id: envId },
     select: { cloudProviderId: true },
@@ -70,16 +86,20 @@ async function start(envId: string): Promise<Entry> {
   const kcfg = await getKubeconfigForEnv(envId);
   if (!kcfg.ok) throw new Error(kcfg.message);
 
+  const svc = kind === "grafana" ? GRAFANA_SVC : PROM_SVC_LOCAL;
+  const svcPort = kind === "grafana" ? GRAFANA_PORT : PROM_PORT_LOCAL;
+  const k = key(envId, kind);
+
   let entry: Entry;
   try {
     const childEnv = await kubeExecEnv(kcfg.handle.path, env?.cloudProviderId ?? null);
-    // Port-forward straight to the Grafana service; `:N` lets kubectl pick a free
+    // Port-forward straight to the service; `:N` lets kubectl pick a free
     // local port, which it prints as "Forwarding from 127.0.0.1:PORT -> …".
     // Cast env through unknown: the strict NodeJS.ProcessEnv type demands a
     // NODE_ENV key we deliberately don't pass (same workaround as runStage).
     const proc = spawn(
       "kubectl",
-      ["port-forward", "-n", NS, `svc/${GRAFANA_SVC}`, `:${GRAFANA_PORT}`, "--address=127.0.0.1"],
+      ["port-forward", "-n", NS, `svc/${svc}`, `:${svcPort}`, "--address=127.0.0.1"],
       {
         env: childEnv as unknown as NodeJS.ProcessEnv,
         stdio: ["ignore", "pipe", "pipe"],
@@ -131,11 +151,11 @@ async function start(envId: string): Promise<Entry> {
     };
     // If the proxy dies later, drop it from the cache so the next request respawns.
     proc.on("exit", () => {
-      if (proxies.get(envId) === entry) proxies.delete(envId);
+      if (proxies.get(k) === entry) proxies.delete(k);
       void kcfg.handle.cleanup().catch(() => {});
     });
-    proxies.set(envId, entry);
-    scheduleReap(envId, entry);
+    proxies.set(k, entry);
+    scheduleReap(k, entry);
   } catch (e) {
     await kcfg.handle.cleanup().catch(() => {});
     throw e;
@@ -143,19 +163,38 @@ async function start(envId: string): Promise<Entry> {
   return entry;
 }
 
-/** Get (or start) the local base URL of an authenticated port-forward to Grafana. */
-export async function getGrafanaForwardBase(envId: string): Promise<string> {
-  const existing = proxies.get(envId);
+async function getBase(envId: string, kind: ProxyKind): Promise<string> {
+  const k = key(envId, kind);
+  const existing = proxies.get(k);
   if (existing && !existing.proc.killed) {
     existing.lastUsed = Date.now();
     return `http://127.0.0.1:${existing.port}`;
   }
-  let pending = starting.get(envId);
+  let pending = starting.get(k);
   if (!pending) {
-    pending = start(envId).finally(() => starting.delete(envId));
-    starting.set(envId, pending);
+    pending = start(envId, kind).finally(() => starting.delete(k));
+    starting.set(k, pending);
   }
   const entry = await pending;
   entry.lastUsed = Date.now();
   return `http://127.0.0.1:${entry.port}`;
+}
+
+/** Get (or start) the local base URL of an authenticated port-forward to Grafana. */
+export async function getGrafanaForwardBase(envId: string): Promise<string> {
+  return getBase(envId, "grafana");
+}
+
+/**
+ * Get (or start) the local base URL of an authenticated port-forward to
+ * Prometheus. We port-forward instead of hitting the kube API-server service
+ * proxy (`/api/v1/namespaces/…/services/…:9090/proxy`) because that proxy
+ * silently hangs on some EKS clusters for the Prometheus service specifically
+ * (Grafana on the same mechanism works fine — proven with kubectl locally).
+ * Symptom: metrics panels + Query Prometheus all timed out with zero
+ * explanation; the same PromQL against `http://127.0.0.1:<pf-port>/api/v1/…`
+ * returns instantly.
+ */
+export async function getPrometheusForwardBase(envId: string): Promise<string> {
+  return getBase(envId, "prometheus");
 }

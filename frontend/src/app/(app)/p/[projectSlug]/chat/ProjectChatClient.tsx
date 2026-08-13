@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Badge, Btn, Icon, StatusDot } from "@/components/ui";
+import { Badge, Btn, Icon, StatusDot, type IconName } from "@/components/ui";
 import { ChatMsg } from "@/components/domain/ChatMsg";
 import { ChatComposer } from "@/components/domain/ChatComposer";
 import { ChatHistoryRail } from "@/components/domain/ChatHistoryRail";
@@ -54,6 +55,29 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
     setActiveThreadId(threads[0]!.id);
   }, [threads, activeThreadId]);
 
+  /**
+   * Auto-send an incoming ?prompt=… once. Used by the RecommendedSetupPanel's
+   * per-row Create buttons + master "Create all infrastructure" button — they
+   * navigate here with a pre-filled prompt so the agent runs its usual create
+   * flow with the plan values baked in (no duplicated form logic). We strip
+   * the param immediately after firing so a hard-refresh doesn't re-fire it.
+   */
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    if (autoSentRef.current) return;
+    const p = searchParams.get("prompt");
+    if (!p) return;
+    autoSentRef.current = true;
+    // Wait until the send hook is idle before firing — avoids stomping on any
+    // resume-in-progress from useSendChatMessageStream's own mount effects.
+    if (status.state !== "idle") return;
+    send(p, { threadId: activeThreadId ?? undefined });
+    // Strip the prompt from the URL so refresh doesn't re-fire.
+    router.replace(`/p/${slug}/chat`);
+  }, [searchParams, status.state, send, activeThreadId, router, slug]);
+
   const isThinking = status.state === "sending";
   const isStreaming = status.state === "streaming";
   const partial = isStreaming ? status.partial : "";
@@ -65,6 +89,11 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
   const busy = isThinking || isStreaming || createChatThread.isPending;
 
   const messages = activeThreadId ? (activeMessages ?? []) : (flatThread ?? []);
+  // Empty state = no messages yet AND no in-flight activity. The landing view
+  // (heading + big pill grid) takes over the scroll area in this state so the
+  // Chat tab feels like a launcher on first arrival, not a blank canvas.
+  const isEmpty =
+    messages.length === 0 && !isThinking && !isStreaming && !partial && toolCalls.length === 0;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -158,6 +187,9 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
 
         <div ref={scrollRef} className="dda-chat-scroll">
           <div className="dda-chat-inner">
+            {isEmpty && (
+              <ChatLanding suggestions={suggestions} onPick={handleSend} disabled={busy} />
+            )}
             {messages.map((m, i) => (
               <ChatMsg
                 key={m.id}
@@ -218,7 +250,10 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
         <div style={{ padding: "0 24px 20px", flex: "none" }}>
           <ChatComposer
             suggestions={suggestions}
-            showSuggestions
+            // Hide the tiny suggestion chips above the composer while the
+            // empty-state landing is up (the landing shows the same suggestions
+            // as full-size pills — one source of truth, no duplicate row).
+            showSuggestions={!isEmpty}
             onSend={handleSend}
             disabled={isThinking || isStreaming}
           />
@@ -231,6 +266,117 @@ export function ProjectChatClient({ slug }: ProjectChatClientProps) {
         onNewChat={handleNewChat}
         disabled={busy}
       />
+    </div>
+  );
+}
+
+/**
+ * Empty-state landing for the Chat tab. Big heading + a wrap of full-size
+ * pill buttons over the built-in chat suggestions. Clicking any pill sends
+ * its text as a message — same code path as the composer's Send button, so
+ * the agent's usual create-fence flow kicks in.
+ *
+ * Shown only while the current thread has zero messages AND no agent activity
+ * is in flight. Once any message lands, the parent hides this and the normal
+ * scroll + composer take over.
+ */
+function ChatLanding({
+  suggestions,
+  onPick,
+  disabled,
+}: {
+  suggestions?: { id: string; icon: string; text: string }[];
+  onPick: (text: string) => void;
+  disabled?: boolean;
+}) {
+  const pills = suggestions ?? [];
+  return (
+    <div
+      className="col center gap-3"
+      style={{
+        minHeight: 420,
+        padding: "48px 20px 20px",
+        maxWidth: 780,
+        margin: "0 auto",
+      }}
+    >
+      <span
+        className="row center"
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 14,
+          background: "var(--accent-soft, rgba(139,124,245,0.14))",
+          color: "var(--accent, #8b7cf5)",
+          marginBottom: 6,
+        }}
+        aria-hidden
+      >
+        <Icon name="bot" size={26} />
+      </span>
+      <h2
+        style={{
+          margin: 0,
+          fontSize: 22,
+          fontWeight: 700,
+          letterSpacing: "-0.3px",
+          textAlign: "center",
+        }}
+      >
+        What do you want to create?
+      </h2>
+      <p
+        className="faint"
+        style={{ margin: 0, fontSize: 13, textAlign: "center", maxWidth: 480 }}
+      >
+        One click, DeepAgent handles the rest — or type your own request in the box below.
+      </p>
+      {pills.length > 0 && (
+        <div
+          className="row gap-2 wrap"
+          style={{ justifyContent: "center", marginTop: 14, maxWidth: 780 }}
+        >
+          {pills.map((s, i) => (
+            <button
+              key={`${s.text}-${i}`}
+              type="button"
+              onClick={() => onPick(s.text)}
+              disabled={disabled}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 16px",
+                borderRadius: 999,
+                background: "var(--surface-1)",
+                border: "1px solid var(--border)",
+                color: "var(--text)",
+                fontSize: 13,
+                fontFamily: "inherit",
+                cursor: disabled ? "not-allowed" : "pointer",
+                opacity: disabled ? 0.5 : 1,
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => {
+                if (disabled) return;
+                e.currentTarget.style.background = "var(--surface-2)";
+                e.currentTarget.style.borderColor = "var(--accent-strong, #6d5ae6)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "var(--surface-1)";
+                e.currentTarget.style.borderColor = "var(--border)";
+              }}
+            >
+              <Icon
+                name={s.icon as IconName}
+                size={14}
+                style={{ color: "var(--accent, #8b7cf5)" }}
+              />
+              {s.text}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

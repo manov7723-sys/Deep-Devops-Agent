@@ -56,6 +56,8 @@ export type ConnectAwsInput = {
   region: string;
   accountRef?: string;
   projectSlug?: string;
+  /** Optional override — matches the value the user actually put in AWS. */
+  externalId?: string;
 };
 export type ConnectAwsResult = {
   ok: boolean;

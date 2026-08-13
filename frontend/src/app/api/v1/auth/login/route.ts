@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { LoginRequest } from "@/lib/api/schemas/auth";
-import { createPendingSession } from "@/lib/auth/session";
+import { createPendingSession, revokeActiveSession } from "@/lib/auth/session";
 import { findUserByEmail, getPasswordHash } from "@/lib/auth/users";
 import { verifyPassword } from "@/lib/auth/password";
 import { extractRequestMeta } from "@/lib/auth/request-meta";
@@ -35,6 +35,19 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(INVALID_CREDS, { status: 401 });
   }
+
+  // Revoke any currently-active session on this browser BEFORE creating
+  // the new pending one. Two things this fixes:
+  //   1. Session-confusion: session cookies are shared across all tabs of
+  //      an origin, so admin's `ddasess` cookie was still live while the
+  //      user was mid-login as a different account. The (guest) layout
+  //      then bounced the /auth/2fa page to /u/dashboard on admin's
+  //      session, and the new user's pending session silently expired.
+  //   2. "Switch users" UX: entering a new set of valid credentials is a
+  //      clear signal that the user wants to leave the previous account.
+  //      We only revoke AFTER password verification so a random POST with
+  //      no credentials can't log the user out.
+  await revokeActiveSession();
 
   await createPendingSession({
     userId: user.id,

@@ -69,7 +69,11 @@ export type SeedCostByEnv = Row;
 export type SeedProjectRepo = Row;
 export type SeedIssue = Row;
 export type SeedChatSuggestion = Row;
-export type SeedChatPlanStep = [string, string]; // [iconName, text] tuple
+// [iconName, text, status?] — the renderer (ChatMsg) shows the third element
+// as a Badge. It was typed as a 2-tuple while the UI read index 2; the
+// mismatch went unnoticed because SeedChatMessage intersects `Row = any`,
+// which erases the tuple check entirely.
+export type SeedChatPlanStep = [string, string, string?];
 export type SeedChatMessage = Row & { plan?: SeedChatPlanStep[] };
 export type EnvId = string;
 

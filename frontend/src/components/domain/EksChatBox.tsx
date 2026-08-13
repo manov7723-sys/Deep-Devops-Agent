@@ -251,18 +251,34 @@ const STEPS: Step[] = [
     max: 6,
     required: true,
     // One pre-populated row so the wizard has a working default out of the box.
-    default: (c) =>
-      JSON.stringify([
+    // When the project has a saved DeploymentPlan from the create-project
+    // Analysis step, we pull nodeType + min/desired/max from its capacity plan
+    // — same numbers the RecommendedSetupPanel shows in its "Cluster" row —
+    // so the wizard opens with the analysis values instead of generic ones.
+    // Falls back to the previous generic defaults when there's no plan.
+    default: (c) => {
+      const availableTypes = strList(c, "instanceTypes", ["t3.medium"]);
+      const planned = c.plan?.capacity?.cluster;
+      // Only trust the planned instance type when it's in the AWS options
+      // list for this region — otherwise the Select would reject it silently.
+      const plannedType =
+        planned && availableTypes.includes(planned.nodeType) ? planned.nodeType : null;
+      const instanceType = plannedType ?? availableTypes[0] ?? "t3.medium";
+      const minNodes = String(planned?.nodeCount ?? 1);
+      const desiredNodes = String(planned?.nodeCount ?? 2);
+      const maxNodes = String(planned?.maxNodeCount ?? 3);
+      return JSON.stringify([
         {
           name: `${String(c.answers.name ?? "cluster")}-workers`,
-          instanceType: strList(c, "instanceTypes", ["t3.medium"])[0] ?? "t3.medium",
+          instanceType,
           capacityType: "ON_DEMAND",
-          minNodes: "1",
-          desiredNodes: "2",
-          maxNodes: "3",
+          minNodes,
+          desiredNodes,
+          maxNodes,
           diskSize: "100",
         },
-      ]),
+      ]);
+    },
     fields: [
       {
         key: "name",

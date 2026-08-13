@@ -22,11 +22,12 @@ import { S3CreateBox } from "@/components/domain/S3CreateBox";
 import { GkeChatBox } from "@/components/domain/GkeChatBox";
 import { AksChatBox } from "@/components/domain/AksChatBox";
 import { RdsChatBox } from "@/components/domain/RdsChatBox";
+import { EnvAssignBox } from "@/components/domain/EnvAssignBox";
 import { ClusterConnectBox } from "@/components/domain/ClusterConnectBox";
 import { CloudConnectBox } from "@/components/domain/CloudConnectBox";
 import { SecretEntryBox } from "@/components/domain/SecretEntryBox";
 import { ApprovalCard } from "@/components/domain/ApprovalCard";
-import type { SeedChatMessage } from "@/lib/legacy-types";
+import type { SeedChatMessage, SeedChatPlanStep } from "@/lib/legacy-types";
 
 export interface ChatMsgProps {
   message: SeedChatMessage;
@@ -66,6 +67,7 @@ type Segment =
   | { type: "azure-vpn-create" }
   | { type: "jenkins-provision" }
   | { type: "s3-create" }
+  | { type: "env-assign" }
   | { type: "cluster-connect" }
   | { type: "cloud-connect" }
   | { type: "secret-entry" }
@@ -92,6 +94,7 @@ const BARE_FENCES = [
   "azure-vpn-create",
   "jenkins-provision",
   "s3-create",
+  "env-assign",
   "cluster-connect",
   "cloud-connect",
   "secret-entry",
@@ -140,6 +143,8 @@ function bareSegment(name: BareFence): Segment {
       return { type: "jenkins-provision" };
     case "s3-create":
       return { type: "s3-create" };
+    case "env-assign":
+      return { type: "env-assign" };
     case "cluster-connect":
       return { type: "cluster-connect" };
     case "cloud-connect":
@@ -240,7 +245,7 @@ function dedupeOptions(segs: Segment[]): Segment[] {
 function parseSegments(text: string): Segment[] {
   const segs: Segment[] = [];
   const re =
-    /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|rds-create|ec2-create|vpc-create|client-vpn-create|vpn-certificates-create|issue-vpn-user-cert|azure-vnet-create|azure-vm-create|azure-vpn-create|gcp-vpc-create|gcp-vm-create|gcp-vpn-create|jenkins-provision|s3-create|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
+    /```(options-form|options|approval-card|proxmox-vm|cicd-setup|eks-create|gke-create|aks-create|rds-create|ec2-create|vpc-create|client-vpn-create|vpn-certificates-create|issue-vpn-user-cert|azure-vnet-create|azure-vm-create|azure-vpn-create|gcp-vpc-create|gcp-vm-create|gcp-vpn-create|jenkins-provision|s3-create|env-assign|cluster-connect|cloud-connect|secret-entry)\s*([\s\S]*?)```/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
@@ -447,6 +452,10 @@ export function ChatMsg({
               slug ? (
                 <S3CreateBox key={`s3-${i}`} slug={slug} />
               ) : null
+            ) : seg.type === "env-assign" ? (
+              slug ? (
+                <EnvAssignBox key={`envassign-${i}`} slug={slug} />
+              ) : null
             ) : seg.type === "cluster-connect" ? (
               slug ? (
                 <ClusterConnectBox key={`cc-${i}`} slug={slug} />
@@ -470,7 +479,10 @@ export function ChatMsg({
         </div>
         {m.plan && (
           <div className="card" style={{ padding: 6 }}>
-            {m.plan.map((p, i) => (
+            {/* `SeedChatMessage` intersects the legacy `Row = any`, which
+                collapses the whole type to any — so the tuple element and
+                index need explicit annotations to satisfy noImplicitAny. */}
+            {m.plan.map((p: SeedChatPlanStep, i: number) => (
               <div key={`${m.id}-plan-${i}`} className="row gap-3 dda-chat-plan-row">
                 <span className="row center dda-chat-plan-icon">
                   <Icon name={p[0] as IconName} size={14} />
@@ -478,7 +490,7 @@ export function ChatMsg({
                 <span className="grow" style={{ fontSize: 12.5, fontWeight: 600 }}>
                   {p[1]}
                 </span>
-                <Badge>{p[2]}</Badge>
+                {p[2] ? <Badge>{p[2]}</Badge> : null}
               </div>
             ))}
           </div>

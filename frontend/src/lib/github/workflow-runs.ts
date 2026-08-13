@@ -319,10 +319,73 @@ async function classifyFailure(
  * Returns done=false with the current status if it's still running when time
  * runs out — the caller can re-invoke to keep waiting.
  */
+/** Fetch ONE run by its id — exact, no workflow-file guessing. */
+async function fetchRunById(
+  fullName: string,
+  token: string,
+  runId: number,
+): Promise<Res<WorkflowRun | null>> {
+  let res: Response;
+  try {
+    res = await fetch(`${GH}/repos/${fullName}/actions/runs/${runId}`, {
+      headers: headers(token),
+      cache: "no-store",
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Network error reaching GitHub: ${e instanceof Error ? e.message : "error"}`,
+    };
+  }
+  if (res.status === 404) return { ok: false, error: `Run ${runId} not found on ${fullName}.` };
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    return { ok: false, error: `GitHub API ${res.status}: ${t.slice(0, 200)}` };
+  }
+  const r = (await res.json().catch(() => ({}))) as {
+    id?: number;
+    name?: string;
+    status?: string;
+    conclusion?: string | null;
+    head_sha?: string;
+    html_url?: string;
+  };
+  if (!r.id) return { ok: true, data: null };
+  const run: WorkflowRun = {
+    runId: r.id,
+    name: r.name ?? "",
+    status: r.status ?? "unknown",
+    conclusion: r.conclusion ?? null,
+    headSha: r.head_sha ?? "",
+    htmlUrl: r.html_url ?? "",
+    failureKind: null,
+    failureHint: null,
+  };
+  if (run.conclusion === "failure") {
+    const cls = await classifyFailure(fullName, token, r.id);
+    run.failureKind = cls.kind;
+    run.failureHint = cls.hint;
+  }
+  return { ok: true, data: run };
+}
+
 export async function waitForWorkflowRun(
   projectId: string,
   repoFullName: string,
-  opts: { workflowFile?: string; branch?: string; timeoutMs?: number; pollMs?: number } = {},
+  opts: {
+    workflowFile?: string;
+    branch?: string;
+    timeoutMs?: number;
+    pollMs?: number;
+    /**
+     * Watch THIS exact run instead of "the latest run of workflowFile".
+     * Preferred whenever the caller has one (run_ci_pipeline returns it) —
+     * workflow file names in the repo don't always match what a caller
+     * guesses ("build-and-push-frontend.yml" vs the committed "ci-frontend.yml"),
+     * and a wrong guess 404s even while the run is plainly visible in the UI.
+     */
+    runId?: number;
+  } = {},
 ): Promise<Res<{ done: boolean; run: WorkflowRun | null }>> {
   const resolved = await resolveAttachedRepo(projectId, repoFullName);
   if (!resolved.ok) return { ok: false, error: resolved.error };
@@ -336,10 +399,12 @@ export async function waitForWorkflowRun(
   let last: WorkflowRun | null = null;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const r = await fetchLatestRun(repoFullName, token, {
-      workflowFile: opts.workflowFile,
-      branch,
-    });
+    const r = opts.runId
+      ? await fetchRunById(repoFullName, token, opts.runId)
+      : await fetchLatestRun(repoFullName, token, {
+          workflowFile: opts.workflowFile,
+          branch,
+        });
     if (!r.ok) return r;
     last = r.data;
     if (last && last.status === "completed") return { ok: true, data: { done: true, run: last } };

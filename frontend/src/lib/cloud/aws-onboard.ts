@@ -142,6 +142,20 @@ export async function assumeRoleCreds(args: {
     // not "no CLI", so the operator looks at the connector rather than the pod.
     return { ok: false, code: "assume_failed", message: `MCP returned an AssumeRole response we couldn't parse.` };
   }
+  // MCP itself reached AWS and got an error (AccessDenied, InvalidClientTokenId,
+  // trust-policy mismatch, etc.). In that case the MCP path already has the
+  // authoritative STS error — don't retry via the local CLI with different
+  // credentials that will produce a different, misleading error. Surface the
+  // MCP error verbatim so the user sees the real reason.
+  const mcpMessage = mcp.message ?? "";
+  if (/AWS error|AccessDenied|InvalidClientTokenId|not authorized|AuthFailure|ValidationError|trust|external/i.test(mcpMessage)) {
+    return {
+      ok: false,
+      code: "assume_failed",
+      message: `AssumeRole rejected by AWS: ${mcpMessage.slice(0, 500)}`,
+      stderr: mcpMessage,
+    };
+  }
   // Remember WHY MCP didn't serve this, so the CLI-fallback error below can
   // tell the truth. Reporting "no MCP connector is registered" when one IS
   // registered but failed sends the operator to the wrong page entirely.

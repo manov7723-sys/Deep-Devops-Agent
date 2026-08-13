@@ -88,6 +88,11 @@ export async function runCiPipeline(pipelineId: string, projectId: string): Prom
     },
   });
 
+  // Arm the background review agent: watches this run server-side (no UI tab
+  // needed), mirrors status onto the row, and auto-heals failures (bounded).
+  const { watchPipelineRun } = await import("./pipeline-watcher");
+  watchPipelineRun(pipeline.id, projectId);
+
   return {
     ok: true,
     commitSha: commit.sha,

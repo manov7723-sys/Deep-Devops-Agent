@@ -38,6 +38,8 @@ import { listEcrReposTool } from "./list-ecr-repos";
 import { analyzeAppServicesTool } from "./analyze-app-services";
 import { listRepoBranchesTool } from "./list-repo-branches";
 import { repairCdKubeconfigTool } from "./repair-cd-kubeconfig";
+import { fixCiBuildFailureTool } from "./fix-ci-build-failure";
+import { importGithubWorkflowsTool } from "./import-github-workflows";
 import { deployMyAppTool } from "./deploy-my-app";
 import { listDockerfileStacksTool } from "./list-dockerfile-stacks";
 import { generateDockerfileTool } from "./generate-dockerfile";
@@ -306,6 +308,8 @@ export const ALL_TOOLS: Tool[] = [
   analyzeAppServicesTool,
   listRepoBranchesTool,
   repairCdKubeconfigTool,
+  fixCiBuildFailureTool,
+  importGithubWorkflowsTool,
   // The single from-scratch flow: analyze repo → Dockerfile + CI + manifests → registry → (build → deploy)
   deployMyAppTool,
   // Managed database (AWS RDS) — provision new, or connect an existing one

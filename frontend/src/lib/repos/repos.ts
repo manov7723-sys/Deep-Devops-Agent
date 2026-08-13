@@ -110,27 +110,48 @@ export async function createRepo(args: CreateRepoArgs): Promise<CreateRepoResult
   const provider = args.provider ?? "github";
 
   // Prefer (oauthAccountId, fullName) when we have one — that matches the
-  // real GitHub identity-scoping reality.
-  if (args.oauthAccountId) {
+  // real GitHub identity-scoping reality. But only honor a client-supplied
+  // oauthAccountId the caller actually HOLDS — the upsert below transfers
+  // `ownerId` to the caller, and an unverified id would let anyone claim
+  // another user's repo rows by guessing ids.
+  const oauthAccountId = args.oauthAccountId
+    ? (
+        await prisma.oAuthAccount.findFirst({
+          where: { id: args.oauthAccountId, userId: args.ownerId },
+          select: { id: true },
+        })
+      )?.id ?? null
+    : null;
+  if (oauthAccountId) {
     const existing = await prisma.repo.findUnique({
       where: {
         oauthAccountId_fullName: {
-          oauthAccountId: args.oauthAccountId,
+          oauthAccountId,
           fullName: args.fullName,
         },
       },
     });
-    if (existing && !existing.deletedAt) return { ok: false, code: "duplicate" };
+    // Same-owner live row → true duplicate, tell the caller. DIFFERENT-owner
+    // live row is the GitHub-link-transfer case: this app moves an OAuth
+    // identity between DeepAgent users on re-auth, but the repo rows keep the
+    // old ownerId — which made the repo permanently un-attachable for the
+    // identity's CURRENT holder ("Attached 0/1" from the AttachReposModal).
+    // Since we just verified the caller holds the OAuth account today, fall
+    // through to the upsert — it refreshes ownerId to the caller and returns
+    // the row so the attach step can proceed.
+    if (existing && !existing.deletedAt && existing.ownerId === args.ownerId) {
+      return { ok: false, code: "duplicate" };
+    }
     const upserted = await prisma.repo.upsert({
       where: {
         oauthAccountId_fullName: {
-          oauthAccountId: args.oauthAccountId,
+          oauthAccountId,
           fullName: args.fullName,
         },
       },
       create: {
         ownerId: args.ownerId,
-        oauthAccountId: args.oauthAccountId,
+        oauthAccountId,
         provider,
         providerRepoId: args.providerRepoId ?? null,
         fullName: args.fullName,
@@ -219,10 +240,15 @@ export async function attachRepoToProject(
 ): Promise<AttachRepoResult> {
   const repo = await prisma.repo.findFirst({
     where: { id: repoId, deletedAt: null },
-    select: { id: true, ownerId: true },
+    select: { id: true, ownerId: true, oauthAccount: { select: { userId: true } } },
   });
   if (!repo) return { ok: false, code: "repo_not_found" };
-  if (repo.ownerId !== attachingUserId) return { ok: false, code: "repo_not_yours" };
+  // Attachable when the caller owns the row OR currently holds the GitHub
+  // identity it was imported through — OAuth links transfer between DeepAgent
+  // users on re-auth, and the row's ownerId can lag behind that transfer.
+  const holdsIdentity = repo.oauthAccount?.userId === attachingUserId;
+  if (repo.ownerId !== attachingUserId && !holdsIdentity)
+    return { ok: false, code: "repo_not_yours" };
 
   try {
     await prisma.projectRepo.create({ data: { projectId, repoId } });
@@ -254,10 +280,13 @@ export async function setProjectRepo(
 ): Promise<AttachRepoResult> {
   const repo = await prisma.repo.findFirst({
     where: { id: repoId, deletedAt: null },
-    select: { id: true, ownerId: true },
+    select: { id: true, ownerId: true, oauthAccount: { select: { userId: true } } },
   });
   if (!repo) return { ok: false, code: "repo_not_found" };
-  if (repo.ownerId !== attachingUserId) return { ok: false, code: "repo_not_yours" };
+  // Same relaxed gate as attachRepoToProject — see the comment there.
+  const holdsIdentity = repo.oauthAccount?.userId === attachingUserId;
+  if (repo.ownerId !== attachingUserId && !holdsIdentity)
+    return { ok: false, code: "repo_not_yours" };
 
   await prisma.$transaction([
     prisma.projectRepo.deleteMany({ where: { projectId, repoId: { not: repoId } } }),

@@ -64,7 +64,11 @@ export function S3CreateBox({ slug }: { slug: string }) {
   const submit = useSubmitS3(slug);
 
   const [answers, setAnswers] = useState<Answers>({
-    name: "my-bucket",
+    // Bucket name seeded from the project slug so the wizard opens with a
+    // sensible project-scoped name ("deepagent-assets") instead of a generic
+    // "my-bucket" the user always has to overwrite. S3 names are global; the
+    // random-suffix step downstream can guard against collision if needed.
+    name: `${slug}-assets`,
     region: "us-east-1",
     envKey: "",
     encryptionMode: "AES256",

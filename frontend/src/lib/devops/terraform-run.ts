@@ -521,6 +521,11 @@ export function startTerraformRun(args: StartTfRunArgs): TfRun {
   evictOld();
   // Durable copy in Postgres so this run survives dev-server restarts and HMR.
   persistTfRun(run, source);
+  // Auto-purge previous runs for the same env so the Infra tab always shows
+  // exactly the current pipeline. Requested UX: "if the new pipeline start
+  // run the old should be removed and the running pipeline should be shown".
+  // Fire-and-forget — a DB hiccup here mustn't stop the fresh run.
+  purgePreviousRunsForEnv(args.envId, id);
 
   // Fire-and-forget; the worker mutates `run` in place.
   void execRun(run, args).catch((e) => {
@@ -530,6 +535,36 @@ export function startTerraformRun(args: StartTfRunArgs): TfRun {
   });
 
   return run;
+}
+
+/**
+ * Delete every TfRun for `envId` EXCEPT the one just created (`keepRunId`) —
+ * from both Postgres and the in-memory RUNS/RUN_SOURCES maps, so the Infra
+ * tab's "recent pipeline" card only ever shows the current run and nothing
+ * older lingers.
+ *
+ * Safe to fire-and-forget:
+ *   - Any run already executing in the background keeps its in-memory refs
+ *     alive via the `execRun` closure; deleting the RUNS entry only removes
+ *     it from the LISTING, not from the running promise.
+ *   - The DB delete is bounded by (envId AND NOT id = keep), so a concurrent
+ *     insert of another run can never be deleted (different id).
+ */
+function purgePreviousRunsForEnv(envId: string, keepRunId: string): void {
+  // In-memory sweep — drop stale entries first so listers don't briefly show
+  // them alongside the new one during the DB round-trip.
+  for (const [id, r] of RUNS) {
+    if (r.envId === envId && id !== keepRunId) {
+      RUNS.delete(id);
+      RUN_SOURCES.delete(id);
+    }
+  }
+  void prisma.tfRun
+    .deleteMany({ where: { envId, NOT: { id: keepRunId } } })
+    .catch(() => {
+      // A transient DB error only means the old rows will still be listed
+      // until the next new run; not worth blocking the current run over.
+    });
 }
 
 /**

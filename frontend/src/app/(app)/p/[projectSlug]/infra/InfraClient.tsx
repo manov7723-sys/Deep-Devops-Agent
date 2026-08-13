@@ -1,15 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Badge, Block, Btn, Field, Icon, Input, PageHead, Select } from "@/components/ui";
+import { useQuery } from "@tanstack/react-query";
+import { Badge, Block, Btn, Field, Icon, PageHead, Select } from "@/components/ui";
 import { CloudCredentialsModal } from "@/components/modals/CloudCredentialsModal";
-import { EksChatBox } from "@/components/domain/EksChatBox";
-import { GkeChatBox } from "@/components/domain/GkeChatBox";
-import { AksChatBox } from "@/components/domain/AksChatBox";
-import { RdsChatBox } from "@/components/domain/RdsChatBox";
-import { KubernetesManifestBuilder } from "@/components/domain/KubernetesManifestBuilder";
-import { HelmChartBuilder } from "@/components/domain/HelmChartBuilder";
 import { api } from "@/lib/api/client";
 import {
   useDeleteGkeCluster,
@@ -30,181 +24,18 @@ type AwsProvider = {
   hasAwsKeysStored: boolean;
 };
 type EnvRow = { id: string; key: string; name: string };
-type TfBackend = { bucket: string | null; region: string | null; table: string | null };
 
 export function ProjectInfraClient({ slug }: { slug: string }) {
   return (
     <div className="col gap-5">
       <PageHead
         title="Infrastructure"
-        sub="Cloud credentials, Terraform state, managed-Kubernetes provisioning (EKS · GKE · AKS), and managed databases."
+        sub="AWS credentials and the recent Terraform runs generated from chat. Configure the state backend on the Connection tab (per-environment)."
       />
       <CredentialsSection slug={slug} />
-      <StateSection slug={slug} />
-      <ClusterCreateSection slug={slug} />
-      <DatabaseCreateSection slug={slug} />
-      <GkeClusterUtilities slug={slug} />
-      <KubernetesManifestBuilder slug={slug} />
-      <HelmChartBuilder slug={slug} />
       <TerraformPipelineSection slug={slug} />
     </div>
   );
-}
-
-/* ── GKE utilities: delete an orphaned cluster (persistent, not tied to a run) ── */
-function GkeClusterUtilities({ slug }: { slug: string }) {
-  const { data: projectInfo } = useQuery<{ project: { cloud: string | null } }>({
-    queryKey: ["p", slug, "project-cloud"],
-    queryFn: () => api.get<{ project: { cloud: string | null } }>(`/projects/${slug}`),
-    staleTime: 60_000,
-  });
-  const { data: envs } = useQuery<EnvRow[]>({
-    queryKey: ["p", slug, "envs"],
-    queryFn: () => api.get<EnvRow[]>(`/projects/${slug}/envs`),
-    staleTime: 60_000,
-  });
-  const [envKey, setEnvKey] = useState("");
-  const [project, setProject] = useState("");
-  const [location, setLocation] = useState("us-central1");
-  const [name, setName] = useState("");
-  useEffect(() => {
-    if (!envKey && envs && envs.length > 0) setEnvKey(envs[0].key);
-  }, [envs, envKey]);
-  const del = useDeleteGkeCluster(slug, envKey);
-
-  // Only meaningful on GCP projects. Anything else, no reason to show it.
-  if (projectInfo?.project?.cloud !== "gcp") return null;
-
-  const canDelete =
-    !!envKey && project.trim().length > 0 && location.trim().length > 0 && name.trim().length > 0;
-  const result = del.data;
-  const resultMsg = result?.alreadyGone
-    ? `Cluster "${name}" was already gone.`
-    : result?.deleted
-      ? `Deleted "${name}". You can now regenerate + apply the Terraform.`
-      : del.error instanceof Error
-        ? del.error.message
-        : null;
-
-  return (
-    <Block>
-      <Block.Header>
-        <Block.Title sub="Delete an orphaned GKE cluster in GCP — for when a prior Terraform apply crashed after creating the cluster but before writing state (so a new apply hits 409 alreadyExists). Uses the env's stored GCP creds; no gcloud needed.">
-          <span className="row gap-2" style={{ alignItems: "center" }}>
-            <Icon name="trash" size={16} /> Delete orphaned GKE cluster
-          </span>
-        </Block.Title>
-      </Block.Header>
-      <Block.Body>
-        {!envs || envs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            Create an environment first.
-          </span>
-        ) : (
-          <div className="col gap-3" style={{ maxWidth: 520 }}>
-            <Field label="Environment (provides GCP creds)">
-              <Select
-                value={envKey}
-                onValueChange={setEnvKey}
-                ariaLabel="Env for GCP creds"
-                options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))}
-              />
-            </Field>
-            <Field label="GCP project id">
-              <Input
-                className="mono"
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-                placeholder="new-project-495604"
-              />
-            </Field>
-            <Field label="Location (region or zone)">
-              <Input
-                className="mono"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="us-central1"
-              />
-            </Field>
-            <Field label="Cluster name">
-              <Input
-                className="mono"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="dev"
-              />
-            </Field>
-            <div className="row gap-2" style={{ alignItems: "center" }}>
-              <Btn
-                variant="primary"
-                icon="trash"
-                loading={del.isPending}
-                disabled={!canDelete || del.isPending}
-                onClick={() =>
-                  del.mutate({
-                    project: project.trim(),
-                    location: location.trim(),
-                    name: name.trim(),
-                  })
-                }
-              >
-                Delete cluster
-              </Btn>
-              <span className="muted" style={{ fontSize: 12 }}>
-                Fires DELETE + polls the operation. Typically 3-6 min.
-              </span>
-            </div>
-            {resultMsg && (
-              <span
-                style={{
-                  fontSize: 12.5,
-                  color:
-                    result?.deleted || result?.alreadyGone
-                      ? "var(--ok, #30a46c)"
-                      : "var(--danger, #e5484d)",
-                }}
-              >
-                {resultMsg}
-              </span>
-            )}
-          </div>
-        )}
-      </Block.Body>
-    </Block>
-  );
-}
-
-/* ── Cluster creation — picks the chat box that matches the project's cloud ─── */
-function ClusterCreateSection({ slug }: { slug: string }) {
-  // The cloud this project targets isolates which managed-Kubernetes blueprint
-  // is offered (AWS → EKS, GCP → GKE, Azure → AKS). Legacy projects with no
-  // chosen cloud fall back to EKS.
-  const { data: projectInfo } = useQuery<{ project: { cloud: string | null } }>({
-    queryKey: ["p", slug, "project-cloud"],
-    queryFn: () => api.get<{ project: { cloud: string | null } }>(`/projects/${slug}`),
-    staleTime: 60_000,
-  });
-  const cloud = projectInfo?.project?.cloud ?? null;
-
-  if (cloud === "gcp") return <GkeChatBox slug={slug} />;
-  if (cloud === "azure") return <AksChatBox slug={slug} />;
-  return <EksChatBox slug={slug} />;
-}
-
-/* ── Database creation — AWS only; RDS is the one managed DB with a blueprint ─ */
-function DatabaseCreateSection({ slug }: { slug: string }) {
-  const { data: projectInfo } = useQuery<{ project: { cloud: string | null } }>({
-    queryKey: ["p", slug, "project-cloud"],
-    queryFn: () => api.get<{ project: { cloud: string | null } }>(`/projects/${slug}`),
-    staleTime: 60_000,
-  });
-  const cloud = projectInfo?.project?.cloud ?? null;
-  // Azure and GCP databases are provisioned through their own flows
-  // (azure-postgres / Cloud SQL), which are not Terraform-blueprint based.
-  // Legacy projects with no cloud recorded default to AWS, matching the
-  // cluster section above.
-  if (cloud === "gcp" || cloud === "azure") return null;
-  return <RdsChatBox slug={slug} />;
 }
 
 /* ── Shared: render a Terraform run's stages + logs ─────────────────────────── */
@@ -553,18 +384,18 @@ function TerraformPipelineSection({ slug }: { slug: string }) {
   }, [envs, envKey]);
 
   const runsQuery = useTerraformRuns(slug, envKey, !!envKey);
+  // Only the ONE most recent run is shown here — older runs stay in the DB
+  // but never render on this tab. The user wanted the pipeline card focused
+  // on "what just happened", not a scrollable history.
+  const RECENT_LIMIT = 1;
   const allRuns = runsQuery.data?.runs ?? [];
-  // Keep the pipeline card focused: only the 3 most recent runs get rendered.
-  // Older runs stay in the DB and can be brought back by clicking "Show all"
-  // (which flips the toggle below). Per-run Delete removes them entirely.
-  const [showAllRuns, setShowAllRuns] = useState(false);
-  const runs = showAllRuns ? allRuns : allRuns.slice(0, 3);
+  const runs = allRuns.slice(0, RECENT_LIMIT);
   const hiddenCount = allRuns.length - runs.length;
 
   return (
     <Block>
       <Block.Header>
-        <Block.Title sub="Runs that generated infra (e.g. EKS) executes — init → plan → apply against the env's stored creds + S3 state.">
+        <Block.Title sub="Most recent Terraform run — init → plan → apply against the env's stored creds + S3 state.">
           Terraform pipeline
         </Block.Title>
       </Block.Header>
@@ -587,26 +418,22 @@ function TerraformPipelineSection({ slug }: { slug: string }) {
             </div>
             {runs.length === 0 ? (
               <span className="muted" style={{ fontSize: 13 }}>
-                No runs yet. Generate an EKS cluster above, then hit <b>Plan</b> or <b>Apply</b>.
+                No runs yet. Generate infra from chat (e.g. “create cluster”), then hit{" "}
+                <b>Plan</b> or <b>Apply</b>.
               </span>
             ) : (
               <div className="col gap-3">
                 {runs.map((r) => (
                   <RunCard key={r.id} slug={slug} run={r} />
                 ))}
-                {hiddenCount > 0 && !showAllRuns && (
-                  <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
-                    <Btn size="sm" variant="ghost" onClick={() => setShowAllRuns(true)}>
-                      Show all ({hiddenCount} older run{hiddenCount === 1 ? "" : "s"})
-                    </Btn>
-                  </div>
-                )}
-                {showAllRuns && allRuns.length > 3 && (
-                  <div className="row gap-2" style={{ justifyContent: "flex-end" }}>
-                    <Btn size="sm" variant="ghost" onClick={() => setShowAllRuns(false)}>
-                      Show only 3 most recent
-                    </Btn>
-                  </div>
+                {hiddenCount > 0 && (
+                  <span
+                    className="muted"
+                    style={{ fontSize: 12, textAlign: "right" }}
+                  >
+                    {hiddenCount} older run{hiddenCount === 1 ? "" : "s"} hidden — showing only
+                    the most recent one.
+                  </span>
                 )}
               </div>
             )}
@@ -681,115 +508,3 @@ function CredentialsSection({ slug }: { slug: string }) {
   );
 }
 
-/* ── 2. Terraform state (S3 bucket) ────────────────────────────────────────── */
-function StateSection({ slug }: { slug: string }) {
-  const { data: envs } = useQuery<EnvRow[]>({
-    queryKey: ["p", slug, "envs"],
-    queryFn: () => api.get<EnvRow[]>(`/projects/${slug}/envs`),
-    staleTime: 60_000,
-  });
-  const [envKey, setEnvKey] = useState("");
-  const [bucket, setBucket] = useState("");
-  const [region, setRegion] = useState("us-east-1");
-  const [table, setTable] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!envKey && envs && envs.length > 0) setEnvKey(envs[0].key);
-  }, [envs, envKey]);
-
-  const current = useQuery<TfBackend>({
-    queryKey: ["p", slug, "tf-backend", envKey],
-    queryFn: () => api.get<TfBackend>(`/projects/${slug}/envs/${envKey}/tf-backend`),
-    enabled: !!envKey,
-  });
-  useEffect(() => {
-    if (current.data) {
-      setBucket(current.data.bucket ?? "");
-      setRegion(current.data.region ?? "us-east-1");
-      setTable(current.data.table ?? "");
-    }
-  }, [current.data]);
-
-  const save = useMutation({
-    mutationFn: () =>
-      api.put(`/projects/${slug}/envs/${envKey}/tf-backend`, {
-        bucket: bucket.trim(),
-        region: region.trim(),
-        ...(table.trim() ? { table: table.trim() } : {}),
-      }),
-    onSuccess: () => setMsg("Saved."),
-    onError: (e: unknown) => setMsg(e instanceof Error ? e.message : "Save failed."),
-  });
-
-  return (
-    <Block>
-      <Block.Header>
-        <Block.Title sub="Per-environment S3 bucket (+ optional DynamoDB lock) that backs Terraform remote state.">
-          Terraform state (S3)
-        </Block.Title>
-      </Block.Header>
-      <Block.Body>
-        {!envs || envs.length === 0 ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            Create an environment first to configure its state backend.
-          </span>
-        ) : (
-          <div className="col gap-3" style={{ maxWidth: 520 }}>
-            <Field label="Environment">
-              <Select
-                value={envKey}
-                onValueChange={(v) => {
-                  setEnvKey(v);
-                  setMsg(null);
-                }}
-                ariaLabel="Environment"
-                options={envs.map((e) => ({ value: e.key, label: e.name || e.key }))}
-              />
-            </Field>
-            <Field label="S3 state bucket" required>
-              <Input
-                value={bucket}
-                onChange={(e) => setBucket(e.target.value)}
-                placeholder="my-tfstate-bucket"
-              />
-            </Field>
-            <Field label="Bucket region" required>
-              <Input
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-                placeholder="us-east-1"
-              />
-            </Field>
-            <Field label="DynamoDB lock table" hint="Optional — enables state locking.">
-              <Input
-                value={table}
-                onChange={(e) => setTable(e.target.value)}
-                placeholder="terraform-locks"
-              />
-            </Field>
-            <div className="row gap-2" style={{ alignItems: "center" }}>
-              <Btn
-                variant="primary"
-                icon="check"
-                loading={save.isPending}
-                disabled={!bucket.trim() || !region.trim()}
-                onClick={() => {
-                  setMsg(null);
-                  save.mutate();
-                }}
-              >
-                Save state backend
-              </Btn>
-              {msg && (
-                <span className="muted" style={{ fontSize: 13 }}>
-                  {msg}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-      </Block.Body>
-    </Block>
-  );
-}
