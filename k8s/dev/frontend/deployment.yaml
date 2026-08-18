@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: deep-devops-agent-frontend
-          image: 985465459771.dkr.ecr.us-east-1.amazonaws.com/dynamic-react-app:latest
+          image: 400200465532.dkr.ecr.us-east-1.amazonaws.com/deep-devops-agent-frontend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
@@ -39,7 +39,7 @@ spec:
           startupProbe:
             tcpSocket:
               port: 3000
-            periodSeconds: 10
+            periodSeconds: 5
             failureThreshold: 30
           readinessProbe:
             tcpSocket:
@@ -59,6 +59,9 @@ spec:
                 optional: true
             - secretRef:
                 name: app-env
+                optional: true
+            - secretRef:
+                name: app-env-frontend
                 optional: true
           env:
             - name: SESSION_COOKIE_SECURE
