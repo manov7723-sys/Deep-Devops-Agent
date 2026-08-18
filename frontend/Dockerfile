@@ -24,8 +24,8 @@ ENV NODE_ENV=production
 WORKDIR /app
 # Copy the built app WITH its node_modules from the builder (avoids a second
 # install and guarantees framework binaries + build output are present).
-# Changed copy from builder to use the correct Next.js build output directory
-COPY --from=builder /app/.next ./.next
+# Fix output copy to copy the 'build' folder (Create React App) instead of '.next'
+COPY --from=builder /app/build ./build
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 USER node
