@@ -24,7 +24,10 @@ ENV NODE_ENV=production
 WORKDIR /app
 # Copy the built app WITH its node_modules from the builder (avoids a second
 # install and guarantees framework binaries + build output are present).
-COPY --from=builder /app .
+# Correct copy from builder for Vite app - use dist/ directory for build output only
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 USER node
 EXPOSE 3000
 CMD ["sh", "-c", "export PATH=/app/node_modules/.bin:$PATH; exec npm start"]
