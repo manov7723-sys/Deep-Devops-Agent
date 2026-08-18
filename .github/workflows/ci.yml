@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  id-token: write   # required to request the OIDC token
   contents: read
 
 jobs:
@@ -16,98 +17,63 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify backend ACR secrets present
-        env:
-          ACR_LOGIN_SERVER: ${{ secrets.ACR_AIAGENTICAPPBACKEND_LOGIN_SERVER }}
-          ACR_USERNAME: ${{ secrets.ACR_AIAGENTICAPPBACKEND_USERNAME }}
-          ACR_PASSWORD: ${{ secrets.ACR_AIAGENTICAPPBACKEND_PASSWORD }}
-        run: |
-          missing=""
-          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ACR_AIAGENTICAPPBACKEND_LOGIN_SERVER"
-          [ -z "$ACR_USERNAME" ] && missing="$missing ACR_AIAGENTICAPPBACKEND_USERNAME"
-          [ -z "$ACR_PASSWORD" ] && missing="$missing ACR_AIAGENTICAPPBACKEND_PASSWORD"
-          if [ -n "$missing" ]; then
-            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=${{ github.repository }} service=backend missing=$missing"
-            exit 1
-          fi
-
-      - name: Log in to ACR for backend
-        uses: docker/login-action@v3
+      - name: Configure AWS credentials (OIDC — no stored secrets)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: aiagenticappbackend.azurecr.io
-          username: ${{ secrets.ACR_AIAGENTICAPPBACKEND_USERNAME }}
-          password: ${{ secrets.ACR_AIAGENTICAPPBACKEND_PASSWORD }}
+          role-to-assume: arn:aws:iam::400200465532:role/gha-manov7723-sys-deep-devops-agent-deep-devops-agent-backend
+          aws-region: us-east-1
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and tag backend image
         env:
-          IMAGE: aiagenticappbackend.azurecr.io/deep-devops-agent-backend
+          ECR: 400200465532.dkr.ecr.us-east-1.amazonaws.com/deep-devops-agent-backend
           TAG: ${{ github.sha }}
         run: |
-          docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "backend/Dockerfile" "backend"
+          docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "backend/Dockerfile" "backend"
 
       - name: Scan backend image for vulnerabilities (Trivy)
         continue-on-error: true
         env:
-          IMAGE: aiagenticappbackend.azurecr.io/deep-devops-agent-backend
+          ECR: 400200465532.dkr.ecr.us-east-1.amazonaws.com/deep-devops-agent-backend
           TAG: ${{ github.sha }}
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.65.0 image \
             --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
-            "$IMAGE:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+            "$ECR:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
       - name: Push backend image
         env:
-          IMAGE: aiagenticappbackend.azurecr.io/deep-devops-agent-backend
+          ECR: 400200465532.dkr.ecr.us-east-1.amazonaws.com/deep-devops-agent-backend
           TAG: ${{ github.sha }}
         run: |
-          docker push "$IMAGE:$TAG"
-          docker push "$IMAGE:latest"
-
-      - name: Verify frontend ACR secrets present
-        env:
-          ACR_LOGIN_SERVER: ${{ secrets.ACR_AIAGENTICAPPFRONTEND_LOGIN_SERVER }}
-          ACR_USERNAME: ${{ secrets.ACR_AIAGENTICAPPFRONTEND_USERNAME }}
-          ACR_PASSWORD: ${{ secrets.ACR_AIAGENTICAPPFRONTEND_PASSWORD }}
-        run: |
-          missing=""
-          [ -z "$ACR_LOGIN_SERVER" ] && missing="$missing ACR_AIAGENTICAPPFRONTEND_LOGIN_SERVER"
-          [ -z "$ACR_USERNAME" ] && missing="$missing ACR_AIAGENTICAPPFRONTEND_USERNAME"
-          [ -z "$ACR_PASSWORD" ] && missing="$missing ACR_AIAGENTICAPPFRONTEND_PASSWORD"
-          if [ -n "$missing" ]; then
-            echo "::error::DEEPAGENT_ACR_SECRETS_MISSING repo=${{ github.repository }} service=frontend missing=$missing"
-            exit 1
-          fi
-
-      - name: Log in to ACR for frontend
-        uses: docker/login-action@v3
-        with:
-          registry: aiagenticappfrontend.azurecr.io
-          username: ${{ secrets.ACR_AIAGENTICAPPFRONTEND_USERNAME }}
-          password: ${{ secrets.ACR_AIAGENTICAPPFRONTEND_PASSWORD }}
+          docker push "$ECR:$TAG"
+          docker push "$ECR:latest"
 
       - name: Build and tag frontend image
         env:
-          IMAGE: aiagenticappfrontend.azurecr.io/deep-devops-agent-frontend
+          ECR: 400200465532.dkr.ecr.us-east-1.amazonaws.com/deep-devops-agent-frontend
           TAG: ${{ github.sha }}
         run: |
-          docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" -f "frontend/Dockerfile" "frontend"
+          docker build -t "$ECR:$TAG" -t "$ECR:latest" -f "frontend/Dockerfile" "frontend"
 
       - name: Scan frontend image for vulnerabilities (Trivy)
         continue-on-error: true
         env:
-          IMAGE: aiagenticappfrontend.azurecr.io/deep-devops-agent-frontend
+          ECR: 400200465532.dkr.ecr.us-east-1.amazonaws.com/deep-devops-agent-frontend
           TAG: ${{ github.sha }}
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.65.0 image \
             --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
-            "$IMAGE:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
+            "$ECR:$TAG" || echo "::warning::Trivy flagged issues or could not run — non-blocking, see logs."
       - name: Push frontend image
         env:
-          IMAGE: aiagenticappfrontend.azurecr.io/deep-devops-agent-frontend
+          ECR: 400200465532.dkr.ecr.us-east-1.amazonaws.com/deep-devops-agent-frontend
           TAG: ${{ github.sha }}
         run: |
-          docker push "$IMAGE:$TAG"
-          docker push "$IMAGE:latest"
+          docker push "$ECR:$TAG"
+          docker push "$ECR:latest"
