@@ -5,7 +5,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY . .
-# Prisma: generate the client BEFORE build (no-op without a schema).
+# Prisma: generate client BEFORE build so TS type checks see the enums.
+# Skipped when the app doesn't use Prisma.
 RUN if [ -f prisma/schema.prisma ] || [ -f schema.prisma ]; then \
       npx --yes prisma generate; \
     fi
@@ -23,7 +24,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 # Copy the built app WITH its node_modules from the builder (avoids a second
 # install and guarantees framework binaries + build output are present).
-COPY --from=builder /app ./
+COPY --from=builder /app .
 USER node
 EXPOSE 3000
-CMD ["sh", "-c", "export PATH=/app/node_modules/.bin:$PATH; exec next start"]
+CMD ["sh", "-c", "export PATH=/app/node_modules/.bin:$PATH; exec npm start"]
