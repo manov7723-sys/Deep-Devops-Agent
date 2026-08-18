@@ -3,6 +3,8 @@ name: CI (build all services)
 # Manual trigger — click "Run" in the Actions tab (or the app's CI/CD Pipelines page).
 # When this workflow succeeds, the CD workflow fires automatically via workflow_run.
 on:
+  push:
+    branches: ["develop"]
   workflow_dispatch:
 
 permissions:
