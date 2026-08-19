@@ -1,6 +1,6 @@
 services:
   app:
-    build: backend
+    build: .
     image: app:local
     ports:
       - "8000:8000"
